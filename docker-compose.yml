@@ -1,0 +1,108 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: artstore_postgres
+    environment:
+      POSTGRES_DB: artstore
+      POSTGRES_USER: artstore
+      POSTGRES_PASSWORD: password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - .data/postgres:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artstore -d artstore"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: artstore_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: password
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - .data/pgadmin:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: artstore_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - .data/redis:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  minio:
+    image: minio/minio:latest
+    container_name: artstore_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - .data/minio:/data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  dex:
+    image: dexidp/dex:v2.30.0
+    container_name: artstore_dex
+    ports:
+      - "5556:5556" # web
+      - "5557:5557" # grpc
+      - "5558:5558" # telemetry
+    volumes:
+      - ./.utils/dex/config.yml:/etc/dex/config.yml
+    command: serve /etc/dex/config.yml
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider --proxy=off http://localhost:5556/dex/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  nginx:
+    image: nginx:latest
+    container_name: artstore_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./.utils/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./.utils/nginx/certs:/etc/nginx/certs
+    command: /bin/sh -c "mkdir -p /etc/nginx/certs && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/certs/key.pem -out /etc/nginx/certs/cert.pem -subj '/C=RU/ST=Moscow/L=Moscow/O=ArtStore/OU=IT/CN=localhost' && nginx -g 'daemon off;'"
+    depends_on:
+      - dex
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  pgadmin_data:
+  redis_data:
+  dex_data:
