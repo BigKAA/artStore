@@ -2,11 +2,11 @@ issuer: http://localhost:5556/dex
 storage:
   type: postgres
   config:
-    host: artstore_postgres
+    host: postgres
     port: 5432
     user: artstore
     password: password
-    dbname: artstore
+    dbname: dex
     ssl:
       mode: disable
 web:
@@ -16,23 +16,45 @@ grpc:
 telemetry:
   http: 0.0.0.0:5558
 
-# Коннектор для статических пользователей.
-# В реальном проекте здесь будет коннектор к LDAP, GitHub или другому провайдеру.
 staticClients:
-- id: admin-ui
+- id: artstore
   redirectURIs:
   - 'http://localhost/callback'
-  name: 'Admin UI'
-  secret: admin-ui-secret
+  name: "artstore"
+  secret: "admin-ui-secret"
+
+oauth2:
+  passwordConnector: ldap
+  responseTypes: ["code", "token", "id_token"]
 
 connectors:
-- type: mockCallback
-  id: mock
-  name: Mock Connector
+- type: ldap
+  id: ldap
+  name: LDAP
+  config:
+    host: ldap:3389
+    insecureNoSSL: true
+    startTLS: false
 
-staticPasswords:
-- email: "admin@admin.com"
-  # bcrypt hash for "password"
-  hash: "$2a$10$2b2u8ZJ/u.R16jBfJIsQp.E/2OO1/O6lnP2l.d2/LHLsT.d6Lwy4y"
-  username: "admin"
-  userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+    bindDN: cn=Directory Manager
+    bindPW: password
+    usernamePrompt: LDAP Username
+
+    userSearch:
+      baseDN: ou=People,dc=artstore,dc=local
+      filter: "(objectClass=person)"
+      username: uid
+      idAttr: uid
+      emailAttr: mail
+      nameAttr: cn
+      preferredUsernameAttr: uid
+
+    groupSearch:
+      baseDN: ou=Groups,dc=artstore,dc=local
+      filter: "(objectClass=groupOfUniqueNames)"
+      userMatchers:
+      - userAttr: dn
+        groupAttr: uniqueMember
+
+      # Represents group name.
+      nameAttr: cn

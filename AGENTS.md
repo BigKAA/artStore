@@ -37,6 +37,8 @@
 - postgres
 - redis
 - minio
+- dex
+- ldap
 
 Логины и пароли администраторов приложений доступны в `docker-compose.yml`.
 

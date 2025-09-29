@@ -66,9 +66,28 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+  
+  ldap:
+    image: 389ds/dirsrv:3.1
+    container_name: artstore_ldap
+    ports:
+      - "1389:3389"
+      - "1636:3636"
+    environment:
+      DS_DM_PASSWORD: "password"
+      DS_SUFFIX_NAME: "dc=artstore,dc=local"
+    volumes:
+      - ldap_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "usr/lib/dirsrv/dscontainer -H"]
+      interval: 30s
+      start_period: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
 
   dex:
-    image: dexidp/dex:v2.30.0
+    image: dexidp/dex:v2.44.0
     container_name: artstore_dex
     ports:
       - "5556:5556" # web
@@ -76,11 +95,11 @@ services:
       - "5558:5558" # telemetry
     volumes:
       - ./.utils/dex/config.yml:/etc/dex/config.yml
-    command: serve /etc/dex/config.yml
+    command: dex serve /etc/dex/config.yml
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+    - ldap
+        
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider --proxy=off http://localhost:5556/dex/healthz"]
       interval: 10s
@@ -102,7 +121,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres_data:
-  pgadmin_data:
-  redis_data:
-  dex_data:
+  ldap_data:

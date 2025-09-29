@@ -1,0 +1,7 @@
+### Проверка получения токена
+POST http://localhost:5556/dex/token
+Authorization: Basic YXJ0c3RvcmU6YWRtaW4tdWktc2VjcmV0
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&scope=openid+profile+groups+email&username=ldap_admin&password=password
+
