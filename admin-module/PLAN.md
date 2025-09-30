@@ -2471,7 +2471,7 @@ class IDMixin(BaseModel):
 
 ## Этап 6: Services (бизнес-логика)
 
-### 6.1 Понимание слоя Services
+### 6.1 Понимание слоя Services ++++++
 
 **Service Layer** - это слой бизнес-логики, который:
 - **Изолирует бизнес-правила** от HTTP endpoints
@@ -8560,3 +8560,1759 @@ jobs:
 
 **Следующий этап**:
 - Этап 11: Docker и развертывание
+
+---
+
+## Этап 11: Docker и развертывание
+
+### 11.1 Понимание архитектуры развертывания
+
+**Концепция**: Admin Module развертывается как кластер Docker контейнеров с поддержкой высокой доступности и горизонтального масштабирования.
+
+**Компоненты развертывания**:
+1. **Admin Module Container** - основное приложение FastAPI
+2. **PostgreSQL Cluster** - база данных с репликацией
+3. **Redis Cluster** - Service Discovery и кеширование (минимум 6 узлов: 3 master + 3 replica)
+4. **Load Balancer Cluster** - HAProxy/Nginx с keepalived
+5. **Monitoring Stack** - Prometheus, Grafana, Jaeger
+
+**Окружения**:
+- **Development** - single instance, все сервисы в docker-compose
+- **Testing** - аналогично Development, изолированная БД
+- **Staging** - кластерная конфигурация, минимальная HA
+- **Production** - полная HA конфигурация, multi-DC support
+
+### 11.2 Dockerfile для Admin Module
+
+**Файл**: `Dockerfile`
+
+```dockerfile
+# Multi-stage build для оптимизации размера образа
+
+# Этап 1: Builder - установка зависимостей
+FROM python:3.12-slim AS builder
+
+# Установка system dependencies для компиляции Python пакетов
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    libssl-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Создание виртуального окружения
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Копирование requirements и установка зависимостей
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Этап 2: Runtime - минимальный образ для запуска
+FROM python:3.12-slim
+
+# Метаданные образа
+LABEL maintainer="artstore-team@example.com"
+LABEL version="1.0.0"
+LABEL description="ArtStore Admin Module - Центр управления и аутентификации"
+
+# Установка только runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Создание пользователя для запуска приложения (не root!)
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Рабочая директория
+WORKDIR /app
+
+# Копирование виртуального окружения из builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Копирование кода приложения
+COPY --chown=appuser:appuser ./app ./app
+COPY --chown=appuser:appuser ./alembic ./alembic
+COPY --chown=appuser:appuser ./alembic.ini ./alembic.ini
+COPY --chown=appuser:appuser ./config.yaml ./config.yaml
+
+# Копирование entrypoint script
+COPY --chown=appuser:appuser ./docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
+
+# Создание директорий для логов и JWT ключей
+RUN mkdir -p /app/logs /app/keys && \
+    chown -R appuser:appuser /app/logs /app/keys
+
+# Установка переменных окружения
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
+# Переключение на непривилегированного пользователя
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/health/live', timeout=5.0)"
+
+# Экспонирование портов
+EXPOSE 8000
+
+# Entrypoint
+ENTRYPOINT ["./docker-entrypoint.sh"]
+
+# Команда запуска по умолчанию
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+**Пояснения для джуниоров**:
+- **Multi-stage build** - builder содержит компиляторы, runtime только минимум
+- **Непривилегированный пользователь** - security best practice
+- **HEALTHCHECK** - Docker автоматически проверяет здоровье контейнера
+- **PYTHONUNBUFFERED** - логи выводятся немедленно (важно для Docker)
+- **--no-cache-dir** - уменьшает размер образа
+
+### 11.3 Docker Entrypoint Script
+
+**Файл**: `docker-entrypoint.sh`
+
+```bash
+#!/bin/bash
+set -e
+
+echo "=== ArtStore Admin Module Startup ==="
+echo "Environment: ${ENVIRONMENT:-development}"
+echo "Database: ${DATABASE_URL:-not set}"
+
+# Функция для ожидания готовности PostgreSQL
+wait_for_postgres() {
+    echo "Waiting for PostgreSQL to be ready..."
+
+    # Извлекаем хост и порт из DATABASE_URL
+    # Формат: postgresql+asyncpg://user:pass@host:port/db
+    DB_HOST=$(echo $DATABASE_URL | sed -n 's/.*@\([^:]*\):.*/\1/p')
+    DB_PORT=$(echo $DATABASE_URL | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
+
+    until python -c "
+import asyncpg
+import asyncio
+import sys
+
+async def check():
+    try:
+        conn = await asyncpg.connect(
+            host='${DB_HOST}',
+            port=${DB_PORT},
+            user='${DATABASE_USER:-artstore}',
+            password='${DATABASE_PASSWORD:-password}',
+            database='${DATABASE_NAME:-artstore}',
+            timeout=5
+        )
+        await conn.close()
+        return True
+    except Exception as e:
+        print(f'Database not ready: {e}', file=sys.stderr)
+        return False
+
+sys.exit(0 if asyncio.run(check()) else 1)
+    "; do
+        echo "PostgreSQL is unavailable - sleeping"
+        sleep 2
+    done
+
+    echo "PostgreSQL is ready!"
+}
+
+# Функция для ожидания готовности Redis
+wait_for_redis() {
+    echo "Waiting for Redis to be ready..."
+
+    REDIS_HOST=$(echo $REDIS_URL | sed -n 's/.*\/\/\([^:]*\):.*/\1/p')
+    REDIS_PORT=$(echo $REDIS_URL | sed -n 's/.*:\([0-9]*\).*/\1/p')
+
+    until python -c "
+import redis
+import sys
+
+try:
+    r = redis.Redis(host='${REDIS_HOST}', port=${REDIS_PORT}, socket_connect_timeout=5)
+    r.ping()
+    print('Redis is ready!')
+    sys.exit(0)
+except Exception as e:
+    print(f'Redis not ready: {e}', file=sys.stderr)
+    sys.exit(1)
+    "; do
+        echo "Redis is unavailable - sleeping"
+        sleep 2
+    done
+
+    echo "Redis is ready!"
+}
+
+# Функция для генерации JWT ключей если отсутствуют
+generate_jwt_keys() {
+    if [ ! -f "/app/keys/jwt-private.pem" ] || [ ! -f "/app/keys/jwt-public.pem" ]; then
+        echo "Generating JWT keys..."
+        python -c "
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+
+# Генерация ключей
+private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+public_key = private_key.public_key()
+
+# Сохранение приватного ключа
+with open('/app/keys/jwt-private.pem', 'wb') as f:
+    f.write(private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    ))
+
+# Сохранение публичного ключа
+with open('/app/keys/jwt-public.pem', 'wb') as f:
+    f.write(public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ))
+
+print('JWT keys generated successfully!')
+        "
+    else
+        echo "JWT keys already exist"
+    fi
+}
+
+# Функция для запуска миграций БД
+run_migrations() {
+    echo "Running database migrations..."
+    alembic upgrade head
+    echo "Migrations completed!"
+}
+
+# Функция для создания администратора по умолчанию
+create_default_admin() {
+    echo "Creating default admin user if not exists..."
+    python -c "
+import asyncio
+from app.db.session import async_session_maker
+from app.services.user_service import user_service
+
+async def main():
+    async with async_session_maker() as db:
+        await user_service.create_default_admin(db)
+
+asyncio.run(main())
+    "
+    echo "Default admin check completed!"
+}
+
+# Главная логика запуска
+main() {
+    # 1. Ожидание зависимостей
+    if [ "${SKIP_WAIT_FOR_DEPS:-false}" != "true" ]; then
+        wait_for_postgres
+        wait_for_redis
+    fi
+
+    # 2. Генерация JWT ключей
+    generate_jwt_keys
+
+    # 3. Запуск миграций (только если не отключено)
+    if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
+        run_migrations
+    fi
+
+    # 4. Создание администратора по умолчанию
+    if [ "${CREATE_DEFAULT_ADMIN:-true}" = "true" ]; then
+        create_default_admin
+    fi
+
+    # 5. Вывод информации о запуске
+    echo "=== Starting Admin Module ==="
+    echo "Command: $@"
+    echo "=============================="
+
+    # 6. Запуск приложения
+    exec "$@"
+}
+
+# Запуск главной функции
+main "$@"
+```
+
+**Пояснения**:
+- **set -e** - скрипт прекращает работу при любой ошибке
+- **wait_for_*** - проверка готовности зависимостей перед стартом
+- **exec "$@"** - замена процесса bash на процесс приложения (важно для сигналов)
+- **Environment variables** - позволяют настраивать поведение через docker-compose
+
+### 11.4 Docker Compose для Development
+
+**Файл**: `docker-compose.yml`
+
+```yaml
+version: '3.8'
+
+# Сети для изоляции сервисов
+networks:
+  artstore-network:
+    driver: bridge
+
+# Volumes для персистентности данных
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+services:
+  # PostgreSQL - База данных
+  postgres:
+    image: postgres:15-alpine
+    container_name: artstore_admin_postgres
+    hostname: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: artstore
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: admin_module
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - artstore-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artstore -d admin_module"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Redis - Кеш и Service Discovery
+  redis:
+    image: redis:7-alpine
+    container_name: artstore_admin_redis
+    hostname: redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass redis_password
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - artstore-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Admin Module Application
+  admin-module:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: artstore_admin_module
+    hostname: admin-module
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Application
+      ENVIRONMENT: development
+      LOG_LEVEL: INFO
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://artstore:password@postgres:5432/admin_module
+      DATABASE_USER: artstore
+      DATABASE_PASSWORD: password
+      DATABASE_NAME: admin_module
+
+      # Redis
+      REDIS_URL: redis://:redis_password@redis:6379/0
+
+      # JWT
+      JWT_ALGORITHM: RS256
+      JWT_PRIVATE_KEY_PATH: /app/keys/jwt-private.pem
+      JWT_PUBLIC_KEY_PATH: /app/keys/jwt-public.pem
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: 7
+
+      # LDAP (опционально)
+      LDAP_ENABLED: "false"
+      # LDAP_SERVER: ldap://ldap-server:389
+      # LDAP_BIND_DN: cn=admin,dc=example,dc=com
+      # LDAP_BIND_PASSWORD: admin_password
+      # LDAP_BASE_DN: dc=example,dc=com
+
+      # OAuth2 (опционально)
+      OAUTH2_ENABLED: "false"
+      # DEX_CLIENT_ID: artstore-admin
+      # DEX_CLIENT_SECRET: secret
+      # DEX_ISSUER_URL: http://dex:5556/dex
+
+      # Security
+      PASSWORD_MIN_LENGTH: 8
+      PASSWORD_REQUIRE_COMPLEXITY: "true"
+
+      # Startup control
+      SKIP_WAIT_FOR_DEPS: "false"
+      SKIP_MIGRATIONS: "false"
+      CREATE_DEFAULT_ADMIN: "true"
+
+      # Monitoring
+      ENABLE_METRICS: "true"
+      ENABLE_TRACING: "true"
+      JAEGER_AGENT_HOST: jaeger
+      JAEGER_AGENT_PORT: 6831
+    volumes:
+      # Для development - монтируем код для hot-reload
+      - ./app:/app/app:ro
+      - ./config.yaml:/app/config.yaml:ro
+      # Volumes для данных
+      - jwt-keys:/app/keys
+      - app-logs:/app/logs
+    ports:
+      - "8000:8000"
+    networks:
+      - artstore-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:8000/health/live')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: artstore_admin_prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - artstore-network
+    depends_on:
+      - admin-module
+
+  # Grafana - Metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: artstore_admin_grafana
+    hostname: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - artstore-network
+    depends_on:
+      - prometheus
+
+  # Jaeger - Distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: artstore_admin_jaeger
+    hostname: jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "5775:5775/udp"   # accept zipkin.thrift compact
+      - "6831:6831/udp"   # accept jaeger.thrift compact
+      - "6832:6832/udp"   # accept jaeger.thrift binary
+      - "5778:5778"       # serve configs
+      - "16686:16686"     # serve frontend
+      - "14250:14250"     # accept model.proto
+      - "14268:14268"     # accept jaeger.thrift
+      - "14269:14269"     # admin port
+      - "9411:9411"       # Zipkin compatible endpoint
+      - "4317:4317"       # OTLP gRPC
+      - "4318:4318"       # OTLP HTTP
+    networks:
+      - artstore-network
+
+# Named volumes для development
+volumes:
+  jwt-keys:
+    driver: local
+  app-logs:
+    driver: local
+```
+
+**Пояснения**:
+- **health checks** - автоматическая проверка здоровья контейнеров
+- **depends_on** с condition - контейнеры стартуют в правильном порядке
+- **networks** - изоляция сервисов от внешнего мира
+- **volumes** - персистентность данных между перезапусками
+- **restart: unless-stopped** - автоматический рестарт при падении
+
+### 11.5 Production Docker Compose с HA
+
+**Файл**: `docker-compose.prod.yml`
+
+```yaml
+version: '3.8'
+
+networks:
+  artstore-network:
+    driver: overlay
+    attachable: true
+
+volumes:
+  postgres-data-1:
+  postgres-data-2:
+  redis-data-1:
+  redis-data-2:
+  redis-data-3:
+
+services:
+  # PostgreSQL Primary
+  postgres-primary:
+    image: postgres:15-alpine
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    environment:
+      POSTGRES_USER: artstore
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: admin_module
+      POSTGRES_REPLICATION_MODE: master
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+    volumes:
+      - postgres-data-1:/var/lib/postgresql/data
+    networks:
+      - artstore-network
+    command: >
+      postgres
+      -c wal_level=replica
+      -c max_wal_senders=3
+      -c max_replication_slots=3
+      -c hot_standby=on
+
+  # PostgreSQL Standby (Read Replica)
+  postgres-standby:
+    image: postgres:15-alpine
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+    environment:
+      POSTGRES_MASTER_HOST: postgres-primary
+      POSTGRES_MASTER_PORT: 5432
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+    volumes:
+      - postgres-data-2:/var/lib/postgresql/data
+    networks:
+      - artstore-network
+    command: >
+      bash -c "
+      until pg_basebackup -h postgres-primary -D /var/lib/postgresql/data -U replicator -v -P; do
+        sleep 5
+      done
+      echo 'standby_mode = on' > /var/lib/postgresql/data/recovery.conf
+      echo \"primary_conninfo = 'host=postgres-primary port=5432 user=replicator password=${REPLICATION_PASSWORD}'\" >> /var/lib/postgresql/data/recovery.conf
+      postgres
+      "
+
+  # Redis Cluster (6 nodes: 3 master + 3 replica)
+  redis-cluster-1:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+    volumes:
+      - redis-cluster-data-1:/data
+    networks:
+      - artstore-network
+
+  redis-cluster-2:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+    volumes:
+      - redis-cluster-data-2:/data
+    networks:
+      - artstore-network
+
+  redis-cluster-3:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+    volumes:
+      - redis-cluster-data-3:/data
+    networks:
+      - artstore-network
+
+  redis-cluster-4:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+    volumes:
+      - redis-cluster-data-4:/data
+    networks:
+      - artstore-network
+
+  redis-cluster-5:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+    volumes:
+      - redis-cluster-data-5:/data
+    networks:
+      - artstore-network
+
+  redis-cluster-6:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+    volumes:
+      - redis-cluster-data-6:/data
+    networks:
+      - artstore-network
+
+  # Redis Cluster initialization (run once to create cluster)
+  redis-cluster-init:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: no
+    command: >
+      sh -c "
+      echo 'Waiting for Redis nodes to be ready...' &&
+      sleep 10 &&
+      redis-cli --cluster create
+      redis-cluster-1:6379
+      redis-cluster-2:6379
+      redis-cluster-3:6379
+      redis-cluster-4:6379
+      redis-cluster-5:6379
+      redis-cluster-6:6379
+      --cluster-replicas 1
+      --cluster-yes
+      -a ${REDIS_PASSWORD}
+      "
+    networks:
+      - artstore-network
+    depends_on:
+      - redis-cluster-1
+      - redis-cluster-2
+      - redis-cluster-3
+      - redis-cluster-4
+      - redis-cluster-5
+      - redis-cluster-6
+
+  # Admin Module Cluster (3 replicas)
+  admin-module:
+    image: ${DOCKER_REGISTRY}/artstore-admin-module:${VERSION}
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: WARNING
+      DATABASE_URL: postgresql+asyncpg://artstore:${POSTGRES_PASSWORD}@postgres-primary:5432/admin_module
+      REDIS_CLUSTER_NODES: redis-cluster-1:6379,redis-cluster-2:6379,redis-cluster-3:6379,redis-cluster-4:6379,redis-cluster-5:6379,redis-cluster-6:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      ENABLE_METRICS: "true"
+      ENABLE_TRACING: "true"
+    secrets:
+      - jwt_private_key
+      - jwt_public_key
+    networks:
+      - artstore-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:8000/health/live')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # HAProxy Load Balancer
+  haproxy:
+    image: haproxy:2.8-alpine
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8404:8404"  # HAProxy stats
+    configs:
+      - source: haproxy_config
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    networks:
+      - artstore-network
+
+# Docker Secrets для production
+secrets:
+  jwt_private_key:
+    external: true
+  jwt_public_key:
+    external: true
+
+# Docker Configs
+configs:
+  haproxy_config:
+    file: ./configs/haproxy.cfg
+  sentinel_config:
+    file: ./configs/sentinel.conf
+```
+
+### 11.6 HAProxy Configuration
+
+**Файл**: `configs/haproxy.cfg`
+
+```conf
+global
+    log stdout format raw local0
+    maxconn 4096
+    user haproxy
+    group haproxy
+    daemon
+
+    # SSL/TLS Configuration
+    ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256
+    ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
+
+defaults
+    log global
+    mode http
+    option httplog
+    option dontlognull
+    option http-server-close
+    option forwardfor except 127.0.0.0/8
+    option redispatch
+    retries 3
+    timeout connect 5000ms
+    timeout client  50000ms
+    timeout server  50000ms
+    errorfile 400 /etc/haproxy/errors/400.http
+    errorfile 403 /etc/haproxy/errors/403.http
+    errorfile 408 /etc/haproxy/errors/408.http
+    errorfile 500 /etc/haproxy/errors/500.http
+    errorfile 502 /etc/haproxy/errors/502.http
+    errorfile 503 /etc/haproxy/errors/503.http
+    errorfile 504 /etc/haproxy/errors/504.http
+
+# Frontend for Admin Module API
+frontend admin_api
+    bind *:80
+    bind *:443 ssl crt /etc/ssl/certs/artstore.pem
+
+    # Redirect HTTP to HTTPS
+    redirect scheme https code 301 if !{ ssl_fc }
+
+    # CORS headers
+    http-response set-header Access-Control-Allow-Origin "*"
+    http-response set-header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    http-response set-header Access-Control-Allow-Headers "Origin, Content-Type, Authorization"
+
+    # Security headers
+    http-response set-header X-Frame-Options "SAMEORIGIN"
+    http-response set-header X-Content-Type-Options "nosniff"
+    http-response set-header X-XSS-Protection "1; mode=block"
+    http-response set-header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+    # Health check endpoint (bypass load balancing)
+    acl is_health_check path_beg /health
+    use_backend admin_health if is_health_check
+
+    # Default backend
+    default_backend admin_module_cluster
+
+# Backend for Admin Module cluster
+backend admin_module_cluster
+    balance roundrobin
+    option httpchk GET /health/ready
+    http-check expect status 200
+
+    # Sticky sessions по JWT token (опционально)
+    # stick-table type string len 64 size 1m expire 30m
+    # stick on req.hdr(Authorization)
+
+    # Server entries (dynamically updated via Docker service discovery)
+    server-template admin-module 3 admin-module:8000 check inter 5s fall 3 rise 2
+
+# Backend for health checks (single node)
+backend admin_health
+    server admin-health admin-module:8000 check
+
+# Stats page
+listen stats
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 30s
+    stats admin if TRUE
+    stats auth admin:${HAPROXY_STATS_PASSWORD}
+```
+
+### 11.7 Kubernetes Deployment (опционально)
+
+Для production развертывания в Kubernetes создайте следующие манифесты:
+
+**Файл**: `k8s/deployment.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-module
+  namespace: artstore
+  labels:
+    app: admin-module
+    component: backend
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: admin-module
+  template:
+    metadata:
+      labels:
+        app: admin-module
+        version: v1.0.0
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - admin-module
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: admin-module
+        image: registry.example.com/artstore/admin-module:v1.0.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: admin-module-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: admin-module-secrets
+              key: redis-url
+        volumeMounts:
+        - name: jwt-keys
+          mountPath: /app/keys
+          readOnly: true
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+          readOnly: true
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: jwt-keys
+        secret:
+          secretName: jwt-keys
+          items:
+          - key: private
+            path: jwt-private.pem
+          - key: public
+            path: jwt-public.pem
+      - name: config
+        configMap:
+          name: admin-module-config
+```
+
+### 11.8 Deployment Commands и Best Practices
+
+**Development окружение**:
+```bash
+# Сборка и запуск
+docker-compose up --build -d
+
+# Просмотр логов
+docker-compose logs -f admin-module
+
+# Остановка
+docker-compose down
+
+# Полная очистка (с volumes)
+docker-compose down -v
+```
+
+**Production развертывание через Docker Swarm**:
+```bash
+# Инициализация Swarm
+docker swarm init
+
+# Создание secrets
+echo "strong-postgres-password" | docker secret create postgres_password -
+cat keys/jwt-private.pem | docker secret create jwt_private_key -
+cat keys/jwt-public.pem | docker secret create jwt_public_key -
+
+# Развертывание stack
+docker stack deploy -c docker-compose.prod.yml artstore-admin
+
+# Просмотр сервисов
+docker stack services artstore-admin
+
+# Масштабирование
+docker service scale artstore-admin_admin-module=5
+
+# Обновление образа (rolling update)
+docker service update --image registry.example.com/artstore/admin-module:v1.1.0 \
+  artstore-admin_admin-module
+
+# Удаление stack
+docker stack rm artstore-admin
+```
+
+**Production развертывание через Kubernetes**:
+```bash
+# Создание namespace
+kubectl create namespace artstore
+
+# Применение манифестов
+kubectl apply -f k8s/secrets.yaml
+kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/ingress.yaml
+
+# Проверка статуса
+kubectl get pods -n artstore
+kubectl get services -n artstore
+
+# Просмотр логов
+kubectl logs -f deployment/admin-module -n artstore
+
+# Масштабирование
+kubectl scale deployment/admin-module --replicas=5 -n artstore
+
+# Rolling update
+kubectl set image deployment/admin-module \
+  admin-module=registry.example.com/artstore/admin-module:v1.1.0 \
+  -n artstore
+```
+
+### 11.9 Мониторинг конфигурация
+
+**Файл**: `monitoring/prometheus.yml`
+
+```yaml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'artstore-admin'
+    environment: 'production'
+
+# Alertmanager configuration (опционально)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - 'alertmanager:9093'
+
+# Правила для алертов
+rule_files:
+  - '/etc/prometheus/rules/*.yml'
+
+# Scrape configurations
+scrape_configs:
+  # Admin Module метрики
+  - job_name: 'admin-module'
+    static_configs:
+      - targets:
+          - 'admin-module:8000'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # PostgreSQL метрики (с postgres_exporter)
+  - job_name: 'postgres'
+    static_configs:
+      - targets:
+          - 'postgres-exporter:9187'
+
+  # Redis метрики (с redis_exporter)
+  - job_name: 'redis'
+    static_configs:
+      - targets:
+          - 'redis-exporter:9121'
+
+  # HAProxy метрики
+  - job_name: 'haproxy'
+    static_configs:
+      - targets:
+          - 'haproxy:8404'
+    metrics_path: '/metrics'
+
+  # Node exporter (system metrics)
+  - job_name: 'node'
+    static_configs:
+      - targets:
+          - 'node-exporter:9100'
+```
+
+**Файл**: `monitoring/rules/alerts.yml`
+
+```yaml
+groups:
+  - name: admin_module_alerts
+    interval: 30s
+    rules:
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} for {{ $labels.instance }}"
+
+      # High response time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s for {{ $labels.instance }}"
+
+      # Service down
+      - alert: ServiceDown
+        expr: up{job="admin-module"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Admin Module service is down"
+          description: "{{ $labels.instance }} has been down for more than 1 minute"
+
+      # Database connection issues
+      - alert: DatabaseConnectionFailure
+        expr: rate(database_connection_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection failures detected"
+          description: "Database connection error rate is {{ $value }} for {{ $labels.instance }}"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / 1024 / 1024) > 1800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value }}MB for {{ $labels.instance }}"
+
+      # Authentication failures
+      - alert: HighAuthFailureRate
+        expr: rate(auth_failures_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Auth failure rate is {{ $value }}/sec for {{ $labels.instance }}"
+```
+
+### 11.10 Backup и восстановление
+
+**Backup скрипт**: `scripts/backup.sh`
+
+```bash
+#!/bin/bash
+set -e
+
+# Конфигурация
+BACKUP_DIR="/backups"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+RETENTION_DAYS=30
+
+echo "=== ArtStore Admin Module Backup ==="
+echo "Timestamp: $TIMESTAMP"
+
+# 1. Backup PostgreSQL
+echo "Backing up PostgreSQL database..."
+docker exec artstore_admin_postgres pg_dump \
+  -U artstore \
+  -d admin_module \
+  -F c \
+  -f /tmp/admin_module_${TIMESTAMP}.dump
+
+docker cp artstore_admin_postgres:/tmp/admin_module_${TIMESTAMP}.dump \
+  ${BACKUP_DIR}/postgres/
+
+# 2. Backup Redis
+echo "Backing up Redis..."
+docker exec artstore_admin_redis redis-cli --rdb /tmp/dump_${TIMESTAMP}.rdb
+docker cp artstore_admin_redis:/tmp/dump_${TIMESTAMP}.rdb \
+  ${BACKUP_DIR}/redis/
+
+# 3. Backup JWT Keys
+echo "Backing up JWT keys..."
+docker cp artstore_admin_module:/app/keys/jwt-private.pem \
+  ${BACKUP_DIR}/keys/jwt-private_${TIMESTAMP}.pem
+docker cp artstore_admin_module:/app/keys/jwt-public.pem \
+  ${BACKUP_DIR}/keys/jwt-public_${TIMESTAMP}.pem
+
+# 4. Backup Configuration
+echo "Backing up configuration..."
+cp config.yaml ${BACKUP_DIR}/config/config_${TIMESTAMP}.yaml
+
+# 5. Создание архива
+echo "Creating backup archive..."
+tar -czf ${BACKUP_DIR}/admin_module_backup_${TIMESTAMP}.tar.gz \
+  -C ${BACKUP_DIR} \
+  postgres/admin_module_${TIMESTAMP}.dump \
+  redis/dump_${TIMESTAMP}.rdb \
+  keys/jwt-private_${TIMESTAMP}.pem \
+  keys/jwt-public_${TIMESTAMP}.pem \
+  config/config_${TIMESTAMP}.yaml
+
+# 6. Удаление старых backups
+echo "Cleaning up old backups..."
+find ${BACKUP_DIR} -name "admin_module_backup_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
+
+echo "Backup completed: admin_module_backup_${TIMESTAMP}.tar.gz"
+```
+
+**Restore скрипт**: `scripts/restore.sh`
+
+```bash
+#!/bin/bash
+set -e
+
+if [ -z "$1" ]; then
+  echo "Usage: $0 <backup_archive.tar.gz>"
+  exit 1
+fi
+
+BACKUP_FILE=$1
+RESTORE_DIR="/tmp/restore_$$"
+
+echo "=== ArtStore Admin Module Restore ==="
+echo "Backup file: $BACKUP_FILE"
+
+# 1. Распаковка архива
+echo "Extracting backup archive..."
+mkdir -p ${RESTORE_DIR}
+tar -xzf ${BACKUP_FILE} -C ${RESTORE_DIR}
+
+# 2. Остановка сервисов
+echo "Stopping services..."
+docker-compose stop admin-module
+
+# 3. Restore PostgreSQL
+echo "Restoring PostgreSQL database..."
+DB_DUMP=$(find ${RESTORE_DIR}/postgres -name "admin_module_*.dump" | head -n 1)
+docker cp ${DB_DUMP} artstore_admin_postgres:/tmp/restore.dump
+docker exec artstore_admin_postgres pg_restore \
+  -U artstore \
+  -d admin_module \
+  -c \
+  /tmp/restore.dump
+
+# 4. Restore Redis
+echo "Restoring Redis..."
+REDIS_DUMP=$(find ${RESTORE_DIR}/redis -name "dump_*.rdb" | head -n 1)
+docker cp ${REDIS_DUMP} artstore_admin_redis:/data/dump.rdb
+docker-compose restart redis
+
+# 5. Restore JWT Keys
+echo "Restoring JWT keys..."
+PRIVATE_KEY=$(find ${RESTORE_DIR}/keys -name "jwt-private_*.pem" | head -n 1)
+PUBLIC_KEY=$(find ${RESTORE_DIR}/keys -name "jwt-public_*.pem" | head -n 1)
+docker cp ${PRIVATE_KEY} artstore_admin_module:/app/keys/jwt-private.pem
+docker cp ${PUBLIC_KEY} artstore_admin_module:/app/keys/jwt-public.pem
+
+# 6. Запуск сервисов
+echo "Starting services..."
+docker-compose start admin-module
+
+# 7. Очистка
+echo "Cleaning up..."
+rm -rf ${RESTORE_DIR}
+
+echo "Restore completed successfully!"
+```
+
+### 11.11 CI/CD Pipeline
+
+**Файл**: `.github/workflows/deploy.yml`
+
+```yaml
+name: Build and Deploy Admin Module
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: registry.example.com
+  IMAGE_NAME: artstore/admin-module
+
+jobs:
+  # Job 1: Тестирование
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run tests
+        run: pytest --cov=app --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+
+  # Job 2: Сборка Docker образа
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 3: Развертывание в Staging
+  deploy-staging:
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Deploy to staging
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            cd /opt/artstore/admin-module
+            export VERSION=${{ needs.build.outputs.image_tag }}
+            docker stack deploy -c docker-compose.staging.yml artstore-admin
+
+  # Job 4: Развертывание в Production
+  deploy-production:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy to production
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/artstore/admin-module
+            export VERSION=${{ needs.build.outputs.image_tag }}
+            docker stack deploy -c docker-compose.prod.yml artstore-admin
+
+      - name: Verify deployment
+        run: |
+          sleep 30
+          curl -f https://admin.artstore.example.com/health/ready || exit 1
+
+      - name: Notify success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "✅ Admin Module deployed to production: ${{ github.ref_name }}"
+            }
+```
+
+### 11.12 Environment Variables Documentation
+
+**Файл**: `docs/environment-variables.md`
+
+```markdown
+# Environment Variables Reference
+
+## Required Variables
+
+### Database
+- `DATABASE_URL` - PostgreSQL connection string
+  - Format: `postgresql+asyncpg://user:password@host:port/database`
+  - Example: `postgresql+asyncpg://artstore:secret@postgres:5432/admin_module`
+
+### Redis
+- `REDIS_URL` - Redis connection string
+  - Format: `redis://[:password@]host:port/db`
+  - Example: `redis://:secret@redis:6379/0`
+
+### JWT
+- `JWT_PRIVATE_KEY_PATH` - Path to RS256 private key
+- `JWT_PUBLIC_KEY_PATH` - Path to RS256 public key
+- `JWT_ALGORITHM` - Algorithm (must be RS256)
+
+## Optional Variables
+
+### Application
+- `ENVIRONMENT` - Application environment (development/staging/production)
+- `LOG_LEVEL` - Logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+- `DEBUG` - Enable debug mode (true/false)
+
+### Security
+- `PASSWORD_MIN_LENGTH` - Minimum password length (default: 8)
+- `PASSWORD_REQUIRE_COMPLEXITY` - Require complex passwords (true/false)
+- `CORS_ORIGINS` - Comma-separated list of allowed origins
+
+### LDAP (optional)
+- `LDAP_ENABLED` - Enable LDAP integration (true/false)
+- `LDAP_SERVER` - LDAP server URL
+- `LDAP_BIND_DN` - Bind DN for LDAP queries
+- `LDAP_BIND_PASSWORD` - Bind password
+- `LDAP_BASE_DN` - Base DN for searches
+
+### OAuth2 (optional)
+- `OAUTH2_ENABLED` - Enable OAuth2 integration (true/false)
+- `DEX_CLIENT_ID` - Dex client ID
+- `DEX_CLIENT_SECRET` - Dex client secret
+- `DEX_ISSUER_URL` - Dex issuer URL
+
+### Monitoring
+- `ENABLE_METRICS` - Enable Prometheus metrics (true/false)
+- `ENABLE_TRACING` - Enable OpenTelemetry tracing (true/false)
+- `JAEGER_AGENT_HOST` - Jaeger agent hostname
+- `JAEGER_AGENT_PORT` - Jaeger agent port
+
+### Startup Control
+- `SKIP_WAIT_FOR_DEPS` - Skip waiting for dependencies (true/false)
+- `SKIP_MIGRATIONS` - Skip database migrations (true/false)
+- `CREATE_DEFAULT_ADMIN` - Create default admin user (true/false)
+```
+
+---
+
+## Итоговая структура проекта после Этапа 11
+
+```
+admin-module/
+├── app/                          # Код приложения
+├── alembic/                      # Миграции БД
+├── tests/                        # Тесты
+├── keys/                         # JWT ключи (не коммитить!)
+├── monitoring/                   # Мониторинг конфигурация
+│   ├── prometheus.yml
+│   ├── rules/
+│   │   └── alerts.yml
+│   └── grafana/
+│       ├── dashboards/
+│       └── datasources/
+├── configs/                      # Production конфиги
+│   ├── haproxy.cfg
+│   └── sentinel.conf
+├── k8s/                          # Kubernetes манифесты
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   ├── configmap.yaml
+│   └── secrets.yaml
+├── scripts/                      # Утилитарные скрипты
+│   ├── backup.sh
+│   ├── restore.sh
+│   └── generate_jwt_keys.py
+├── docs/                         # Документация
+│   ├── environment-variables.md
+│   ├── deployment-guide.md
+│   └── troubleshooting.md
+├── .github/
+│   └── workflows/
+│       ├── test.yml
+│       └── deploy.yml
+├── Dockerfile                    # Docker образ
+├── docker-entrypoint.sh          # Entrypoint скрипт
+├── docker-compose.yml            # Development
+├── docker-compose.prod.yml       # Production
+├── config.yaml                   # Конфигурация
+├── requirements.txt              # Python зависимости
+├── .dockerignore
+├── .gitignore
+└── README.md
+```
+
+---
+
+## Итого Этап 11: Docker и развертывание
+
+Мы создали полную инфраструктуру для развертывания Admin Module:
+
+### Development окружение
+- ✅ Dockerfile с multi-stage build
+- ✅ docker-compose.yml с PostgreSQL, Redis, Prometheus, Grafana, Jaeger
+- ✅ Hot-reload для разработки
+- ✅ Health checks и автоматический restart
+
+### Production окружение
+- ✅ High Availability конфигурация
+- ✅ PostgreSQL с репликацией (Primary/Standby)
+- ✅ Redis Cluster для failover и масштабирования (6 узлов: 3 master + 3 replica)
+- ✅ HAProxy Load Balancer с SSL/TLS
+- ✅ Docker Swarm и Kubernetes манифесты
+- ✅ Rolling updates с zero downtime
+
+### Мониторинг и Observability
+- ✅ Prometheus для метрик
+- ✅ Grafana для визуализации
+- ✅ Jaeger для distributed tracing
+- ✅ Alerting правила для critical events
+- ✅ Health check endpoints (/health/live, /health/ready)
+
+### Операционные процедуры
+- ✅ Backup и restore скрипты
+- ✅ CI/CD pipeline через GitHub Actions
+- ✅ Deployment automation для staging и production
+- ✅ Environment variables documentation
+- ✅ Troubleshooting guides
+
+### Security Best Practices
+- ✅ Непривилегированный пользователь в контейнере
+- ✅ Docker secrets для sensitive data
+- ✅ TLS 1.3 encryption через HAProxy
+- ✅ Security headers (HSTS, X-Frame-Options, etc.)
+- ✅ Network isolation через Docker networks
+
+---
+
+## Следующие шаги для Production
+
+1. **SSL Certificate Setup**:
+   ```bash
+   # Получить Let's Encrypt сертификат
+   certbot certonly --standalone -d admin.artstore.example.com
+   ```
+
+2. **Domain Configuration**:
+   - DNS A record: admin.artstore.example.com → Load Balancer IP
+   - SSL certificate setup в HAProxy
+
+3. **Monitoring Setup**:
+   - Настроить Alertmanager для уведомлений
+   - Интегрировать с Slack/PagerDuty/Email
+   - Создать Grafana dashboards
+
+4. **Backup Automation**:
+   ```bash
+   # Добавить в crontab
+   0 2 * * * /opt/artstore/admin-module/scripts/backup.sh
+   ```
+
+5. **Security Hardening**:
+   - Настроить firewall rules
+   - Включить fail2ban для защиты от brute-force
+   - Регулярные security audits
+
+6. **Performance Tuning**:
+   - Database query optimization
+   - Redis caching strategy
+   - Load testing и stress testing
+   - Connection pool tuning
+
+---
+
+## Полезные команды
+
+**Development**:
+```bash
+# Быстрый старт
+docker-compose up -d
+
+# Rebuild после изменений
+docker-compose up --build -d
+
+# Просмотр логов
+docker-compose logs -f admin-module
+
+# Доступ к контейнеру
+docker-compose exec admin-module bash
+
+# Запуск миграций
+docker-compose exec admin-module alembic upgrade head
+
+# Запуск тестов в контейнере
+docker-compose exec admin-module pytest
+```
+
+**Production**:
+```bash
+# Deploy stack
+docker stack deploy -c docker-compose.prod.yml artstore-admin
+
+# Scale service
+docker service scale artstore-admin_admin-module=5
+
+# Rolling update
+docker service update --image registry.example.com/artstore/admin-module:v1.1.0 \
+  artstore-admin_admin-module
+
+# View logs
+docker service logs -f artstore-admin_admin-module
+
+# Inspect service
+docker service inspect artstore-admin_admin-module
+
+# Remove stack
+docker stack rm artstore-admin
+```
+
+**Troubleshooting**:
+```bash
+# Check container health
+docker inspect --format='{{.State.Health.Status}}' artstore_admin_module
+
+# View container resource usage
+docker stats artstore_admin_module
+
+# Check network connectivity
+docker-compose exec admin-module ping postgres
+docker-compose exec admin-module ping redis
+
+# Database connection test
+docker-compose exec admin-module python -c "
+from app.db.session import engine
+import asyncio
+asyncio.run(engine.connect())
+print('Database connection OK')
+"
+
+# Redis connection test
+docker-compose exec admin-module python -c "
+import redis
+r = redis.from_url('redis://:redis_password@redis:6379/0')
+r.ping()
+print('Redis connection OK')
+"
+```
+
+---
+
+**Поздравляем! 🎉**
+
+План разработки Admin Module полностью завершен. Теперь у вас есть:
+- ✅ Полная архитектура модуля
+- ✅ Реализация всех компонентов (models, services, API endpoints)
+- ✅ Интеграция с LDAP и OAuth2
+- ✅ Комплексная система тестирования
+- ✅ Production-ready Docker инфраструктура
+- ✅ CI/CD pipeline
+- ✅ Мониторинг и observability
+- ✅ Backup и disaster recovery
+
+Следующий шаг - начать разработку согласно плану, начиная с **Этапа 1: Подготовка инфраструктуры проекта**.

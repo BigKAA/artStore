@@ -14,12 +14,12 @@ ArtStore - это распределенная система файлового
 
 **JWT-based Authentication (RS256)**: Центральная аутентификация через Admin Module с распределенной валидацией токенов через публичный ключ.
 
-**Service Discovery**: Координация через Redis Sentinel Cluster - Admin Module Cluster публикует конфигурацию storage-element, а Ingester/Query кластеры подписываются на эти обновления с fallback на локальную конфигурацию.
+**Service Discovery**: Координация через Redis Cluster - Admin Module Cluster публикует конфигурацию storage-element, а Ingester/Query кластеры подписываются на эти обновления с fallback на локальную конфигурацию.
 
 **High Availability Architecture**: Полное устранение Single Points of Failure:
 - **Load Balancer Cluster**: HAProxy/Nginx с keepalived для распределения трафика
 - **Admin Module Cluster**: Raft consensus с 3+ узлами и automatic leader election (RTO < 15 сек)
-- **Redis Sentinel Cluster**: 3+ Sentinel узла с automatic failover (RTO < 30 сек)
+- **Redis Cluster**: 6+ узлов (минимум 3 master + 3 replica) с automatic failover и горизонтальным масштабированием (RTO < 30 сек)
 - **Storage Element Clusters**: Кластеризация с shared storage и master election
 - **Circuit Breaker Patterns**: Graceful degradation при недоступности dependencies
 
@@ -91,7 +91,7 @@ docker exec -it artstore_postgres psql -U artstore -d artstore
 - **Vector Clock Manager**: Управление глобальным упорядочиванием событий
 - **Conflict Resolution Engine**: Разрешение конфликтов данных между storage-element
 - User and storage element management
-- Service Discovery publishing to Redis Sentinel Cluster
+- Service Discovery publishing to Redis Cluster
 - Prometheus metrics endpoint
 
 **Key APIs**:
@@ -105,7 +105,7 @@ docker exec -it artstore_postgres psql -U artstore -d artstore
 ### 2. Storage Element Clusters (storage-element/)
 **Role**: Отказоустойчивое физическое хранение файлов с кешированием метаданных
 - **Clustered Architecture**: Множественные узлы за Load Balancer Cluster
-- **Master Election via Redis Sentinel**: Distributed leader election для режимов edit/rw
+- **Master Election via Redis Cluster**: Distributed leader election для режимов edit/rw
 - **Automatic Failover**: Переключение мастера за < 30 секунд с split-brain protection
 - **Shared Storage Access**: NFS/S3 кластерный доступ для всех узлов
 - File storage (local filesystem or S3)
@@ -131,7 +131,7 @@ docker exec -it artstore_postgres psql -U artstore -d artstore
 - **CDN Pre-upload**: Автоматическая репликация на CDN для популярных файлов
 - **Kafka Integration**: Асинхронная обработка через message queue
 - **Circuit Breaker Integration**: Graceful degradation при недоступности storage-element
-- **Redis Sentinel Client**: Подключение к HA Redis для Service Discovery
+- **Redis Cluster Client**: Подключение к HA Redis Cluster для Service Discovery
 - **Local Config Fallback**: Кеширование конфигурации при недоступности Service Discovery
 - **Saga Transactions**: Координируемые операции загрузки файлов
 - **Compensating Actions**: Автоматический откат при сбоях
@@ -148,7 +148,7 @@ docker exec -it artstore_postgres psql -U artstore -d artstore
 - **Connection Pooling**: HTTP/2 persistent connections к storage-element
 - **Load Balanced Cluster**: Множественные узлы за Load Balancer для высокой доступности
 - **Circuit Breaker Pattern**: Автоматическое отключение недоступных storage-element
-- **Redis Sentinel Integration**: HA подключение к Service Discovery
+- **Redis Cluster Integration**: HA подключение к Service Discovery
 - **Consistent Queries**: Поиск с учетом Vector Clock для консистентности
 - **Conflict Detection**: Обнаружение конфликтов между storage-element
 - **Read Consistency**: Гарантии согласованности при чтении
@@ -272,7 +272,7 @@ database:
 1. **No Single Points of Failure**: Все компоненты развернуты в кластерной конфигурации
 2. **Load Balancer Cluster**: HAProxy/Nginx + keepalived для устранения SPOF входного трафика
 3. **Admin Module Cluster**: Raft consensus кластер 3+ узлов с automatic leader election (RTO < 15 сек)
-4. **Redis Sentinel Cluster**: 3+ Sentinel узла с automatic failover (RTO < 30 сек)
+4. **Redis Cluster**: 6+ узлов (минимум 3 master + 3 replica) с automatic failover и горизонтальным масштабированием (RTO < 30 сек)
 5. **Circuit Breaker Pattern**: Обязательная реализация для всех inter-service communications
 6. **Local Fallback**: Кеширование конфигурации для работы при недоступности Service Discovery
 
@@ -282,8 +282,8 @@ database:
 9. **Vector Clock Sync**: Все модули синхронизируют логическое время через Admin Module Cluster
 10. **Conflict Resolution**: Автоматическое обнаружение и разрешение конфликтов данных
 11. **Attribute Files**: Always write to *.attr.json first, then update database cache
-12. **Master Election**: Required for edit/rw modes using Redis Sentinel coordination
-13. **Service Discovery**: Ingester/Query clusters must subscribe to Redis Sentinel for storage element updates
+12. **Master Election**: Required for edit/rw modes using Redis Cluster coordination
+13. **Service Discovery**: Ingester/Query clusters must subscribe to Redis Cluster for storage element updates
 14. **Stateless Design**: All modules must be stateless
 15. **Error Handling**: Insufficient storage space should return specific error message
 16. **Retention Management**: Storage elements have configurable retention periods with automatic warnings
