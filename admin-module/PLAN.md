@@ -257,7 +257,9 @@ auth:
     username: "admin"
     email: "admin@artstore.local"
     password: "admin123"  # ИЗМЕНИТЬ В PRODUCTION!
-    full_name: "Системный администратор"
+    last_name: "Администратор"
+    first_name: "Системный"
+    middle_name: null
     description: "Пользователь администратора системы по умолчанию"
 
   # LDAP конфигурация (опционально)
@@ -271,7 +273,9 @@ auth:
     user_attributes:
       username: "uid"
       email: "mail"
-      full_name: "cn"
+      last_name: "sn"
+      first_name: "givenName"
+      middle_name: "middleName"
     group_search_filter: "(memberUid={username})"
     admin_groups:
       - "cn=admins,ou=groups,dc=example,dc=com"
@@ -306,7 +310,9 @@ auth:
         user_mapping:
           username: "preferred_username"
           email: "email"
-          full_name: "name"
+          last_name: "family_name"
+          first_name: "given_name"
+          middle_name: "middle_name"
           groups: "groups"
         # Группы администраторов в OAuth2
         admin_groups:
@@ -327,7 +333,9 @@ auth:
         user_mapping:
           username: "email"
           email: "email"
-          full_name: "name"
+          last_name: "family_name"
+          first_name: "given_name"
+          middle_name: null
         # Для Google нет групп, администраторов назначаем по email
         admin_emails:
           - "admin@example.com"
@@ -461,7 +469,9 @@ class DefaultAdminConfig(BaseSettings):
     username: str
     email: str
     password: str
-    full_name: str
+    last_name: str
+    first_name: str
+    middle_name: Optional[str] = None
     description: str = ""
 
 
@@ -469,7 +479,9 @@ class LDAPUserAttributesConfig(BaseSettings):
     """Маппинг LDAP атрибутов на поля пользователя"""
     username: str = "uid"
     email: str = "mail"
-    full_name: str = "cn"
+    last_name: str = "sn"
+    first_name: str = "givenName"
+    middle_name: str = "middleName"
 
 
 class LDAPConfig(BaseSettings):
@@ -493,7 +505,9 @@ class OAuth2UserMappingConfig(BaseSettings):
     """Маппинг OAuth2 claims на поля пользователя"""
     username: str = "preferred_username"
     email: str = "email"
-    full_name: str = "name"
+    last_name: str = "family_name"
+    first_name: str = "given_name"
+    middle_name: Optional[str] = "middle_name"
     groups: str = "groups"
 
 
@@ -1089,7 +1103,9 @@ class User(Base):
         username: Имя пользователя (уникальное)
         email: Email (уникальный)
         hashed_password: Bcrypt хеш пароля
-        full_name: Полное имя
+        last_name: Фамилия
+        first_name: Имя
+        middle_name: Отчество (опционально)
         is_active: Активен ли пользователь
         is_admin: Является ли администратором
         is_system: Системный пользователь (защищен от удаления)
@@ -1106,7 +1122,17 @@ class User(Base):
     username = Column(String(100), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
-    full_name = Column(String(255), nullable=False)
+    last_name = Column(String(100), nullable=False)
+    first_name = Column(String(100), nullable=False)
+    middle_name = Column(String(100), nullable=True)
+
+    @property
+    def full_name(self) -> str:
+        """Полное имя пользователя (ФИО)."""
+        parts = [self.last_name, self.first_name]
+        if self.middle_name:
+            parts.append(self.middle_name)
+        return " ".join(parts)
 
     # Статусы
     is_active = Column(Boolean, default=True, nullable=False)

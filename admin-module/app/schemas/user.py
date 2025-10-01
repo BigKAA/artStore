@@ -1,11 +1,10 @@
 """
 Pydantic схемы для работы с пользователями.
 """
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
-from app.schemas.common import IDMixin, TimestampMixin
 
 
 class UserBase(BaseModel):
@@ -13,7 +12,7 @@ class UserBase(BaseModel):
     Базовая схема пользователя с общими полями.
     """
 
-    login: str = Field(..., min_length=3, max_length=100, description="Логин пользователя")
+    username: str = Field(..., min_length=3, max_length=100, description="Логин пользователя")
     email: EmailStr = Field(..., description="Email адрес")
     last_name: str = Field(..., min_length=1, max_length=100, description="Фамилия")
     first_name: str = Field(..., min_length=1, max_length=100, description="Имя")
@@ -34,7 +33,7 @@ class UserCreate(UserBase):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "login": "ivanov_ii",
+                "username": "ivanov_ii",
                 "email": "ivanov@example.com",
                 "last_name": "Иванов",
                 "first_name": "Иван",
@@ -77,27 +76,7 @@ class UserUpdate(BaseModel):
     )
 
 
-class UserChangePassword(BaseModel):
-    """
-    Схема для изменения пароля пользователя.
-
-    Используется в POST /api/users/{user_id}/change-password
-    """
-
-    old_password: str = Field(..., description="Текущий пароль")
-    new_password: str = Field(..., min_length=8, description="Новый пароль (минимум 8 символов)")
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "old_password": "OldPassword123",
-                "new_password": "NewSecurePassword456",
-            }
-        }
-    )
-
-
-class UserResponse(UserBase, IDMixin, TimestampMixin):
+class UserResponse(UserBase):
     """
     Схема пользователя в ответе API.
 
@@ -105,28 +84,37 @@ class UserResponse(UserBase, IDMixin, TimestampMixin):
     Содержит все данные кроме пароля.
     """
 
+    id: str = Field(description="ID пользователя (UUID)")
     is_active: bool = Field(description="Активен ли пользователь")
     is_admin: bool = Field(description="Является ли администратором")
     is_system: bool = Field(description="Системный пользователь (защищен от удаления)")
-    full_name: str = Field(description="Полное имя (ФИО)")
+    auth_provider: str = Field(description="Источник аутентификации (local, ldap, oauth2)")
+    external_id: Optional[str] = Field(None, description="ID во внешней системе")
+    last_synced_at: Optional[datetime] = Field(
+        None, description="Время последней синхронизации с внешней системой"
+    )
+    created_at: datetime = Field(description="Дата создания")
+    updated_at: datetime = Field(description="Дата обновления")
 
     model_config = ConfigDict(
         from_attributes=True,  # Для работы с ORM моделями
         json_schema_extra={
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
-                "login": "ivanov_ii",
+                "username": "ivanov_ii",
                 "email": "ivanov@example.com",
                 "last_name": "Иванов",
                 "first_name": "Иван",
                 "middle_name": "Иванович",
-                "full_name": "Иванов Иван Иванович",
                 "is_active": True,
                 "is_admin": False,
                 "is_system": False,
+                "auth_provider": "local",
+                "external_id": None,
                 "description": "Менеджер отдела продаж",
                 "created_at": "2024-01-15T10:30:00Z",
                 "updated_at": "2024-01-15T10:30:00Z",
+                "last_synced_at": None,
             }
         },
     )

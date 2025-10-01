@@ -6,6 +6,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ArtStore - это распределенная система файлового хранилища с микросервисной архитектурой, предназначенная для долгосрочного хранения документов с различными сроками хранения. Система реализует принципы отказоустойчивости, горизонтального масштабирования и обеспечивает разделение оперативного и архивного хранения.
 
+## Общие вопросы
+
+Если не знаешь ответ, так и скажи - Не знаю ответ. Не ври.
+
+Если видишь, что выполнение задач зациклилось - остановись, спроси что делать дальше.
+
+Пиши подробные комментарии в коде на русском языке.
+
+Отвечай на русском языке.
+
+## Набор утилит
+
+Базовые утилиты запускай в docker или podman при помощи docker-compose.yml:
+
+- postgres
+- redis
+- minio
+- dex
+- ldap
+
+Логины и пароли администраторов приложений доступны в `docker-compose.yml`.
+
+Логин административного пользователя в LDAP: `cn=Directory Manager`. Пароль: `password`. Tree: `dc=artstore,dc=local`.
+
+Для работы с postgres используй инструменты, находящиеся в контейнере postgres. Если необходимой базы данных нет - создавай ее сам.
+
 ### Core Architecture Concepts
 
 **Attribute-First Storage Model**: Система использует файлы атрибутов (`*.attr.json`) как единственный источник истины для метаданных файлов. Это критически важно для обеспечения backup'а элементов хранения как набора простых файлов без необходимости работы с отдельными таблицами БД.
@@ -55,12 +81,14 @@ ArtStore - это распределенная система файлового
 ## Development Environment Setup
 
 ### Prerequisites
+
 ```bash
 # Ensure base infrastructure is running
 docker-compose up -d
 ```
 
 ### Database Access
+
 ```bash
 # Access PostgreSQL container for database operations
 docker exec -it artstore_postgres psql -U artstore -d artstore
@@ -73,10 +101,11 @@ docker exec -it artstore_postgres psql -U artstore -d artstore
 - **PgAdmin**: 5050 (admin@admin.com / password)
 - **Redis**: 6379
 - **MinIO**: 9000 (console: 9001, minioadmin / minioadmin)
+- **LDAP**: 1398 
 - **Admin Module**: 8000-8009
 - **Storage Elements**: 8010-8019
-- **Ingester Module**: 8020-20
-- **Query Module**: 8030
+- **Ingester Module**: 8020-8029
+- **Query Module**: 8030-8039
 - **Admin UI**: 4200
 
 ## Module Architecture

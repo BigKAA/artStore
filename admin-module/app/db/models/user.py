@@ -20,7 +20,7 @@ class User(Base):
 
     Атрибуты:
         id: Уникальный идентификатор (UUID)
-        login: Логин пользователя (уникальный)
+        username: Логин пользователя (уникальный)
         email: Email (уникальный)
         hashed_password: Bcrypt хеш пароля
         last_name: Фамилия
@@ -29,6 +29,9 @@ class User(Base):
         is_active: Активен ли пользователь
         is_admin: Является ли администратором
         is_system: Системный пользователь (защищен от удаления)
+        auth_provider: Источник аутентификации (local, ldap, oauth2)
+        external_id: ID пользователя во внешней системе (для LDAP/OAuth2)
+        last_synced_at: Время последней синхронизации с внешней системой
         description: Описание пользователя
         created_at: Дата создания
         updated_at: Дата последнего обновления
@@ -40,11 +43,9 @@ class User(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
 
     # Основные данные
-    login = Column(String(100), unique=True, nullable=False, index=True)
+    username = Column(String(100), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
-
-    # ФИО
     last_name = Column(String(100), nullable=False)
     first_name = Column(String(100), nullable=False)
     middle_name = Column(String(100), nullable=True)
@@ -53,6 +54,11 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
     is_system = Column(Boolean, default=False, nullable=False)
+
+    # Аутентификация
+    auth_provider = Column(String(50), default="local", nullable=False, index=True)  # local, ldap, oauth2
+    external_id = Column(String(255), nullable=True, index=True)  # ID во внешней системе
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)  # Время последней синхронизации
 
     # Дополнительная информация
     description = Column(Text, nullable=True)
@@ -69,16 +75,18 @@ class User(Base):
     )
 
     def __repr__(self):
-        return f"<User(id={self.id}, login={self.login}, is_admin={self.is_admin})>"
+        return f"<User(id={self.id}, username={self.username}, is_admin={self.is_admin})>"
 
     @property
     def full_name(self) -> str:
         """
-        Возвращает полное имя пользователя (Фамилия Имя Отчество).
+        Полное имя пользователя (ФИО).
+        Формируется из фамилии, имени и отчества.
         """
+        parts = [self.last_name, self.first_name]
         if self.middle_name:
-            return f"{self.last_name} {self.first_name} {self.middle_name}"
-        return f"{self.last_name} {self.first_name}"
+            parts.append(self.middle_name)
+        return " ".join(parts)
 
     @property
     def is_protected(self) -> bool:
@@ -87,3 +95,10 @@ class User(Base):
         Системный пользователь не может быть удален или лишен прав администратора.
         """
         return self.is_system
+
+    @property
+    def is_external(self) -> bool:
+        """
+        Проверка, является ли пользователь внешним (LDAP/OAuth2).
+        """
+        return self.auth_provider in ("ldap", "oauth2")
