@@ -111,42 +111,93 @@ docker exec -it artstore_postgres psql -U artstore -d artstore
 - **Raft Consensus Cluster**: Автоматическое лидерство с выборами в кластере 3+ узлов
 - **Multi-Master Active-Active**: Consistent hashing для распределения нагрузки
 - **Zero-Downtime Operations**: Rolling updates и graceful failover (RTO < 15 сек)
-- JWT token generation (RS256) с распределенной валидацией
-- **Saga Orchestrator**: Координация распределенных транзакций
-- **Vector Clock Manager**: Управление глобальным упорядочиванием событий
-- **Conflict Resolution Engine**: Разрешение конфликтов данных между storage-element
+- **JWT token generation (RS256)** с распределенной валидацией через публичный ключ
+- **LDAP/AD Integration**: Аутентификация через корпоративный LDAP с mapping групп на роли
+- **Saga Orchestrator**: Координация распределенных транзакций (Upload, Delete, Transfer файлов)
+- **Conflict Resolution**: Автоматическое обнаружение и устранение несоответствий между attr.json и DB cache
 - User and storage element management
-- Service Discovery publishing to Redis Cluster
+- Service Discovery publishing to Redis Sentinel Cluster
+- Webhook management для уведомлений о событиях (file_restored, restore_failed, file_expiring)
 - Prometheus metrics endpoint
 
 **Key APIs**:
-- `/api/auth/*` - Authentication endpoints
-- `/api/users/*` - User management
+- `/api/auth/*` - Authentication endpoints (login, JWT refresh, LDAP integration)
+- `/api/users/*` - User management и LDAP mapping
+- `/api/users/{id}/webhooks` - Webhook configuration для пользователей
 - `/api/storage-elements/*` - Storage element management
-- `/api/transactions/*` - Saga orchestration and Vector Clock management
-- `/health/*` - Health checks
+- `/api/transactions/*` - Saga orchestration status и compensating actions
+- `/api/batch/*` - Batch operations (upload, delete до 100 файлов / 1GB)
+- `/health/*` - Health checks (liveness, readiness)
 - `/metrics` - Prometheus metrics
 
 ### 2. Storage Element Clusters (storage-element/)
 **Role**: Отказоустойчивое физическое хранение файлов с кешированием метаданных
-- **Clustered Architecture**: Множественные узлы за Load Balancer Cluster
-- **Master Election via Redis Cluster**: Distributed leader election для режимов edit/rw
-- **Automatic Failover**: Переключение мастера за < 30 секунд с split-brain protection
-- **Shared Storage Access**: NFS/S3 кластерный доступ для всех узлов
+
+**Deployment Options**:
+- **Standalone Mode**: Одиночный узел без репликации (упрощенная конфигурация для некритичных данных)
+- **Replicated Mode** (опционально): Кластер из 3+ узлов с синхронной или асинхронной репликацией для критичных данных
+
+**Core Features**:
 - File storage (local filesystem or S3)
 - **Write-Ahead Log**: Журнал транзакций для атомарности операций
-- **Vector Clock Integration**: Локальные векторные часы для упорядочивания
-- **Saga Participant**: Участие в распределенных транзакциях
+- **Saga Participant**: Участие в распределенных транзакциях координируемых Admin Module
 - Metadata caching in PostgreSQL Cluster
 - Four operational modes: edit, rw, ro, ar
 
-**Critical Features**:
-- Attribute files (*.attr.json) as source of truth
-- **Consistency Protocol**: WAL → Attr File → Vector Clock → DB Cache → Commit
-- **Automatic Reconciliation**: Обнаружение и устранение несоответствий
-- Directory structure: `/year/month/day/hour/`
-- Master coordination through Redis for write modes
-- Mode transitions: edit (fixed) → rw → ro → ar
+**Critical Implementation Details**:
+- **Attribute files** (`*.attr.json`): Единственный источник истины для метаданных
+  - Максимальный размер: 4KB (гарантия атомарности записи)
+  - Атомарная запись: WAL → Temporary file → fsync → Atomic Rename
+- **File Naming Convention**: `{name_without_ext}_{username}_{timestamp}_{uuid}.{ext}`
+  - Original filename первым для human-readability при сортировке
+  - Гарантирует уникальность при одновременной загрузке файлов с одинаковыми именами
+  - **Автоматическое обрезание** длинных имен до 200 символов (полное имя в attr.json)
+  - Пример: `report_ivanov_20250102T153045_a1b2c3d4.pdf`
+  - Implementation:
+    ```python
+    from pathlib import Path
+
+    def generate_storage_filename(original_name, username, timestamp, uuid, max_len=200):
+        name_stem = Path(original_name).stem
+        name_ext = Path(original_name).suffix
+        fixed_len = 1 + len(username) + 1 + len(timestamp) + 1 + len(uuid) + len(name_ext)
+        available = max_len - fixed_len
+        if len(name_stem) > available:
+            name_stem = name_stem[:available]
+        return f"{name_stem}_{username}_{timestamp}_{uuid}{name_ext}"
+    ```
+- **Consistency Protocol**: WAL → Attr File → DB Cache → Service Discovery → Commit
+- **Automatic Reconciliation**: Обнаружение и устранение несоответствий между attr.json и DB cache
+- **Directory structure**: `/year/month/day/hour/` для удобства резервного копирования
+- **Mode transitions**: edit (fixed) → rw → ro → ar
+
+**Replicated Mode Configuration** (опционально):
+```yaml
+replication:
+  enabled: true
+  mode: sync | async
+  replicas: 2
+  quorum: majority
+
+sync_replication:
+  min_replicas: 2
+  write_timeout: 5s
+  consistency: strong
+  rto: < 30s
+  rpo: 0  # Zero data loss
+
+async_replication:
+  batch_size: 100
+  interval: 60s
+  retry_failed: true
+  rto: < 30s
+  rpo: ~60s  # Last batch
+```
+
+**Master Election** (только replicated mode):
+- Redis Sentinel координация для режимов edit/rw
+- Automatic failover за < 30 секунд
+- Split-brain protection через quorum
 
 ### 3. Ingester Cluster (ingester-module/)
 **Role**: Высокопроизводительное отказоустойчивое добавление и управление файлами
