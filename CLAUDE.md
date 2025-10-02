@@ -68,10 +68,6 @@ ArtStore - это распределенная система файлового
 - **TLS 1.3 Transit Encryption**: Все межсервисные соединения защищены современным протоколом TLS 1.3
 - **Secure Key Management**: Защищенное управление JWT ключами через Admin Module Cluster
 - **Automated JWT Key Rotation**: Ротация RS256 ключей каждые 24 часа с плавным переходом
-- **Fine-grained RBAC**: Детализированная ролевая модель с resource-level permissions
-- **Comprehensive Audit Logging**: Tamper-proof логирование с цифровыми подписями
-- **API Rate Limiting**: Adaptive защита от DDoS атак и злоупотреблений
-- **Real-time Security Monitoring**: Автоматическое обнаружение и блокировка угроз
 
 **Advanced Monitoring и Observability Framework**: Комплексная система наблюдаемости:
 - **OpenTelemetry Distributed Tracing**: Полное отслеживание запросов через все микросервисы
