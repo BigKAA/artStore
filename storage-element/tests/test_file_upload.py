@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 
 from app.main import app
 from app.db.base import Base
-from app.api.deps.database import get_db
-from app.models import FileMetadata, WAL
+from app.api.deps.database import get_db  # Import from same place as endpoints
+from app.models import FileMetadata, WAL, Config
 from app.core.config import get_config
 
 
@@ -25,6 +25,8 @@ from app.core.config import get_config
 @pytest.fixture
 def test_db():
     """Create in-memory test database."""
+    # Models are imported at module level, ensuring they're registered
+    # with Base.metadata before create_all() is called
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(bind=engine)
@@ -46,21 +48,21 @@ def test_storage_dir():
 
 
 @pytest.fixture
-def client(test_db, test_storage_dir, monkeypatch):
+def client(test_storage_dir, monkeypatch):
     """Create FastAPI test client with overrides."""
-    # Create an engine and session bound to it
-    engine = test_db.bind
+    # Import models to ensure they're registered before creating database
+    from app.models import FileMetadata, WAL, Config
+    import app.db.base as db_base
 
-    # Override database dependency
-    def override_get_db():
-        SessionLocal = sessionmaker(bind=engine)
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+    # Create fresh in-memory database engine for this test
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
 
-    app.dependency_overrides[get_db] = override_get_db
+    # CRITICAL: Set globals BEFORE creating TestClient
+    # This prevents init_db() from being called with production database
+    db_base._SessionLocal = SessionLocal
+    db_base._engine = engine
 
     # Override storage path in config
     config = get_config()
@@ -69,7 +71,10 @@ def client(test_db, test_storage_dir, monkeypatch):
     with TestClient(app) as c:
         yield c
 
-    app.dependency_overrides.clear()
+    # Cleanup
+    db_base._SessionLocal = None
+    db_base._engine = None
+    Base.metadata.drop_all(bind=engine)
 
 
 class TestFileUploadAPI:

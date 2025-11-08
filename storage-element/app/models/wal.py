@@ -7,12 +7,12 @@ PostgreSQL table для транзакционного журнала опера
 from sqlalchemy import (
     Column, BigInteger, String, TIMESTAMP, CheckConstraint, Index, JSON, Integer
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from datetime import datetime, timezone
 import uuid as uuid_lib
 
 from app.db.base import Base
+from app.db.types import UUID  # Cross-database UUID type
 from app.core.config import get_config
 
 

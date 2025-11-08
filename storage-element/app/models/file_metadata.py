@@ -8,12 +8,13 @@ from sqlalchemy import (
     Column, String, BigInteger, Integer, TIMESTAMP, Text,
     CheckConstraint, Index, JSON
 )
-from sqlalchemy.dialects.postgresql import UUID, TSVECTOR, ARRAY
+from sqlalchemy.dialects.postgresql import TSVECTOR, ARRAY
 from sqlalchemy.sql import func
 from datetime import datetime, timezone
 import uuid as uuid_lib
 
 from app.db.base import Base
+from app.db.types import UUID  # Cross-database UUID type
 from app.core.config import get_config
 
 
