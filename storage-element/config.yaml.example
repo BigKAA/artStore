@@ -1,0 +1,73 @@
+# Storage Element Configuration Example
+# Copy to config.yaml and customize for your environment
+
+# Application settings
+app_name: "Storage Element"
+app_version: "1.0.0"
+debug: false
+log_level: "INFO"
+log_format: "json"  # json | text
+
+# Server settings
+host: "0.0.0.0"
+port: 8010
+workers: 4
+
+# Database configuration
+database:
+  host: "localhost"
+  port: 5432
+  username: "artstore"
+  password: "password"
+  database: "artstore"
+  table_prefix: "storage_elem_01"  # Unique prefix for this storage element
+
+# Storage configuration
+storage:
+  type: "local"  # local | s3
+  max_file_size: 1073741824  # 1GB in bytes
+
+  # Local filesystem settings
+  local_base_path: "./.data/storage"
+
+  # S3 settings (uncomment if type: s3)
+  # s3_endpoint_url: "http://localhost:9000"  # MinIO endpoint
+  # s3_access_key: "minioadmin"
+  # s3_secret_key: "minioadmin"
+  # s3_bucket_name: "artstore-files"
+  # s3_region: "us-east-1"
+
+# Redis Service Discovery (optional)
+redis:
+  enabled: false
+  host: "localhost"
+  port: 6379
+  password: null
+  db: 0
+
+  # Redis Sentinel for HA (optional)
+  sentinel_enabled: false
+  # sentinel_master: "mymaster"
+  # sentinel_hosts: "localhost:26379,localhost:26380,localhost:26381"
+
+# JWT Authentication
+auth:
+  jwt_public_key_path: "./keys/public_key.pem"
+  jwt_algorithm: "RS256"
+
+# Storage Mode
+mode:
+  mode: "edit"  # edit | rw | ro | ar
+
+  # Archive mode settings (if mode: ar)
+  # ar_cold_storage_path: "/mnt/cold-storage"
+
+# File Retention
+retention:
+  default_retention_days: 365
+  warning_days_before_expiry: 30
+
+# Write-Ahead Log
+wal:
+  enabled: true
+  wal_dir: "./.data/wal"
