@@ -209,5 +209,4 @@ __marimo__/
 .data/
 .serena/
 .claude/
-.utils/nginx/certs/cert.pem
-.utils/nginx/certs/key.pem
+.utils/nginx/certs/
