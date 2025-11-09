@@ -11,6 +11,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres:/var/lib/postgresql/data
+    networks:
+      - artstore_network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U artstore -d artstore"]
@@ -29,6 +31,8 @@ services:
       - "5050:80"
     volumes:
       - pgadmin:/var/lib/pgadmin
+    networks:
+      - artstore_network
     depends_on:
       - postgres
     restart: unless-stopped
@@ -40,6 +44,8 @@ services:
       - "6379:6379"
     volumes:
       - redis:/data
+    networks:
+      - artstore_network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -59,6 +65,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
+    networks:
+      - artstore_network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -77,6 +85,8 @@ services:
       DS_SUFFIX_NAME: "dc=artstore,dc=local"
     volumes:
       - ldap_data:/data
+    networks:
+      - artstore_network
     healthcheck:
       test: ["CMD-SHELL", "usr/lib/dirsrv/dscontainer -H"]
       interval: 30s
@@ -95,10 +105,12 @@ services:
     volumes:
       - ./.utils/dex/config.yml:/etc/dex/config.yml
     command: dex serve /etc/dex/config.yml
+    networks:
+      - artstore_network
     restart: unless-stopped
     depends_on:
     - ldap
-        
+
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider --proxy=off http://localhost:5556/dex/healthz"]
       interval: 10s
@@ -115,9 +127,16 @@ services:
       - ./.utils/nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./.utils/nginx/certs:/etc/nginx/certs
     command: /bin/sh -c "mkdir -p /etc/nginx/certs && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/certs/key.pem -out /etc/nginx/certs/cert.pem -subj '/C=RU/ST=Moscow/L=Moscow/O=ArtStore/OU=IT/CN=localhost' && nginx -g 'daemon off;'"
+    networks:
+      - artstore_network
     depends_on:
       - dex
     restart: unless-stopped
+
+networks:
+  artstore_network:
+    driver: bridge
+    name: artstore_network
 
 volumes:
   ldap_data:

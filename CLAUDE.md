@@ -42,6 +42,8 @@ ArtStore - это распределенная система файлового
 
 **Service Discovery**: Координация через Redis Cluster - Admin Module Cluster публикует конфигурацию storage-element, а Ingester/Query кластеры подписываются на эти обновления с fallback на локальную конфигурацию.
 
+**ВАЖНО: Redis работает в СИНХРОННОМ режиме**: Все модули используют синхронный redis-py (не redis.asyncio). Это архитектурное решение для упрощения координации между микросервисами и обеспечения предсказуемости Service Discovery через Redis Pub/Sub. Database (PostgreSQL) использует async (asyncpg), Redis - sync (redis-py).
+
 **High Availability Architecture**: Полное устранение Single Points of Failure:
 - **Load Balancer Cluster**: HAProxy/Nginx с keepalived для распределения трафика
 - **Admin Module Cluster**: Raft consensus с 3+ узлами и automatic leader election (RTO < 15 сек)
@@ -82,6 +84,41 @@ ArtStore - это распределенная система файлового
 # Ensure base infrastructure is running
 docker-compose up -d
 ```
+
+### Python Virtual Environment
+
+**ВАЖНО: Проект использует ЕДИНЫЙ глобальный virtual environment**
+
+Система использует externally-managed Python environment, поэтому установка зависимостей через pip требует использования venv.
+
+**Все Python модули проекта используют ОБЩИЙ venv, расположенный в корне проекта: `/home/artur/Projects/artStore/.venv`**
+
+```bash
+# Создание глобального virtual environment (выполняется ОДИН РАЗ в корне проекта)
+cd /home/artur/Projects/artStore
+python3 -m venv .venv
+
+# Активация venv (выполняется перед работой с любым Python модулем)
+source /home/artur/Projects/artStore/.venv/bin/activate  # Linux/macOS
+# или
+C:\path\to\artStore\.venv\Scripts\activate  # Windows
+
+# Установка зависимостей для всех модулей
+pip install -r admin-module/requirements.txt
+pip install -r storage-element/requirements.txt
+pip install -r ingester-module/requirements.txt
+pip install -r query-module/requirements.txt
+
+# Деактивация venv (когда закончите работу)
+deactivate
+```
+
+**Требования**:
+- **ЕДИНЫЙ .venv в корне проекта** `/home/artur/Projects/artStore/.venv` для всех Python модулей
+- .venv добавлен в .gitignore корневой директории
+- Все команды python/pip выполняются внутри активированного глобального venv
+- Скрипты и утилиты запускаются через `/home/artur/Projects/artStore/.venv/bin/python`
+- Перед работой с любым модулем активируйте глобальный venv
 
 ### Database Access
 
@@ -241,19 +278,50 @@ async_replication:
 
 ## Development Commands
 
+### Docker Containerization (ОБЯЗАТЕЛЬНО)
+
+**ВАЖНО: ВСЕ модули ДОЛЖНЫ разрабатываться и тестироваться в Docker контейнерах**
+
+Каждый Python модуль должен иметь:
+- `Dockerfile` - многоступенчатый образ для production
+- `docker-compose.yml` - локальная разработка и тестирование
+- `.dockerignore` - исключение ненужных файлов из образа
+
+**Требования к логированию**:
+- **JSON формат по умолчанию**: Все production логи ДОЛЖНЫ быть в JSON формате для интеграции с ELK Stack, Splunk и другими системами анализа
+- **Structured logging**: Использовать python-json-logger или аналоги для структурированного логирования
+- **Text формат**: Разрешен ТОЛЬКО в development режиме (docker-compose.dev.yml) для удобства отладки
+- **Обязательные поля в логах**: timestamp, level, logger, message, module, function, line
+- **Дополнительные поля**: request_id, user_id, trace_id (для OpenTelemetry интеграции)
+
 ### Running Applications
+
 ```bash
-# Start base infrastructure
+# Start base infrastructure (PostgreSQL, Redis, MinIO, LDAP)
 docker-compose up -d
 
-# Run specific module in development (example for admin-module)
+# Build and run specific module with Docker (ОБЯЗАТЕЛЬНЫЙ МЕТОД)
 cd admin-module
-py -m pip install -r requirements.txt
-py -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+docker-compose up --build -d
 
-# Build and run with Docker (preferred method)
-docker-compose -f docker-compose-app.yml up --build -d
+# View logs
+docker-compose logs -f admin-module
+
+# Stop module
+docker-compose down
+
+# Rebuild after code changes
+docker-compose up --build -d
+
+# Development mode с hot-reload (только для разработки)
+docker-compose -f docker-compose.dev.yml up --build
 ```
+
+**Запрет прямого запуска без Docker**:
+- ❌ НЕ запускать `python -m uvicorn` напрямую
+- ❌ НЕ использовать локальный venv для тестирования
+- ✅ ВСЕГДА использовать `docker-compose up` для запуска
+- ✅ ВСЕГДА тестировать в Docker окружении
 
 ### Testing
 Always create and run unit tests for modified code:
@@ -306,6 +374,28 @@ database:
   password: "password"
   database: "artstore"
   table_prefix: "storage_elem_01"  # For uniqueness in shared DB
+```
+
+### Logging Configuration
+```yaml
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "json"  # ОБЯЗАТЕЛЬНО "json" для production, "text" только для development
+  log_file: null  # Путь к файлу лога, null для stdout
+```
+
+**Production Environment Variables (docker-compose.yml)**:
+```yaml
+environment:
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"  # ОБЯЗАТЕЛЬНО json
+```
+
+**Development Environment Variables (docker-compose.dev.yml)**:
+```yaml
+environment:
+  LOG_LEVEL: "DEBUG"
+  LOG_FORMAT: "text"  # Разрешен text только в dev режиме
 ```
 
 ## Storage Element Modes and Transitions

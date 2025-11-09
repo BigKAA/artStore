@@ -1,0 +1,70 @@
+# Admin Module Docker Compose
+# Использует инфраструктуру из глобального /home/artur/Projects/artStore/docker-compose.yml
+
+version: '3.8'
+
+services:
+  admin-module:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: artstore_admin_module
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Database Configuration (использует глобальный postgres)
+      DB_HOST: artstore_postgres
+      DB_PORT: 5432
+      DB_USERNAME: artstore
+      DB_PASSWORD: password
+      DB_DATABASE: artstore_admin
+
+      # Redis Configuration (использует глобальный redis)
+      REDIS_HOST: artstore_redis
+      REDIS_PORT: 6379
+
+      # LDAP Configuration (использует глобальный ldap)
+      LDAP_ENABLED: "true"
+      LDAP_SERVER: "ldap://artstore_ldap:3389"
+      LDAP_BIND_DN: "cn=Directory Manager"
+      LDAP_BIND_PASSWORD: "password"
+      LDAP_BASE_DN: "dc=artstore,dc=local"
+
+      # JWT Configuration
+      JWT_PRIVATE_KEY_PATH: "/app/.keys/private_key.pem"
+      JWT_PUBLIC_KEY_PATH: "/app/.keys/public_key.pem"
+      JWT_ALGORITHM: "RS256"
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: 7
+
+      # Application Configuration
+      APP_NAME: "ArtStore Admin Module"
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "false"
+      APP_HOST: "0.0.0.0"
+      APP_PORT: 8000
+
+      # Logging
+      LOG_LEVEL: "INFO"
+      LOG_FORMAT: "json"
+
+    volumes:
+      # Конфигурация (read-only)
+      - ./config.yaml:/app/config.yaml:ro
+      # JWT ключи копируются в образ при сборке, не монтируются
+
+    networks:
+      - artstore_network
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# Использует существующую сеть из глобального docker-compose.yml
+networks:
+  artstore_network:
+    external: true

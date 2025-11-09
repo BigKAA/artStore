@@ -1,0 +1,120 @@
+# Admin Module Configuration
+# Этот файл содержит настройки по умолчанию
+# Значения могут быть переопределены через environment variables
+
+# Приложение
+app:
+  name: "ArtStore Admin Module"
+  version: "0.1.0"
+  debug: false
+  host: "0.0.0.0"
+  port: 8000
+
+# База данных PostgreSQL
+database:
+  host: "localhost"
+  port: 5432
+  username: "artstore"
+  password: "password"  # Переопределить через DB_PASSWORD
+  database: "artstore_admin"
+  pool_size: 10
+  max_overflow: 20
+  echo: false  # SQL логирование
+
+# Redis
+redis:
+  host: "localhost"
+  port: 6379
+  password: null  # Переопределить через REDIS_PASSWORD
+  db: 0
+  pool_size: 10
+  socket_timeout: 5
+  socket_connect_timeout: 5
+
+# LDAP Configuration
+ldap:
+  enabled: true
+  server: "ldap://localhost:1398"
+  bind_dn: "cn=Directory Manager"
+  bind_password: "password"  # Переопределить через LDAP_PASSWORD
+  base_dn: "dc=artstore,dc=local"
+  user_search_base: "ou=users,dc=artstore,dc=local"
+  group_search_base: "ou=groups,dc=artstore,dc=local"
+  user_object_class: "inetOrgPerson"
+  group_object_class: "groupOfNames"
+  username_attribute: "uid"
+  email_attribute: "mail"
+  firstname_attribute: "givenName"
+  lastname_attribute: "sn"
+  member_attribute: "member"
+  # Mapping LDAP групп на роли системы
+  group_role_mapping:
+    "cn=admins,ou=groups,dc=artstore,dc=local": "admin"
+    "cn=users,ou=groups,dc=artstore,dc=local": "user"
+    "cn=operators,ou=groups,dc=artstore,dc=local": "operator"
+
+# JWT Authentication
+jwt:
+  algorithm: "RS256"
+  access_token_expire_minutes: 30
+  refresh_token_expire_days: 7
+  private_key_path: ".keys/private_key.pem"  # Переопределить через JWT_PRIVATE_KEY_PATH
+  public_key_path: ".keys/public_key.pem"    # Переопределить через JWT_PUBLIC_KEY_PATH
+  key_rotation_hours: 24  # Автоматическая ротация ключей каждые 24 часа
+
+# CORS
+cors:
+  enabled: true
+  allow_origins:
+    - "http://localhost:4200"  # Admin UI
+  allow_credentials: true
+  allow_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "PATCH"
+  allow_headers:
+    - "*"
+
+# Rate Limiting
+rate_limit:
+  enabled: true
+  requests_per_minute: 60
+  burst: 10
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "json"  # json или text
+  log_file: null  # Путь к файлу лога, null для stdout
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+    port: 8000  # Metrics на /metrics основного приложения
+  opentelemetry:
+    enabled: true
+    service_name: "artstore-admin-module"
+    exporter_endpoint: null  # Для production: OTLP endpoint
+
+# Service Discovery (Redis-based)
+service_discovery:
+  enabled: true
+  redis_channel: "artstore:service_discovery"
+  publish_interval_seconds: 30
+  storage_element_config_key: "artstore:storage_elements"
+
+# Saga Orchestration
+saga:
+  enabled: true
+  timeout_seconds: 300
+  retry_attempts: 3
+  retry_backoff_seconds: 5
+
+# Health Checks
+health:
+  startup_timeout_seconds: 30
+  liveness_timeout_seconds: 5
+  readiness_timeout_seconds: 10
