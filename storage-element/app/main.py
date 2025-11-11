@@ -132,10 +132,10 @@ async def health_ready():
     return {"status": "ready"}
 
 
-# TODO: Подключить API routers
-# from app.api.v1 import files, admin
-# app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
-# app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+# Подключение API v1 router
+from app.api.v1.router import router as api_v1_router
+
+app.include_router(api_v1_router, prefix="/api/v1")
 
 
 if __name__ == "__main__":

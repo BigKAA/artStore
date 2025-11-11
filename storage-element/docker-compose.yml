@@ -1,0 +1,173 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # Storage Element Application
+  # ==========================================
+  storage-element:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: artstore_storage_element
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      # Application
+      APP_NAME: "Storage Element 01"
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "true"
+      APP_MODE: "edit"  # edit, rw, ro, ar
+
+      # Server
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8010"
+      SERVER_RELOAD: "true"
+      SERVER_WORKERS: "1"
+
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: artstore
+      DB_PASSWORD: password
+      DB_DATABASE: artstore_storage_01
+      DB_TABLE_PREFIX: storage_elem_01
+      DB_POOL_SIZE: 10
+      DB_MAX_OVERFLOW: 20
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+
+      # JWT
+      JWT_ALGORITHM: "RS256"
+      JWT_PUBLIC_KEY_PATH: "/app/.keys/public_key.pem"
+
+      # Storage
+      STORAGE_TYPE: "local"  # local или s3
+      STORAGE_LOCAL_BASE_PATH: "/app/.data/storage"
+      STORAGE_MAX_FILE_SIZE: "1073741824"  # 1GB
+
+      # S3 (если STORAGE_TYPE=s3)
+      # STORAGE_S3_ENDPOINT_URL: "http://minio:9000"
+      # STORAGE_S3_ACCESS_KEY: "minioadmin"
+      # STORAGE_S3_SECRET_KEY: "minioadmin"
+      # STORAGE_S3_BUCKET_NAME: "artstore-storage-01"
+      # STORAGE_S3_REGION: "us-east-1"
+
+      # Logging
+      LOG_LEVEL: "DEBUG"
+      LOG_FORMAT: "text"  # text для dev, json для production
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PATH: "/metrics"
+
+      # Health
+      HEALTH_LIVENESS_PATH: "/health/live"
+      HEALTH_READINESS_PATH: "/health/ready"
+    volumes:
+      # Persistent storage
+      - ./data/storage:/app/.data/storage
+      # JWT public key (должен быть скопирован из admin-module)
+      - ../admin-module/.keys/public_key.pem:/app/.keys/public_key.pem:ro
+      # Code для hot-reload (только для dev)
+      - ./app:/app/app
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - artstore-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ==========================================
+  # PostgreSQL Database
+  # ==========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: artstore_storage_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: artstore
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: artstore_storage_01
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # External port 5433 to avoid conflict with main postgres
+    networks:
+      - artstore-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artstore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # Redis Cache
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: artstore_storage_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6380:6379"  # External port 6380 to avoid conflict with main redis
+    networks:
+      - artstore-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ==========================================
+  # MinIO S3 Storage (Optional)
+  # ==========================================
+  # Uncomment если используете S3 storage
+  # minio:
+  #   image: minio/minio:latest
+  #   container_name: artstore_storage_minio
+  #   restart: unless-stopped
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   volumes:
+  #     - minio_data:/data
+  #   ports:
+  #     - "9010:9000"  # API
+  #     - "9011:9001"  # Console
+  #   networks:
+  #     - artstore-network
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+  #     interval: 30s
+  #     timeout: 20s
+  #     retries: 3
+
+# ==========================================
+# Networks
+# ==========================================
+networks:
+  artstore-network:
+    driver: bridge
+
+# ==========================================
+# Volumes
+# ==========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  # minio_data:
+  #   driver: local
