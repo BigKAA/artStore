@@ -4,6 +4,7 @@ Pytest fixtures для тестирования Admin Module.
 
 import pytest
 import asyncio
+import os
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
@@ -13,22 +14,26 @@ from pathlib import Path
 # Добавляем путь к app для импортов
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Настраиваем environment variables для тестов перед импортом конфигурации
+os.environ["JWT_PRIVATE_KEY_PATH"] = str(Path(__file__).resolve().parent.parent / ".keys/private_key.pem")
+os.environ["JWT_PUBLIC_KEY_PATH"] = str(Path(__file__).resolve().parent.parent / ".keys/public_key.pem")
+
 from app.models import Base
 from app.core.config import settings
 
 
-# Настройка event loop для async тестов
-@pytest.fixture(scope="session")
+# Настройка event loop для async тестов (function scope для compatibility)
+@pytest.fixture(scope="function")
 def event_loop():
-    """Создание event loop для всей сессии тестирования."""
+    """Создание event loop для каждой тестовой функции."""
     policy = asyncio.get_event_loop_policy()
     loop = policy.new_event_loop()
     yield loop
     loop.close()
 
 
-# Фикстура для тестовой базы данных
-@pytest.fixture(scope="session")
+# Фикстура для тестовой базы данных (function scope для async compatibility)
+@pytest.fixture(scope="function")
 async def test_engine():
     """
     Создание тестового database engine.
@@ -74,9 +79,8 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     )
 
     async with async_session() as session:
-        async with session.begin():
-            yield session
-            await session.rollback()
+        yield session
+        await session.rollback()
 
 
 @pytest.fixture
