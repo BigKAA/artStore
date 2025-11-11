@@ -184,6 +184,99 @@ class HealthSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="HEALTH_", case_sensitive=False, extra="allow")
 
 
+class InitialAdminSettings(BaseSettings):
+    """
+    Настройки для автоматического создания администратора при первом запуске.
+
+    При первом старте системы, если в БД нет пользователей, автоматически создается
+    учетная запись администратора с параметрами из этой конфигурации.
+
+    ВАЖНО: В production окружении ОБЯЗАТЕЛЬНО установить безопасный пароль через
+    environment variable INITIAL_ADMIN_PASSWORD.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        alias="INITIAL_ADMIN_ENABLED",
+        description="Включить автоматическое создание администратора"
+    )
+    username: str = Field(
+        default="admin",
+        alias="INITIAL_ADMIN_USERNAME",
+        description="Username администратора"
+    )
+    password: str = Field(
+        default="admin123",
+        alias="INITIAL_ADMIN_PASSWORD",
+        description="Пароль администратора (минимум 8 символов)"
+    )
+    email: str = Field(
+        default="admin@artstore.local",
+        alias="INITIAL_ADMIN_EMAIL",
+        description="Email администратора"
+    )
+    firstname: str = Field(
+        default="System",
+        alias="INITIAL_ADMIN_FIRSTNAME",
+        description="Имя администратора"
+    )
+    lastname: str = Field(
+        default="Administrator",
+        alias="INITIAL_ADMIN_LASTNAME",
+        description="Фамилия администратора"
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="INITIAL_ADMIN_",
+        case_sensitive=False,
+        extra="allow"
+    )
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        """
+        Валидация минимальной сложности пароля.
+
+        Args:
+            v: Пароль для валидации
+
+        Returns:
+            str: Валидированный пароль
+
+        Raises:
+            ValueError: Если пароль слишком короткий
+        """
+        if len(v) < 8:
+            raise ValueError("Initial admin password must be at least 8 characters")
+        return v
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        """
+        Валидация username.
+
+        Args:
+            v: Username для валидации
+
+        Returns:
+            str: Валидированный username
+
+        Raises:
+            ValueError: Если username пустой или содержит недопустимые символы
+        """
+        if not v or not v.strip():
+            raise ValueError("Initial admin username cannot be empty")
+
+        # Проверка на допустимые символы (alphanumeric + underscore + dash)
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError("Initial admin username can only contain alphanumeric characters, underscore and dash")
+
+        return v.strip()
+
+
 class Settings(BaseSettings):
     """Главные настройки приложения."""
 
@@ -206,6 +299,7 @@ class Settings(BaseSettings):
     service_discovery: ServiceDiscoverySettings = Field(default_factory=ServiceDiscoverySettings)
     saga: SagaSettings = Field(default_factory=SagaSettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
+    initial_admin: InitialAdminSettings = Field(default_factory=InitialAdminSettings)
 
     model_config = SettingsConfigDict(
         env_file=".env",
