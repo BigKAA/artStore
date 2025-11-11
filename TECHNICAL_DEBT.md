@@ -214,6 +214,129 @@ userPassword: {SSHA}...
 
 ---
 
+### [HIGH] Автоматическое создание администратора при первом запуске
+
+**Модуль**: admin-module
+**Дата добавления**: 2025-01-11
+**Оценка сложности**: средняя
+**Описание**:
+- При первом запуске системы необходимо автоматически создавать администратора для начальной настройки
+- Параметры администратора должны быть настраиваемы через конфигурацию
+- Создание должно происходить только если в базе данных нет пользователей
+- Необходимо логировать факт создания администратора для аудита
+
+**План устранения**:
+1. Добавить `InitialAdminSettings` в `app/core/config.py`:
+   ```python
+   class InitialAdminSettings(BaseSettings):
+       """Настройки для автоматического создания администратора при первом запуске."""
+
+       enabled: bool = Field(default=True, alias="INITIAL_ADMIN_ENABLED")
+       username: str = Field(default="admin", alias="INITIAL_ADMIN_USERNAME")
+       password: str = Field(default="admin123", alias="INITIAL_ADMIN_PASSWORD")
+       email: str = Field(default="admin@artstore.local", alias="INITIAL_ADMIN_EMAIL")
+       firstname: str = Field(default="System", alias="INITIAL_ADMIN_FIRSTNAME")
+       lastname: str = Field(default="Administrator", alias="INITIAL_ADMIN_LASTNAME")
+
+       model_config = SettingsConfigDict(env_prefix="INITIAL_ADMIN_", case_sensitive=False, extra="allow")
+
+       @field_validator("password")
+       @classmethod
+       def validate_password_strength(cls, v: str) -> str:
+           """Валидация минимальной сложности пароля."""
+           if len(v) < 8:
+               raise ValueError("Initial admin password must be at least 8 characters")
+           return v
+   ```
+
+2. Добавить `initial_admin` поле в класс `Settings`:
+   ```python
+   initial_admin: InitialAdminSettings = Field(default_factory=InitialAdminSettings)
+   ```
+
+3. Создать startup функцию в `app/db/init_db.py`:
+   ```python
+   async def create_initial_admin(settings: Settings, db: AsyncSession) -> None:
+       """
+       Создание начального администратора при первом запуске.
+
+       Выполняется только если:
+       - initial_admin.enabled = True
+       - В базе данных нет пользователей
+       """
+       # Check if any users exist
+       result = await db.execute(select(func.count()).select_from(User))
+       user_count = result.scalar()
+
+       if user_count == 0 and settings.initial_admin.enabled:
+           # Create initial admin
+           logger.info("No users found, creating initial administrator")
+           # Implementation...
+   ```
+
+4. Интегрировать в lifespan context в `app/main.py`:
+   ```python
+   @asynccontextmanager
+   async def lifespan(app: FastAPI):
+       # Database initialization
+       await init_db()
+
+       # Create initial admin if needed
+       async with AsyncSessionLocal() as db:
+           await create_initial_admin(settings, db)
+
+       yield
+
+       await close_db()
+   ```
+
+5. Добавить environment variables в `.env.example`:
+   ```bash
+   # Initial Administrator (created on first startup)
+   INITIAL_ADMIN_ENABLED=true
+   INITIAL_ADMIN_USERNAME=admin
+   INITIAL_ADMIN_PASSWORD=ChangeMe123!  # ОБЯЗАТЕЛЬНО ИЗМЕНИТЬ В PRODUCTION
+   INITIAL_ADMIN_EMAIL=admin@artstore.local
+   INITIAL_ADMIN_FIRSTNAME=System
+   INITIAL_ADMIN_LASTNAME=Administrator
+   ```
+
+6. Добавить unit tests:
+   ```python
+   # tests/unit/test_initial_admin.py
+   async def test_create_initial_admin_when_no_users()
+   async def test_skip_initial_admin_when_users_exist()
+   async def test_skip_initial_admin_when_disabled()
+   async def test_validate_password_strength()
+   ```
+
+7. Обновить документацию:
+   - `admin-module/README.md` - секция "First-time Setup"
+   - `CLAUDE.md` - добавить в Testing Credentials
+   - Docker healthcheck проверяет наличие admin пользователя
+
+**Связанные файлы**:
+- Изменить: `admin-module/app/core/config.py` - добавить InitialAdminSettings
+- Создать: `admin-module/app/db/init_db.py` - create_initial_admin функция
+- Изменить: `admin-module/app/main.py` - интегрировать в lifespan
+- Изменить: `admin-module/.env.example` - добавить INITIAL_ADMIN_* переменные
+- Изменить: `admin-module/README.md` - документировать first-time setup
+- Создать: `admin-module/tests/unit/test_initial_admin.py` - тесты
+- Изменить: `CLAUDE.md` - обновить Testing Credentials секцию
+
+**Требования безопасности**:
+- Дефолтный пароль должен быть достаточно сложным (минимум 8 символов)
+- В production ОБЯЗАТЕЛЬНО должен быть изменен через environment variables
+- Факт создания администратора логируется в audit log
+- После создания рекомендуется сменить пароль через API
+- Docker образ НЕ должен содержать production пароль в Dockerfile
+
+**Ссылки**:
+- [CLAUDE.md:367](file:///home/artur/Projects/artStore/CLAUDE.md#L367) - Testing Credentials
+- [admin-module/app/core/config.py](file:///home/artur/Projects/artStore/admin-module/app/core/config.py) - Конфигурация
+
+---
+
 ### [MEDIUM] pytest-asyncio Dependency
 
 **Модуль**: admin-module
@@ -316,5 +439,5 @@ userPassword: {SSHA}...
 
 ---
 
-**Последнее обновление**: 2025-01-10
-**Общее количество долгов**: 7 (2 CRITICAL, 3 HIGH, 2 LOW)
+**Последнее обновление**: 2025-01-11
+**Общее количество долгов**: 8 (2 CRITICAL, 4 HIGH, 2 LOW, 0 MEDIUM)
