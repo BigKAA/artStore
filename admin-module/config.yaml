@@ -118,3 +118,12 @@ health:
   startup_timeout_seconds: 30
   liveness_timeout_seconds: 5
   readiness_timeout_seconds: 10
+
+# Initial Administrator (auto-created on first startup)
+initial_admin:
+  enabled: true
+  username: "admin"
+  password: "admin123"  # ВАЖНО: Изменить в production через INITIAL_ADMIN_PASSWORD
+  email: "admin@artstore.local"
+  firstname: "System"
+  lastname: "Administrator"

@@ -392,6 +392,10 @@ class Settings(BaseSettings):
         if "health" in yaml_data:
             flat_config["health"] = HealthSettings(**yaml_data["health"])
 
+        # Initial Admin settings
+        if "initial_admin" in yaml_data:
+            flat_config["initial_admin"] = InitialAdminSettings(**yaml_data["initial_admin"])
+
         return cls(**flat_config)
 
 
