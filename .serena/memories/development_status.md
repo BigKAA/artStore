@@ -1,14 +1,14 @@
 # ArtStore Development Status
 
-**Last Updated**: 2025-01-10
+**Last Updated**: 2025-01-11
 
 ## Project Overview
 Распределенная система файлового хранилища с микросервисной архитектурой для долгосрочного хранения документов.
 
 ## Module Status
 
-### Admin Module ✅ 95% Complete
-**Status**: Core functionality complete, minor technical debt remains
+### Admin Module ✅ 96% Complete
+**Status**: Core functionality complete, LDAP structure ready, services pending
 
 #### Completed Features
 - ✅ JWT Authentication (RS256) with access/refresh tokens
@@ -22,13 +22,16 @@
 - ✅ Comprehensive test coverage (96.5% pass rate)
 - ✅ Docker containerization with multi-stage build
 - ✅ Prometheus metrics endpoint
+- ✅ **LDAP Directory Structure** - Base structure and test users created
 
 #### In Progress
-- 🔄 LDAP/AD integration (code exists, needs LDIF structure)
+- 🔄 LDAP/AD integration (structure ready, services pending)
 - 🔄 Password reset functionality (stub implementation)
 - 🔄 API endpoint integration tests (3/9 tests need fixing)
 
 #### Pending Features
+- ⏳ LDAP Services (LDAPAuthService, LDAPSyncService, GroupMappingService)
+- ⏳ Database migration for LDAP support (User.source, User.ldap_dn, User.last_sync_at)
 - ⏳ Saga orchestrator for distributed transactions
 - ⏳ Storage element configuration publishing to Redis
 - ⏳ Webhook management system
@@ -43,8 +46,8 @@
 - **Integration Tests**: 13/13 AuthService passing (100%)
 - **API Endpoint Tests**: 6/9 passing (67%, documented as technical debt)
 
-### Storage Element ✅ 65% Complete
-**Status**: Phase 1 infrastructure complete, Phase 2 services pending
+### Storage Element ✅ 70% Complete
+**Status**: Phase 1 infrastructure complete, Phase 2 85% complete, Docker pending
 
 #### Phase 1 - Core Infrastructure ✅ 100% Complete
 - ✅ Project structure with proper separation of concerns
@@ -59,13 +62,15 @@
 - ✅ PostgreSQL full-text search indexes (TSVECTOR + GIN)
 - ✅ JSONB metadata with GIN indexes
 
-#### Phase 2 - Services Layer 🔄 In Progress
-- ⏳ Utils: file_naming.py, attr_utils.py
-- ⏳ Services: wal_service.py, storage_service.py, file_service.py
-- ⏳ API: deps/auth.py, endpoints/files.py, endpoints/admin.py
-- ⏳ Docker: Dockerfile, docker-compose.yml
+#### Phase 2 - Services Layer ✅ 85% Complete
+- ✅ Utils: file_naming.py, attr_utils.py
+- ✅ Services: wal_service.py, storage_service.py, file_service.py
+- ✅ API: deps/auth.py, endpoints/files.py
+- ✅ Health endpoints (in main.py)
+- ⏳ API: v1/router.py (pending)
+- ⏳ Docker: Dockerfile, docker-compose.yml (pending)
 
-#### Phase 3 - Testing & Production 🔄 Not Started
+#### Phase 3 - Testing & Production ⏳ Not Started
 - ⏳ Unit tests for all services
 - ⏳ Integration tests for API endpoints
 - ⏳ Alembic database migrations
@@ -129,8 +134,16 @@
 - ✅ PostgreSQL (docker-compose)
 - ✅ Redis (docker-compose)
 - ✅ MinIO (docker-compose)
-- ✅ LDAP (docker-compose)
+- ✅ LDAP (docker-compose) - **Structure loaded**
 - ✅ PgAdmin (docker-compose)
+
+### LDAP Infrastructure ✅ Complete
+- ✅ Base directory structure (ou=users, ou=dismissed, ou=Groups)
+- ✅ Service account (cn=readonly)
+- ✅ Groups (artstore-admins, artstore-operators, artstore-users)
+- ✅ Test users (ivanov, petrov, sidorov)
+- ✅ Group memberships configured
+- ✅ Authentication tested
 
 ### Pending Infrastructure
 - ⏳ Redis Cluster (HA with 6+ nodes)
@@ -157,28 +170,30 @@
 - **Storage Element Phase 1** - Core infrastructure
 
 ### Week 3 (Current) 🔄
-- **Storage Element Phase 2** - Services implementation
-- LDAP integration completion
-- Password reset implementation
-- API endpoint test fixes
+- **Storage Element Phase 2** - Services implementation (85% done)
+- **LDAP Integration** - Directory structure complete (100% done)
+- Password reset implementation (pending)
+- API endpoint test fixes (pending)
 
 ### Week 4 (Planned)
 - Storage Element Phase 3 - Testing & Docker
+- LDAP Services implementation (Auth, Sync, Mapping)
+- Database migration for LDAP support
 - Ingester Module core implementation
 - Query Module core implementation
 - Service Discovery via Redis
 
 ## Technical Debt Summary
 
-### Critical (2 items)
-1. ~~JSON Logging Migration~~ ✅ **RESOLVED** - Storage Element uses JSON by default
-2. LDAP LDIF Structure - Create base-structure.ldif and test-users.ldif
+### Critical (1 item)
+1. ~~LDAP LDIF Structure~~ ✅ **RESOLVED** - Structure created and loaded
 
-### High Priority (4 items)
-1. API Endpoint Integration Tests - Fix dependency injection for test database
-2. Password Reset Implementation - Redis + email service integration
-3. pytest-asyncio Dependency - Add to requirements.txt
-4. **Storage Element Phase 2** - Services, API endpoints, Docker
+### High Priority (5 items)
+1. **LDAP Services Implementation** - LDAPAuthService, LDAPSyncService, GroupMappingService
+2. **Database Migration for LDAP** - Add User.source, User.ldap_dn, User.last_sync_at fields
+3. API Endpoint Integration Tests - Fix dependency injection for test database
+4. Password Reset Implementation - Redis + email service integration
+5. **Storage Element Phase 2 Completion** - Router, Dockerfile, docker-compose.yml
 
 ### Low Priority (2 items)
 1. Enhanced Test Coverage - Edge cases, security, performance tests
@@ -190,8 +205,17 @@
 - RS256 asymmetric JWT tokens (30min access, 7 days refresh)
 - bcrypt password hashing with salt
 - **Local validation** через публичный ключ (no network calls)
-- LDAP/AD integration for enterprise authentication
+- **LDAP/AD integration** - Read-only access, live bind authentication
+- **Dual User Store** - LOCAL users (full CRUD) + LDAP users (read-only + auth)
 - Multi-factor authentication planned for admin accounts
+
+### LDAP Integration Architecture
+- **Read-only LDAP access** - Принцип наименьших привилегий
+- **Live LDAP bind** - Аутентификация без кеширования паролей
+- **Periodic sync** - Metadata sync каждые 15 минут
+- **Group mapping** - LDAP groups → ArtStore roles (ADMIN, OPERATOR, USER)
+- **Deactivation** - Перемещение в ou=dismissed за пределами search base
+- **Service account** - cn=readonly для синхронизации
 
 ### Data Consistency
 - **Attribute files (*.attr.json)** as single source of truth
@@ -222,36 +246,75 @@
 
 ## Next Immediate Actions
 
-1. **Storage Element Phase 2** - Critical Path:
-   - Create utils (file_naming.py, attr_utils.py)
-   - Implement services (wal_service.py, storage_service.py, file_service.py)
-   - Build API endpoints (files, admin, health)
-   - Docker containerization
+### Priority 1: Storage Element Phase 2 Completion
+1. Создать api/v1/router.py
+2. Обновить main.py для подключения router
+3. Создать Dockerfile (multi-stage build)
+4. Создать docker-compose.yml
 
-2. **Create LDAP LDIF files** - Base structure and test users
+### Priority 2: LDAP Integration Services
+5. Создать Alembic migration для LDAP полей
+6. Обновить User model (source, ldap_dn, last_sync_at)
+7. Реализовать LDAPAuthService
+8. Реализовать LDAPSyncService
+9. Реализовать GroupMappingService
+10. Интегрировать в AuthService
 
-3. **Fix API endpoint tests** - Implement dependency injection
-
-4. **Start Ingester implementation** - File upload and management
+### Priority 3: Testing & Quality
+11. Fix API endpoint integration tests
+12. Implement password reset functionality
+13. LDAP integration tests
+14. Storage Element Phase 3 - Unit tests
 
 ## Session Management
-- **Last Session**: checkpoint_storage_element_phase1_complete
+- **Last Session**: session_20250111_ldap_structure_complete
 - **Checkpoint Frequency**: Every major phase completion
-- **Memory Files**: 14 active memories tracking project state
+- **Memory Files**: 17 active memories tracking project state
 
 ## Progress Metrics
 
-### Overall Progress: 42%
-- Admin Module: 95%
-- Storage Element: 65%
+### Overall Progress: 45%
+- Admin Module: 96% (+1% LDAP structure)
+- Storage Element: 70% (+5% Phase 2 progress)
 - Ingester Module: 10%
 - Query Module: 10%
 - Admin UI: 0%
-- Infrastructure: 30%
+- Infrastructure: 35% (+5% LDAP setup)
 
 ### Code Statistics
-- **Total Files**: ~85 files
-- **Lines of Code**: ~3500 LOC
+- **Total Files**: ~92 files (+7 for LDAP)
+- **Lines of Code**: ~3800 LOC
 - **Test Coverage**: Admin (96.5%), Storage Element (0%, Phase 3)
 - **Database Models**: 6 models (Admin: 3, Storage: 3)
 - **API Endpoints**: ~15 endpoints implemented
+- **LDAP Records**: 7 (3 users + 3 groups + 1 service account)
+
+## LDAP Integration Status
+
+### Directory Structure ✅ Complete
+```
+dc=artstore,dc=local
+├── ou=users (3 test users)
+├── ou=dismissed (deactivation target)
+├── ou=Groups (3 groups with role mapping)
+└── cn=readonly (service account)
+```
+
+### Test Users ✅ Ready
+- **ivanov** (test123) → artstore-admins → ADMIN role
+- **petrov** (test123) → artstore-operators → OPERATOR role
+- **sidorov** (test123) → artstore-users → USER role
+
+### Pending LDAP Work
+- ⏳ LDAPAuthService (authentication via live bind)
+- ⏳ LDAPSyncService (periodic metadata sync)
+- ⏳ GroupMappingService (LDAP groups → ArtStore roles)
+- ⏳ Database migration (User.source, User.ldap_dn, User.last_sync_at)
+- ⏳ API endpoints (POST /api/users/me/password, POST /api/ldap/sync)
+- ⏳ LDAP configuration в config.yaml
+- ⏳ Integration tests
+
+### LDAP Files Location
+- **Directory**: `.ldap/`
+- **Files**: base-structure-final.ldif, test-users.ldif, README.md
+- **Documentation**: Complete setup and troubleshooting guide

@@ -1,0 +1,65 @@
+# ArtStore LDAP Base Structure
+# Базовая структура директории для интеграции с Admin Module
+#
+# Инструкции по загрузке:
+# docker exec -i artstore_ldap ldapadd -x -D "cn=Directory Manager" -w password < base-structure.ldif
+
+# Organizational Units
+# OU для активных пользователей (search base)
+dn: ou=users,dc=artstore,dc=local
+objectClass: top
+objectClass: organizationalUnit
+ou: users
+description: Active users
+
+# OU для деактивированных пользователей (за пределами search base)
+dn: ou=dismissed,dc=artstore,dc=local
+objectClass: top
+objectClass: organizationalUnit
+ou: dismissed
+description: Dismissed/deactivated users
+
+# OU для групп
+dn: ou=groups,dc=artstore,dc=local
+objectClass: top
+objectClass: organizationalUnit
+ou: groups
+description: User groups
+
+# Service Accounts
+# Read-only аккаунт для синхронизации Admin Module
+dn: cn=readonly,dc=artstore,dc=local
+objectClass: top
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: readonly
+userPassword: readonly_secret_password
+description: Read-only account for ArtStore sync
+
+# Groups
+# Группа администраторов (маппинг на ADMIN role)
+dn: cn=artstore-admins,ou=groups,dc=artstore,dc=local
+objectClass: top
+objectClass: groupOfNames
+cn: artstore-admins
+description: ArtStore Administrators
+# Placeholder member (groupOfNames требует хотя бы 1 member)
+member: cn=readonly,dc=artstore,dc=local
+
+# Группа операторов (маппинг на OPERATOR role)
+dn: cn=artstore-operators,ou=groups,dc=artstore,dc=local
+objectClass: top
+objectClass: groupOfNames
+cn: artstore-operators
+description: ArtStore Operators
+# Placeholder member
+member: cn=readonly,dc=artstore,dc=local
+
+# Группа обычных пользователей (маппинг на USER role)
+dn: cn=artstore-users,ou=groups,dc=artstore,dc=local
+objectClass: top
+objectClass: groupOfNames
+cn: artstore-users
+description: ArtStore Users
+# Placeholder member
+member: cn=readonly,dc=artstore,dc=local
