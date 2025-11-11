@@ -12,8 +12,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.models.user import User
-from app.services.auth_service import hash_password
+from app.models.user import User, UserRole, UserStatus
+from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -58,18 +58,18 @@ async def create_initial_admin(settings: Settings, db: AsyncSession) -> None:
         )
 
         # Хеширование пароля
-        password_hash = hash_password(settings.initial_admin.password)
+        password_hash = AuthService.hash_password(settings.initial_admin.password)
 
         # Создание User объекта
         admin_user = User(
             username=settings.initial_admin.username,
-            password_hash=password_hash,
+            hashed_password=password_hash,
             email=settings.initial_admin.email,
-            firstname=settings.initial_admin.firstname,
-            lastname=settings.initial_admin.lastname,
-            role="admin",  # Административная роль
-            is_active=True,
-            email_verified=True  # Email автоматически верифицирован для initial admin
+            first_name=settings.initial_admin.firstname,
+            last_name=settings.initial_admin.lastname,
+            role=UserRole.ADMIN,  # Административная роль
+            status=UserStatus.ACTIVE,
+            is_system=True  # System admin не может быть удален
         )
 
         db.add(admin_user)

@@ -10,9 +10,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from app.core.config import settings
-from app.core.database import init_db, close_db, check_db_connection
+from app.core.database import init_db, close_db, check_db_connection, get_db
 from app.core.redis import close_redis, check_redis_connection, service_discovery
 from app.core.logging_config import setup_logging, get_logger
+from app.db.init_db import create_initial_admin
 from app.api.v1.endpoints import health, auth
 
 # Настройка логирования (JSON формат по умолчанию)
@@ -33,6 +34,14 @@ async def lifespan(app: FastAPI):
         # Инициализация базы данных
         await init_db()
         logger.info("Database initialized")
+
+        # Создание initial admin пользователя (если необходимо)
+        async for db in get_db():
+            try:
+                await create_initial_admin(settings, db)
+            finally:
+                await db.close()
+            break  # Получаем только одну сессию
 
         # Проверка подключений
         db_ok = await check_db_connection()

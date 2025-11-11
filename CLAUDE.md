@@ -422,10 +422,23 @@ environment:
 
 ## Testing Credentials
 
-**Default Admin User**:
-- Username: `admin`
-- Password: `admin123`
-- Change in production!
+**Initial Admin User (Auto-created on first startup)**:
+- Username: `admin` (configurable via `INITIAL_ADMIN_USERNAME`)
+- Password: `admin123` (configurable via `INITIAL_ADMIN_PASSWORD`)
+- Email: `admin@artstore.local` (configurable via `INITIAL_ADMIN_EMAIL`)
+- **ВАЖНО**: Автоматически создается при первом запуске если в БД нет пользователей
+- **ВАЖНО**: Имеет флаг `is_system=True` - не может быть удален через API
+- **ВАЖНО**: В production ОБЯЗАТЕЛЬНО изменить пароль через environment variable!
+
+**Configuration (`.env`):**
+```bash
+INITIAL_ADMIN_ENABLED=true  # Отключить автосоздание можно установив false
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=admin123  # ИЗМЕНИТЬ В PRODUCTION!
+INITIAL_ADMIN_EMAIL=admin@artstore.local
+INITIAL_ADMIN_FIRSTNAME=System
+INITIAL_ADMIN_LASTNAME=Administrator
+```
 
 **Infrastructure Credentials**:
 - PostgreSQL: artstore / password
