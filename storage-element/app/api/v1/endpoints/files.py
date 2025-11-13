@@ -15,9 +15,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, OperatorUser, get_db
+from app.api.deps import get_db, get_current_user, require_operator_or_admin
+from app.core.security import UserContext
 from app.core.config import settings, StorageMode
-from app.core.exceptions import FileOperationException, StorageException
+from app.core.exceptions import StorageException
 from app.models.file_metadata import FileMetadata
 from app.services.file_service import FileService
 
@@ -79,8 +80,8 @@ async def upload_file(
     file: UploadFile = File(..., description="Файл для загрузки"),
     description: Optional[str] = Form(None, description="Описание содержимого"),
     version: Optional[str] = Form(None, description="Версия документа"),
-    user: CurrentUser = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user)
 ):
     """
     Загрузить файл в хранилище.
@@ -147,7 +148,7 @@ async def upload_file(
             message="File uploaded successfully"
         )
 
-    except FileOperationException as e:
+    except StorageException as e:
         logger.error(
             f"File upload failed: {e.message}",
             extra={"error_code": e.error_code, "details": e.details}
@@ -172,8 +173,8 @@ async def upload_file(
 )
 async def get_file_metadata(
     file_id: UUID,
-    user: CurrentUser = Depends(),
-    db: AsyncSession = Depends(get_db)
+    user: UserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Получить метаданные файла.
@@ -232,8 +233,8 @@ async def get_file_metadata(
 )
 async def download_file(
     file_id: UUID,
-    user: CurrentUser = Depends(),
-    db: AsyncSession = Depends(get_db)
+    user: UserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Скачать файл (streaming).
@@ -286,7 +287,7 @@ async def download_file(
 
     except HTTPException:
         raise
-    except FileOperationException as e:
+    except StorageException as e:
         if e.error_code == "FILE_NOT_FOUND":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -312,8 +313,8 @@ async def download_file(
 )
 async def delete_file(
     file_id: UUID,
-    operator: OperatorUser = Depends(),
-    db: AsyncSession = Depends(get_db)
+    operator: UserContext = Depends(require_operator_or_admin),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Удалить файл из хранилища.
@@ -357,7 +358,7 @@ async def delete_file(
 
         return None  # 204 No Content
 
-    except FileOperationException as e:
+    except StorageException as e:
         if e.error_code == "FILE_NOT_FOUND":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -384,8 +385,8 @@ async def delete_file(
 async def update_file_metadata(
     file_id: UUID,
     update_data: FileUpdateRequest,
-    user: CurrentUser = Depends(),
-    db: AsyncSession = Depends(get_db)
+    user: UserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Обновить метаданные файла.
@@ -447,7 +448,7 @@ async def update_file_metadata(
             checksum=metadata.checksum
         )
 
-    except FileOperationException as e:
+    except StorageException as e:
         if e.error_code == "FILE_NOT_FOUND":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -474,8 +475,8 @@ async def update_file_metadata(
 async def list_files(
     skip: int = 0,
     limit: int = 100,
-    user: CurrentUser = Depends(),
-    db: AsyncSession = Depends(get_db)
+    user: UserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Получить список файлов с пагинацией.

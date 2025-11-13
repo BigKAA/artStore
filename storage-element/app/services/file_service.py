@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import FileOperationException, StorageException, WALException
+from app.core.exceptions import StorageException, WALException
 from app.models.file_metadata import FileMetadata
 from app.models.wal import WALOperationType
 from app.services.storage_service import StorageService, get_storage_service
@@ -121,7 +121,7 @@ class FileService:
             UUID: file_id созданного файла
 
         Raises:
-            FileOperationException: Ошибка создания файла
+            StorageException: Ошибка создания файла
 
         Примеры:
             >>> with open("document.pdf", "rb") as f:
@@ -291,7 +291,7 @@ class FileService:
             except Exception as db_error:
                 logger.error(f"Failed to rollback database: {db_error}")
 
-            raise FileOperationException(
+            raise StorageException(
                 message="Failed to create file",
                 error_code="FILE_CREATE_FAILED",
                 details={
@@ -315,7 +315,7 @@ class FileService:
             bytes: Chunk данных файла
 
         Raises:
-            FileOperationException: Файл не найден или ошибка чтения
+            StorageException: Файл не найден или ошибка чтения
         """
         try:
             # Получение метаданных из DB cache
@@ -325,7 +325,7 @@ class FileService:
             metadata = result.scalar_one_or_none()
 
             if not metadata:
-                raise FileOperationException(
+                raise StorageException(
                     message=f"File not found: {file_id}",
                     error_code="FILE_NOT_FOUND",
                     details={"file_id": str(file_id)}
@@ -346,7 +346,7 @@ class FileService:
                 }
             )
 
-        except FileOperationException:
+        except StorageException:
             raise
         except Exception as e:
             logger.error(
@@ -356,7 +356,7 @@ class FileService:
                     "error": str(e)
                 }
             )
-            raise FileOperationException(
+            raise StorageException(
                 message="Failed to retrieve file",
                 error_code="FILE_RETRIEVE_FAILED",
                 details={"file_id": str(file_id), "error": str(e)}
@@ -382,7 +382,7 @@ class FileService:
             user_id: User ID инициатора удаления
 
         Raises:
-            FileOperationException: Файл не найден или ошибка удаления
+            StorageException: Файл не найден или ошибка удаления
         """
         transaction_id = None
 
@@ -394,7 +394,7 @@ class FileService:
             metadata = result.scalar_one_or_none()
 
             if not metadata:
-                raise FileOperationException(
+                raise StorageException(
                     message=f"File not found: {file_id}",
                     error_code="FILE_NOT_FOUND",
                     details={"file_id": str(file_id)}
@@ -447,7 +447,7 @@ class FileService:
                 }
             )
 
-        except FileOperationException:
+        except StorageException:
             # Rollback WAL
             if transaction_id:
                 try:
@@ -472,7 +472,7 @@ class FileService:
                 except Exception as wal_error:
                     logger.error(f"WAL rollback failed: {wal_error}")
 
-            raise FileOperationException(
+            raise StorageException(
                 message="Failed to delete file",
                 error_code="FILE_DELETE_FAILED",
                 details={"file_id": str(file_id), "error": str(e)}
@@ -532,7 +532,7 @@ class FileService:
             metadata: Новые дополнительные метаданные (опционально)
 
         Raises:
-            FileOperationException: Ошибка обновления метаданных
+            StorageException: Ошибка обновления метаданных
         """
         transaction_id = None
 
@@ -544,7 +544,7 @@ class FileService:
             db_metadata = result.scalar_one_or_none()
 
             if not db_metadata:
-                raise FileOperationException(
+                raise StorageException(
                     message=f"File not found: {file_id}",
                     error_code="FILE_NOT_FOUND",
                     details={"file_id": str(file_id)}
@@ -613,7 +613,7 @@ class FileService:
                 }
             )
 
-        except FileOperationException:
+        except StorageException:
             # Rollback WAL
             if transaction_id:
                 try:
@@ -643,7 +643,7 @@ class FileService:
             except Exception as db_error:
                 logger.error(f"DB rollback failed: {db_error}")
 
-            raise FileOperationException(
+            raise StorageException(
                 message="Failed to update file metadata",
                 error_code="FILE_UPDATE_FAILED",
                 details={"file_id": str(file_id), "error": str(e)}
