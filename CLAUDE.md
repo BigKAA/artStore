@@ -54,10 +54,9 @@ ArtStore - это распределенная система файлового
 **Data Consistency Framework**: Система обеспечивает строгую консистентность данных через:
 - **Saga Pattern**: Для долгосрочных операций с файлами (загрузка → валидация → индексация)
 - **Two-Phase Commit**: Для критических операций изменения метаданных и смены режимов
-- **Vector Clocks**: Глобальное упорядочивание событий между распределенными компонентами
 - **Write-Ahead Log**: Атомарность операций записи файлов и атрибутов
-- **CRDT**: Conflict-free Replicated Data Types для метаданных, изменяемых независимо
 - **Automatic Reconciliation**: Автоматическое восстановление консистентности при расхождениях
+- **Template Schema**: Гибкая эволюция метаданных без breaking changes через schema versioning
 
 **Performance Optimization Framework**: Комплексная стратегия повышения производительности:
 - **Multi-Level Caching**: CDN → Redis Cluster → Local Cache → Database Cache
@@ -149,18 +148,20 @@ docker exec -it artstore_postgres psql -U artstore -d artstore
 - **Multi-Master Active-Active**: Consistent hashing для распределения нагрузки
 - **Zero-Downtime Operations**: Rolling updates и graceful failover (RTO < 15 сек)
 - **JWT token generation (RS256)** с распределенной валидацией через публичный ключ
-- **LDAP/AD Integration**: Аутентификация через корпоративный LDAP с mapping групп на роли
+- **Service Account Management**: OAuth 2.0 Client Credentials для machine-to-machine аутентификации
+- **Automated Secret Rotation**: Ротация client secrets каждые 90 дней
 - **Saga Orchestrator**: Координация распределенных транзакций (Upload, Delete, Transfer файлов)
 - **Conflict Resolution**: Автоматическое обнаружение и устранение несоответствий между attr.json и DB cache
-- User and storage element management
+- Service account and storage element management
 - Service Discovery publishing to Redis Sentinel Cluster
 - Webhook management для уведомлений о событиях (file_restored, restore_failed, file_expiring)
 - Prometheus metrics endpoint
 
 **Key APIs**:
-- `/api/auth/*` - Authentication endpoints (login, JWT refresh, LDAP integration)
-- `/api/users/*` - User management и LDAP mapping
-- `/api/users/{id}/webhooks` - Webhook configuration для пользователей
+- `/api/auth/token` - OAuth 2.0 Client Credentials authentication (client_id + client_secret → JWT)
+- `/api/service-accounts/*` - Service account management (CRUD operations)
+- `/api/service-accounts/{id}/rotate-secret` - Manual secret rotation
+- `/api/service-accounts/{id}/webhooks` - Webhook configuration для service accounts
 - `/api/storage-elements/*` - Storage element management
 - `/api/transactions/*` - Saga orchestration status и compensating actions
 - `/api/batch/*` - Batch operations (upload, delete до 100 файлов / 1GB)
@@ -262,9 +263,8 @@ async_replication:
 - **Load Balanced Cluster**: Множественные узлы за Load Balancer для высокой доступности
 - **Circuit Breaker Pattern**: Автоматическое отключение недоступных storage-element
 - **Redis Cluster Integration**: HA подключение к Service Discovery
-- **Consistent Queries**: Поиск с учетом Vector Clock для консистентности
-- **Conflict Detection**: Обнаружение конфликтов между storage-element
-- **Read Consistency**: Гарантии согласованности при чтении
+- **Read Consistency**: Гарантии согласованности при чтении через WAL + Saga Pattern
+- **Automatic Reconciliation**: Обнаружение и устранение несоответствий метаданных
 - File search by metadata with full-text capabilities
 - Optimized file download with resumable transfers
 - Digital signature verification
@@ -422,22 +422,33 @@ environment:
 
 ## Testing Credentials
 
-**Initial Admin User (Auto-created on first startup)**:
-- Username: `admin` (configurable via `INITIAL_ADMIN_USERNAME`)
-- Password: `admin123` (configurable via `INITIAL_ADMIN_PASSWORD`)
-- Email: `admin@artstore.local` (configurable via `INITIAL_ADMIN_EMAIL`)
-- **ВАЖНО**: Автоматически создается при первом запуске если в БД нет пользователей
+**Initial Service Account (Auto-created on first startup)**:
+- Name: `admin-service` (configurable via `INITIAL_ACCOUNT_NAME`)
+- Client ID: Auto-generated UUID (configurable via `INITIAL_CLIENT_ID`)
+- Client Secret: Auto-generated secure string (configurable via `INITIAL_CLIENT_SECRET`)
+- Role: `ADMIN` (full permissions)
+- **ВАЖНО**: Автоматически создается при первом запуске если в БД нет service accounts
 - **ВАЖНО**: Имеет флаг `is_system=True` - не может быть удален через API
-- **ВАЖНО**: В production ОБЯЗАТЕЛЬНО изменить пароль через environment variable!
+- **ВАЖНО**: В production ОБЯЗАТЕЛЬНО изменить client_secret через environment variable!
 
 **Configuration (`.env`):**
 ```bash
-INITIAL_ADMIN_ENABLED=true  # Отключить автосоздание можно установив false
-INITIAL_ADMIN_USERNAME=admin
-INITIAL_ADMIN_PASSWORD=admin123  # ИЗМЕНИТЬ В PRODUCTION!
-INITIAL_ADMIN_EMAIL=admin@artstore.local
-INITIAL_ADMIN_FIRSTNAME=System
-INITIAL_ADMIN_LASTNAME=Administrator
+INITIAL_ACCOUNT_ENABLED=true  # Отключить автосоздание можно установив false
+INITIAL_ACCOUNT_NAME=admin-service
+INITIAL_CLIENT_ID=auto-generated  # Автогенерация если не указан
+INITIAL_CLIENT_SECRET=auto-generated  # Автогенерация если не указан, ИЗМЕНИТЬ В PRODUCTION!
+INITIAL_ACCOUNT_ROLE=ADMIN
+INITIAL_ACCOUNT_DESCRIPTION="System administrative service account"
+```
+
+**OAuth 2.0 Authentication Example**:
+```bash
+# Получение JWT токена
+curl -X POST http://localhost:8000/api/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": "${CLIENT_ID}", "client_secret": "${CLIENT_SECRET}"}'
+
+# Response: {"access_token": "eyJ...", "token_type": "Bearer", "expires_in": 1800}
 ```
 
 **Infrastructure Credentials**:
@@ -456,9 +467,9 @@ INITIAL_ADMIN_LASTNAME=Administrator
 6. **Local Fallback**: Кеширование конфигурации для работы при недоступности Service Discovery
 
 ### Data Consistency & Operations
-7. **Consistency Protocol**: WAL → Attr File → Vector Clock → DB Cache → Commit (строго в этом порядке)
+7. **Consistency Protocol**: WAL → Attr File → DB Cache → Service Discovery → Commit (строго в этом порядке)
 8. **Saga Coordination**: Admin Module Cluster координирует все долгосрочные операции через Saga Pattern
-9. **Vector Clock Sync**: Все модули синхронизируют логическое время через Admin Module Cluster
+9. **Template Schema Evolution**: Гибкая эволюция метаданных через schema versioning без breaking changes
 10. **Conflict Resolution**: Автоматическое обнаружение и разрешение конфликтов данных
 11. **Attribute Files**: Always write to *.attr.json first, then update database cache
 12. **Master Election**: Required for edit/rw modes using Redis Cluster coordination

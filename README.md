@@ -63,17 +63,19 @@
 
 #### Identity & Access Management (IAM)
 - **Automated JWT Key Rotation**: Автоматическая ротация JWT ключей каждые 24 часа с плавным переходом без прерывания сервиса
-- **LDAP/Active Directory Integration**: Обязательная интеграция с корпоративным LDAP с mapping групп на роли системы:
+- **OAuth 2.0 Client Credentials**: Machine-to-machine аутентификация через Service Accounts для API клиентов:
   ```yaml
-  LDAP Mapping:
-    "cn=ArtStore-Admins,ou=Groups,dc=artstore,dc=local" → admin
-    "cn=ArtStore-Users,ou=Groups,dc=artstore,dc=local" → user
-    "cn=ArtStore-Auditors,ou=Groups,dc=artstore,dc=local" → auditor
-    "cn=ArtStore-Readonly,ou=Groups,dc=artstore,dc=local" → readonly
+  Service Account Model:
+    - client_id: Уникальный UUID идентификатор
+    - client_secret: Безопасный секрет (bcrypt hashed)
+    - role: ADMIN | USER | AUDITOR | READONLY
+    - rate_limit: Ограничение запросов (100 req/min по умолчанию)
+    - status: ACTIVE | SUSPENDED | EXPIRED
   ```
+- **Automated Secret Rotation**: Автоматическая ротация client secrets каждые 90 дней с уведомлениями
 - **Fine-grained RBAC**: Детализированная ролевая модель с правами доступа на уровне отдельных ресурсов и операций
-- **Resource-level Permissions**: Контроль доступа к конкретным файлам и storage-element на основе атрибутов пользователя
-- **JWT Claims from LDAP**: Автоматическое включение LDAP атрибутов (username, email, department, full_name) в JWT токен
+- **Resource-level Permissions**: Контроль доступа к конкретным файлам и storage-element на основе ролей Service Account
+- **JWT Claims Structure**: Автоматическое включение claims (client_id, role, permissions, rate_limit) в JWT токен
 - **Comprehensive Audit Logging**: Полное логирование всех операций доступа с tamper-proof хранением для соответствия требованиям безопасности
 
 #### Защита API
@@ -184,9 +186,9 @@
   - **Multi-master конфигурацию** с consistent hashing для распределения нагрузки
   - **Graceful failover** с минимальным RTO при недоступности основного узла
   - **Координацию распределенных транзакций** через Saga Orchestrator
-  - **Управление Vector Clocks** для глобального упорядочивания событий
-  - Управление пользователями и правами доступа
-  - Генерацию JWT-токенов с распределенной валидацией
+  - **OAuth 2.0 authentication** с генерацией JWT-токенов для Service Accounts
+  - Управление Service Accounts и правами доступа
+  - Генерацию JWT-токенов с распределенной валидацией через публичный ключ
   - Управление конфигурацией `Элементов хранения`
   - Публикацию конфигурации в Service Discovery (Redis HA)
 - **[Admin User Interface](admin-ui/README.md)**: Графический интерфейс для администраторов.

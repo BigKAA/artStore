@@ -3,7 +3,7 @@ JWT Token Service для аутентификации.
 Использует RS256 алгоритм с ротацией ключей.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
 from pathlib import Path
 import logging
@@ -13,6 +13,7 @@ from jose.exceptions import ExpiredSignatureError
 
 from app.core.config import settings
 from app.models.user import User
+from app.models.service_account import ServiceAccount
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class TokenService:
         if not self._private_key:
             raise ValueError("Private key not loaded")
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expire = now + timedelta(minutes=settings.jwt.access_token_expire_minutes)
 
         # Базовые claims
@@ -126,7 +127,7 @@ class TokenService:
         if not self._private_key:
             raise ValueError("Private key not loaded")
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expire = now + timedelta(days=settings.jwt.refresh_token_expire_days)
 
         claims = {
@@ -261,6 +262,121 @@ class TokenService:
 
         # Создаем новый access токен
         return self.create_access_token(user)
+
+    # ========================================================================
+    # SERVICE ACCOUNT TOKEN METHODS
+    # ========================================================================
+
+    def create_service_account_access_token(
+        self,
+        service_account: ServiceAccount,
+        extra_claims: Optional[Dict] = None
+    ) -> str:
+        """
+        Создание access токена для Service Account (OAuth 2.0 Client Credentials).
+
+        Args:
+            service_account: Service Account для которого создается токен
+            extra_claims: Дополнительные claims для токена
+
+        Returns:
+            str: Закодированный JWT токен
+
+        Raises:
+            ValueError: Если приватный ключ не загружен
+        """
+        if not self._private_key:
+            raise ValueError("Private key not loaded")
+
+        now = datetime.now(timezone.utc)
+        expire = now + timedelta(minutes=settings.jwt.access_token_expire_minutes)
+
+        # Базовые claims для Service Account
+        claims = {
+            "sub": str(service_account.id),  # Subject - UUID Service Account
+            "client_id": service_account.client_id,
+            "name": service_account.name,
+            "role": service_account.role.value,
+            "rate_limit": service_account.rate_limit,
+            "type": "access",
+            "iat": now,  # Issued At
+            "exp": expire,  # Expiration Time
+            "nbf": now,  # Not Before
+        }
+
+        # Добавляем дополнительные claims если есть
+        if extra_claims:
+            claims.update(extra_claims)
+
+        # Кодируем токен
+        token = jwt.encode(
+            claims,
+            self._private_key,
+            algorithm=settings.jwt.algorithm
+        )
+
+        logger.info(
+            f"Created access token for service account {service_account.client_id} "
+            f"(expires: {expire})"
+        )
+        return token
+
+    def create_service_account_refresh_token(self, service_account: ServiceAccount) -> str:
+        """
+        Создание refresh токена для Service Account.
+
+        Args:
+            service_account: Service Account для которого создается токен
+
+        Returns:
+            str: Закодированный JWT refresh токен
+
+        Raises:
+            ValueError: Если приватный ключ не загружен
+        """
+        if not self._private_key:
+            raise ValueError("Private key not loaded")
+
+        now = datetime.now(timezone.utc)
+        expire = now + timedelta(days=settings.jwt.refresh_token_expire_days)
+
+        claims = {
+            "sub": str(service_account.id),
+            "client_id": service_account.client_id,
+            "type": "refresh",
+            "iat": now,
+            "exp": expire,
+            "nbf": now,
+        }
+
+        token = jwt.encode(
+            claims,
+            self._private_key,
+            algorithm=settings.jwt.algorithm
+        )
+
+        logger.info(
+            f"Created refresh token for service account {service_account.client_id} "
+            f"(expires: {expire})"
+        )
+        return token
+
+    def create_service_account_token_pair(
+        self,
+        service_account: ServiceAccount
+    ) -> Tuple[str, str]:
+        """
+        Создание пары access и refresh токенов для Service Account.
+
+        Args:
+            service_account: Service Account для которого создаются токены
+
+        Returns:
+            Tuple[str, str]: (access_token, refresh_token)
+        """
+        access_token = self.create_service_account_access_token(service_account)
+        refresh_token = self.create_service_account_refresh_token(service_account)
+        return access_token, refresh_token
 
 
 # Глобальный экземпляр сервиса

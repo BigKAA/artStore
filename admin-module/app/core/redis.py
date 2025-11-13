@@ -235,3 +235,6 @@ class ServiceDiscovery:
 
 # Глобальный экземпляр Service Discovery
 service_discovery = ServiceDiscovery()
+
+# Глобальный Redis client для использования в middleware и других компонентах
+redis_client = get_redis()

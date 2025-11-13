@@ -5,6 +5,7 @@
 from .base import Base, TimestampMixin
 from .user import User, UserRole, UserStatus
 from .storage_element import StorageElement, StorageMode, StorageType, StorageStatus
+from .service_account import ServiceAccount, ServiceAccountRole, ServiceAccountStatus
 
 __all__ = [
     # Base
@@ -19,4 +20,8 @@ __all__ = [
     "StorageMode",
     "StorageType",
     "StorageStatus",
+    # Service Account
+    "ServiceAccount",
+    "ServiceAccountRole",
+    "ServiceAccountStatus",
 ]

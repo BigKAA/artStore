@@ -11,10 +11,11 @@ from datetime import datetime
 
 from app.core.config import settings
 from app.core.database import init_db, close_db, check_db_connection, get_db
-from app.core.redis import close_redis, check_redis_connection, service_discovery
+from app.core.redis import close_redis, check_redis_connection, service_discovery, redis_client
 from app.core.logging_config import setup_logging, get_logger
 from app.db.init_db import create_initial_admin
 from app.api.v1.endpoints import health, auth
+from app.middleware import RateLimitMiddleware
 
 # Настройка логирования (JSON формат по умолчанию)
 setup_logging()
@@ -95,6 +96,10 @@ if settings.cors.enabled:
         allow_headers=settings.cors.allow_headers,
     )
     logger.info("CORS enabled")
+
+# Rate Limiting middleware для Service Accounts
+app.add_middleware(RateLimitMiddleware, redis_client=redis_client)
+logger.info("Rate limiting middleware enabled")
 
 # Подключаем роутеры
 app.include_router(health.router, prefix="/health", tags=["health"])
