@@ -1,0 +1,157 @@
+version: '3.8'
+
+# ==========================================
+# Docker Compose для Integration Tests
+# ==========================================
+# Изолированное тестовое окружение с собственными
+# базами данных и конфигурацией для integration tests
+# ==========================================
+
+services:
+  # ==========================================
+  # Test PostgreSQL Database
+  # ==========================================
+  postgres-test:
+    image: postgres:15
+    container_name: artstore_storage_postgres_test
+    environment:
+      POSTGRES_DB: artstore_test
+      POSTGRES_USER: artstore_test
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"  # Отдельный порт для тестов
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    networks:
+      - artstore_test_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artstore_test -d artstore_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ==========================================
+  # Test Redis
+  # ==========================================
+  redis-test:
+    image: redis:7-alpine
+    container_name: artstore_storage_redis_test
+    ports:
+      - "6380:6379"  # Отдельный порт для тестов
+    volumes:
+      - redis_test_data:/data
+    networks:
+      - artstore_test_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ==========================================
+  # Storage Element для Integration Tests
+  # ==========================================
+  storage-element-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: artstore_storage_element_test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    environment:
+      # Application
+      APP_NAME: "Storage Element Test"
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "true"
+      APP_MODE: "edit"
+      APP_REBUILD_CACHE_ON_STARTUP: "false"
+
+      # Server
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8010"
+      SERVER_RELOAD: "false"
+      SERVER_WORKERS: "1"
+
+      # Database - test database
+      DB_HOST: postgres-test
+      DB_PORT: 5432
+      DB_USERNAME: artstore_test
+      DB_PASSWORD: test_password
+      DB_DATABASE: artstore_test
+      DB_TABLE_PREFIX: test_storage
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 10
+
+      # Redis - test instance
+      REDIS_HOST: redis-test
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+
+      # JWT - using admin-module keys
+      JWT_ALGORITHM: "RS256"
+      JWT_PUBLIC_KEY_PATH: "/app/.keys/public_key.pem"
+
+      # Storage - test storage
+      STORAGE_TYPE: "local"
+      STORAGE_LOCAL_BASE_PATH: "/app/.data/test_storage"
+      STORAGE_MAX_SIZE_GB: "1"
+
+      # WAL
+      WAL_DIR: "/app/.data/test_wal"
+
+      # Logging - text format для удобства отладки
+      LOG_LEVEL: "DEBUG"
+      LOG_FORMAT: "text"
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PATH: "/metrics"
+
+      # Health
+      HEALTH_LIVENESS_PATH: "/health/live"
+      HEALTH_READINESS_PATH: "/health/ready"
+
+    ports:
+      - "8011:8010"  # Отдельный порт для тестового сервера
+    volumes:
+      # Test storage (ephemeral - не сохраняется между запусками)
+      - test_storage_data:/app/.data/test_storage
+      - test_wal_data:/app/.data/test_wal
+      # JWT public key (read-only from admin-module)
+      - ../admin-module/.keys/public_key.pem:/app/.keys/public_key.pem:ro
+      # Code для hot-reload (только для integration test development)
+      - ./app:/app/app
+    networks:
+      - artstore_test_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+# ==========================================
+# Test Network (isolated)
+# ==========================================
+networks:
+  artstore_test_network:
+    driver: bridge
+    name: artstore_test_network
+
+# ==========================================
+# Test Volumes (ephemeral)
+# ==========================================
+volumes:
+  postgres_test_data:
+    name: artstore_storage_postgres_test_data
+  redis_test_data:
+    name: artstore_storage_redis_test_data
+  test_storage_data:
+    name: artstore_storage_test_storage_data
+  test_wal_data:
+    name: artstore_storage_test_wal_data

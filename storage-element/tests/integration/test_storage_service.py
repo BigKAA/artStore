@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings, StorageType
 from app.db.session import AsyncSessionLocal
 from app.models.file_metadata import FileMetadata
-from app.services.storage_service import StorageService
+from app.services.storage_service import StorageService, LocalStorageService, S3StorageService
 from app.utils.attr_utils import read_attr_file
 from app.utils.template_schema import FileAttributesV2, read_and_migrate_if_needed
 
@@ -43,8 +43,35 @@ async def db_session():
 
 @pytest.fixture
 async def storage_service(db_session):
-    """Storage service instance"""
-    return StorageService(db_session)
+    """
+    Storage service instance.
+
+    ВАЖНО: Возвращает конкретную реализацию (LocalStorageService или S3StorageService)
+    в зависимости от настройки STORAGE_TYPE в конфигурации.
+
+    Args:
+        db_session: Async database session fixture
+
+    Returns:
+        LocalStorageService | S3StorageService: Concrete storage service implementation
+    """
+    if settings.storage.type == StorageType.LOCAL:
+        # Local filesystem storage
+        return LocalStorageService(
+            base_path=settings.storage.local.base_path
+        )
+    elif settings.storage.type == StorageType.S3:
+        # S3 storage (MinIO)
+        return S3StorageService(
+            endpoint_url=settings.storage.s3.endpoint_url,
+            access_key_id=settings.storage.s3.access_key_id,
+            secret_access_key=settings.storage.s3.secret_access_key,
+            bucket_name=settings.storage.s3.bucket_name,
+            region=settings.storage.s3.region,
+            app_folder=settings.storage.s3.app_folder
+        )
+    else:
+        raise ValueError(f"Unsupported storage type: {settings.storage.type}")
 
 
 @pytest.fixture

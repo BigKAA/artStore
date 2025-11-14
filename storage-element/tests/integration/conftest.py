@@ -1,0 +1,220 @@
+"""
+Pytest Configuration для Integration Tests.
+
+Fixtures и настройка для интеграционного тестирования
+с реальными сервисами (PostgreSQL, Redis, Storage Element API).
+"""
+
+import os
+from pathlib import Path
+
+import pytest
+from httpx import AsyncClient, ASGITransport
+
+# ВАЖНО: Установить JWT_PUBLIC_KEY_PATH ДО импорта app modules
+project_root = Path(__file__).parent.parent.parent.parent
+public_key_path = project_root / "admin-module" / ".keys" / "public_key.pem"
+
+# Проверка что ключ существует
+if not public_key_path.exists():
+    raise FileNotFoundError(
+        f"JWT public key not found at {public_key_path}. "
+        "Ensure admin-module JWT keys are generated."
+    )
+
+os.environ["JWT_PUBLIC_KEY_PATH"] = str(public_key_path)
+
+# Настройки для integration tests (если не заданы через environment)
+os.environ.setdefault("DB_HOST", "localhost")
+os.environ.setdefault("DB_PORT", "5433")
+os.environ.setdefault("DB_USERNAME", "artstore_test")
+os.environ.setdefault("DB_PASSWORD", "test_password")
+os.environ.setdefault("DB_DATABASE", "artstore_test")
+os.environ.setdefault("DB_TABLE_PREFIX", "test_storage")
+os.environ.setdefault("REDIS_HOST", "localhost")
+os.environ.setdefault("REDIS_PORT", "6380")
+os.environ.setdefault("LOG_LEVEL", "DEBUG")
+
+
+@pytest.fixture(scope="session")
+def test_environment_info():
+    """
+    Информация о тестовом окружении для debugging.
+
+    Returns:
+        dict: Конфигурация тестового окружения
+    """
+    return {
+        "db_host": os.environ.get("DB_HOST"),
+        "db_port": os.environ.get("DB_PORT"),
+        "db_database": os.environ.get("DB_DATABASE"),
+        "redis_host": os.environ.get("REDIS_HOST"),
+        "redis_port": os.environ.get("REDIS_PORT"),
+        "jwt_public_key": os.environ.get("JWT_PUBLIC_KEY_PATH"),
+        "storage_api_url": os.environ.get("STORAGE_API_URL", "http://localhost:8011"),
+    }
+
+
+@pytest.fixture(scope="function")
+def auth_headers():
+    """
+    Authentication headers с реальными JWT токенами для integration tests.
+
+    ВАЖНО: scope="function" - токен генерируется для каждого теста,
+    чтобы избежать expiration issues при длительных test runs.
+
+    Returns:
+        dict: HTTP headers с Authorization Bearer токеном
+
+    Примеры:
+        >>> async def test_upload_file(auth_headers):
+        ...     async with AsyncClient(
+        ...         transport=ASGITransport(app=app),
+        ...         base_url="http://test"
+        ...     ) as client:
+        ...         response = await client.post(
+        ...             "/api/v1/files/upload",
+        ...             headers=auth_headers,
+        ...             files={"file": file_content}
+        ...         )
+    """
+    from tests.utils.jwt_utils import create_auth_headers
+
+    return create_auth_headers(
+        username="integration_test_user",
+        email="integration@test.artstore.local",
+        role="admin",
+        user_id="integration_test_id"
+    )
+
+
+@pytest.fixture(scope="function")
+async def async_client():
+    """
+    AsyncClient для тестирования API endpoints через HTTP.
+
+    ВАЖНО: Использует httpx 0.28+ синтаксис с ASGITransport.
+
+    Yields:
+        AsyncClient: Настроенный async HTTP client
+
+    Примеры:
+        >>> async def test_health_check(async_client):
+        ...     response = await async_client.get("/health/live")
+        ...     assert response.status_code == 200
+    """
+    from app.main import app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        timeout=30.0
+    ) as client:
+        yield client
+
+
+@pytest.fixture(scope="session")
+def test_file_content():
+    """
+    Тестовое содержимое файла для upload tests.
+
+    Returns:
+        bytes: Бинарное содержимое тестового файла
+    """
+    return b"Test file content for integration testing.\nThis is line 2.\n"
+
+
+@pytest.fixture(scope="session")
+def test_file_metadata():
+    """
+    Метаданные тестового файла.
+
+    Returns:
+        dict: Template-based метаданные для тестового файла
+    """
+    return {
+        "document_type": "test_document",
+        "department": "Engineering",
+        "author": "Integration Test Suite",
+        "tags": ["test", "integration", "automated"],
+        "retention_years": 3,
+    }
+
+
+@pytest.fixture(scope="function")
+async def cleanup_test_files(async_client, auth_headers):
+    """
+    Fixture для автоматической очистки файлов после тестов.
+
+    Usage:
+        >>> async def test_upload(cleanup_test_files, async_client, auth_headers):
+        ...     # Upload file
+        ...     response = await async_client.post("/api/v1/files/upload", ...)
+        ...     file_id = response.json()["file_id"]
+        ...     cleanup_test_files.append(file_id)
+        ...     # Test logic...
+        ...     # File will be automatically deleted after test
+
+    Yields:
+        list: List для добавления file_id файлов для очистки
+    """
+    files_to_cleanup = []
+
+    yield files_to_cleanup
+
+    # Cleanup после теста
+    for file_id in files_to_cleanup:
+        try:
+            await async_client.delete(
+                f"/api/v1/files/{file_id}",
+                headers=auth_headers
+            )
+        except Exception:
+            # Игнорируем ошибки при cleanup
+            pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def verify_test_environment():
+    """
+    Автоматическая проверка тестового окружения перед запуском tests.
+
+    Проверяет:
+    - JWT public key существует
+    - Environment variables установлены
+    - Тестовая БД доступна (опционально)
+
+    Raises:
+        RuntimeError: Если тестовое окружение не готово
+    """
+    # Проверка JWT ключа
+    jwt_key_path = os.environ.get("JWT_PUBLIC_KEY_PATH")
+    if not jwt_key_path or not Path(jwt_key_path).exists():
+        raise RuntimeError(
+            f"JWT public key not found. Expected at: {jwt_key_path}\n"
+            "Ensure admin-module JWT keys are generated:\n"
+            "  cd admin-module && python scripts/generate_jwt_keys.py"
+        )
+
+    # Проверка обязательных environment variables
+    required_vars = [
+        "DB_HOST", "DB_PORT", "DB_USERNAME", "DB_PASSWORD", "DB_DATABASE",
+        "REDIS_HOST", "REDIS_PORT"
+    ]
+
+    missing_vars = [var for var in required_vars if not os.environ.get(var)]
+    if missing_vars:
+        raise RuntimeError(
+            f"Missing required environment variables: {', '.join(missing_vars)}\n"
+            "Ensure test environment is properly configured.\n"
+            "Run: ./scripts/run_integration_tests.sh"
+        )
+
+    print("\n" + "="*60)
+    print("Integration Test Environment Configuration:")
+    print("="*60)
+    print(f"Database: {os.environ.get('DB_USERNAME')}@{os.environ.get('DB_HOST')}:{os.environ.get('DB_PORT')}/{os.environ.get('DB_DATABASE')}")
+    print(f"Redis: {os.environ.get('REDIS_HOST')}:{os.environ.get('REDIS_PORT')}")
+    print(f"JWT Key: {jwt_key_path}")
+    print(f"Storage API: {os.environ.get('STORAGE_API_URL', 'N/A')}")
+    print("="*60 + "\n")
