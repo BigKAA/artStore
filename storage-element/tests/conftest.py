@@ -29,7 +29,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.file_metadata import FileMetadata
 from app.models.storage_config import StorageConfig
-from app.models.wal import WALEntry
+from app.models.wal import WALTransaction
 
 
 # ==========================================
