@@ -18,7 +18,7 @@ import asyncio
 import hashlib
 import io
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -34,11 +34,18 @@ from app.utils.attr_utils import read_attr_file
 from app.utils.template_schema import FileAttributesV2, read_and_migrate_if_needed
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 async def db_session():
-    """Async database session для integration tests"""
+    """
+    Async database session для integration tests.
+
+    ВАЖНО: scope="function" обеспечивает изоляцию event loop между тестами.
+    Каждый тест получает новую session с собственным event loop.
+    """
     async with AsyncSessionLocal() as session:
         yield session
+        # Cleanup: rollback any uncommitted changes to avoid event loop issues
+        await session.rollback()
 
 
 @pytest.fixture
@@ -103,16 +110,25 @@ class TestLocalFilesystemStorage:
         file_id = uuid4()
         storage_filename = f"test_{file_id}.txt"
 
-        # Store file
-        stored_path = await storage_service.store_file(
-            file_data=test_file_stream,
-            storage_filename=storage_filename
+        # Generate relative path with directory structure: year/month/day/hour/
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # Store file using current API
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_file_stream
         )
 
-        # Verify directory structure: /year/month/day/hour/
+        # Verify file was written
+        assert size == len(test_file_data)
+        assert len(checksum) == 64  # SHA256 hex length
+
+        # Get full path for verification
+        stored_path = storage_service._get_full_path(relative_path)
         assert stored_path.exists()
 
-        # Check path components
+        # Check path components (should have year/month/day/hour structure)
         path_parts = stored_path.parts
         assert len(path_parts) >= 4  # At least year/month/day/hour
 
@@ -132,14 +148,18 @@ class TestLocalFilesystemStorage:
 
         storage_filename = f"test_{uuid4()}.txt"
 
-        # Store
-        stored_path = await storage_service.store_file(
-            file_data=test_file_stream,
-            storage_filename=storage_filename
+        # Generate relative path
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # Store using current API
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_file_stream
         )
 
-        # Retrieve
-        retrieved_stream = await storage_service.get_file(stored_path)
+        # Retrieve using current API
+        retrieved_stream = storage_service.read_file(relative_path)
 
         # Verify content
         retrieved_content = b""
@@ -147,6 +167,7 @@ class TestLocalFilesystemStorage:
             retrieved_content += chunk
 
         assert retrieved_content == test_file_data
+        assert size == len(test_file_data)
 
     @pytest.mark.asyncio
     async def test_delete_file_removes_file_and_attr(self, storage_service, test_file_stream):
@@ -156,11 +177,18 @@ class TestLocalFilesystemStorage:
 
         storage_filename = f"test_{uuid4()}.txt"
 
-        # Store file
-        stored_path = await storage_service.store_file(
-            file_data=test_file_stream,
-            storage_filename=storage_filename
+        # Generate relative path
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # Store file using current API
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_file_stream
         )
+
+        # Get full path for attr.json creation
+        stored_path = storage_service._get_full_path(relative_path)
 
         # Create attr.json (normally done by file_service)
         attr_file = stored_path.with_suffix(stored_path.suffix + ".attr.json")
@@ -170,8 +198,8 @@ class TestLocalFilesystemStorage:
             "storage_filename": storage_filename,
             "file_size": 100,
             "content_type": "text/plain",
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "created_by_id": "test_user",
             "created_by_username": "test",
             "storage_path": str(stored_path),
@@ -183,8 +211,8 @@ class TestLocalFilesystemStorage:
         assert stored_path.exists()
         assert attr_file.exists()
 
-        # Delete
-        await storage_service.delete_file(stored_path)
+        # Delete using current API (takes relative_path as string)
+        await storage_service.delete_file(relative_path)
 
         # Verify deleted
         assert not stored_path.exists()
@@ -192,18 +220,30 @@ class TestLocalFilesystemStorage:
 
     @pytest.mark.asyncio
     async def test_calculate_checksum(self, storage_service, test_file_data):
-        """Тест расчета SHA256 checksum"""
+        """Тест расчета SHA256 checksum через write_file()"""
         test_stream = io.BytesIO(test_file_data)
 
-        checksum = await storage_service.calculate_checksum(test_stream)
+        # Generate relative path
+        storage_filename = f"test_{uuid4()}.txt"
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # write_file() automatically calculates checksum during write
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_stream
+        )
 
         # Verify checksum format
         assert len(checksum) == 64
         assert all(c in "0123456789abcdef" for c in checksum)
 
-        # Verify checksum value
+        # Verify checksum value matches expected
         expected_checksum = hashlib.sha256(test_file_data).hexdigest()
         assert checksum == expected_checksum
+
+        # Cleanup
+        await storage_service.delete_file(relative_path)
 
 
 class TestS3Storage:
@@ -217,14 +257,19 @@ class TestS3Storage:
 
         storage_filename = f"test_{uuid4()}.txt"
 
-        # Store file in S3
-        stored_path = await storage_service.store_file(
-            file_data=test_file_stream,
-            storage_filename=storage_filename
+        # Generate relative path
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # Store file in S3 using current API
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_file_stream
         )
 
-        # For S3, stored_path is S3 key
-        assert isinstance(stored_path, (str, Path))
+        # Verify size and checksum returned
+        assert size > 0
+        assert len(checksum) == 64  # SHA256 hex length
 
     @pytest.mark.asyncio
     async def test_s3_retrieve_file(self, storage_service, test_file_stream, test_file_data):
@@ -234,19 +279,24 @@ class TestS3Storage:
 
         storage_filename = f"test_{uuid4()}.txt"
 
-        # Store
-        stored_path = await storage_service.store_file(
-            file_data=test_file_stream,
-            storage_filename=storage_filename
+        # Generate relative path
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # Store using current API
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_file_stream
         )
 
-        # Retrieve
-        retrieved_stream = await storage_service.get_file(stored_path)
+        # Retrieve using current API
+        retrieved_stream = storage_service.read_file(relative_path)
         retrieved_content = b""
         async for chunk in retrieved_stream:
             retrieved_content += chunk
 
         assert retrieved_content == test_file_data
+        assert size == len(test_file_data)
 
 
 class TestAttrFileManagement:
@@ -261,11 +311,18 @@ class TestAttrFileManagement:
         file_id = uuid4()
         storage_filename = f"test_{file_id}.txt"
 
-        # Store file
-        stored_path = await storage_service.store_file(
-            file_data=test_file_stream,
-            storage_filename=storage_filename
+        # Generate relative path
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # Store file using current API
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_file_stream
         )
+
+        # Get full path for attr.json creation
+        stored_path = storage_service._get_full_path(relative_path)
 
         # Create attr.json v2.0
         attr_file = stored_path.with_suffix(stored_path.suffix + ".attr.json")
@@ -276,8 +333,8 @@ class TestAttrFileManagement:
             storage_filename=storage_filename,
             file_size=100,
             content_type="text/plain",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
             created_by_id="test_user",
             created_by_username="test",
             storage_path=str(stored_path),
@@ -306,11 +363,18 @@ class TestAttrFileManagement:
         file_id = uuid4()
         storage_filename = f"test_{file_id}.txt"
 
-        # Store file
-        stored_path = await storage_service.store_file(
-            file_data=test_file_stream,
-            storage_filename=storage_filename
+        # Generate relative path
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # Store file using current API
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_file_stream
         )
+
+        # Get full path for attr.json creation
+        stored_path = storage_service._get_full_path(relative_path)
 
         # Create v1.0 attr.json (NO schema_version field)
         attr_file = stored_path.with_suffix(stored_path.suffix + ".attr.json")
@@ -320,8 +384,8 @@ class TestAttrFileManagement:
             "storage_filename": storage_filename,
             "file_size": 100,
             "content_type": "text/plain",
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "created_by_id": "test_user",
             "created_by_username": "test",
             "storage_path": str(stored_path),
@@ -413,14 +477,21 @@ class TestStorageModeBehavior:
 
         # Store should work
         storage_filename = f"test_{uuid4()}.txt"
-        stored_path = await storage_service.store_file(
-            file_data=test_file_stream,
-            storage_filename=storage_filename
+
+        # Generate relative path
+        now = datetime.now(timezone.utc)
+        relative_path = f"{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}/{storage_filename}"
+
+        # Store using current API
+        size, checksum = await storage_service.write_file(
+            relative_path=relative_path,
+            file_data=test_file_stream
         )
+        stored_path = storage_service._get_full_path(relative_path)
         assert stored_path.exists()
 
-        # Delete should work
-        await storage_service.delete_file(stored_path)
+        # Delete should work using current API
+        await storage_service.delete_file(relative_path)
         assert not stored_path.exists()
 
     @pytest.mark.asyncio

@@ -260,7 +260,7 @@ def test_jwt_token(test_jwt_keys) -> str:
         str: Valid JWT access token
     """
     import jwt
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     private_key, _ = test_jwt_keys
 
@@ -270,9 +270,9 @@ def test_jwt_token(test_jwt_keys) -> str:
         "email": "test@artstore.local",
         "role": "user",
         "type": "access",
-        "iat": datetime.utcnow(),
-        "exp": datetime.utcnow() + timedelta(hours=1),
-        "nbf": datetime.utcnow()
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        "nbf": datetime.now(timezone.utc)
     }
 
     token = jwt.encode(payload, private_key, algorithm="RS256")
@@ -291,7 +291,7 @@ def admin_jwt_token(test_jwt_keys) -> str:
         str: Valid JWT admin token
     """
     import jwt
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     private_key, _ = test_jwt_keys
 
@@ -301,9 +301,9 @@ def admin_jwt_token(test_jwt_keys) -> str:
         "email": "admin@artstore.local",
         "role": "admin",
         "type": "access",
-        "iat": datetime.utcnow(),
-        "exp": datetime.utcnow() + timedelta(hours=1),
-        "nbf": datetime.utcnow()
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        "nbf": datetime.now(timezone.utc)
     }
 
     token = jwt.encode(payload, private_key, algorithm="RS256")

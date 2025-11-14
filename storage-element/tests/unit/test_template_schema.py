@@ -19,7 +19,7 @@ Unit tests для Template Schema v2.0.
 
 import json
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.utils.template_schema import (
@@ -39,7 +39,7 @@ class TestFileAttributesV2Model:
     def test_create_v2_attributes_with_all_fields(self):
         """Тест создания v2.0 attributes со всеми полями"""
         file_id = uuid4()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         attrs = FileAttributesV2(
             schema_version="2.0",
@@ -73,7 +73,7 @@ class TestFileAttributesV2Model:
     def test_create_v2_attributes_minimal_fields(self):
         """Тест создания v2.0 с минимальными обязательными полями"""
         file_id = uuid4()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         attrs = FileAttributesV2(
             file_id=file_id,
@@ -99,7 +99,7 @@ class TestFileAttributesV2Model:
     def test_custom_attributes_validation(self):
         """Тест валидации custom_attributes"""
         file_id = uuid4()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Valid custom_attributes
         attrs = FileAttributesV2(
@@ -135,8 +135,8 @@ class TestFileAttributesV2Model:
                 storage_filename="test.pdf",
                 file_size=100,
                 content_type="application/pdf",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
                 created_by_id="user1",
                 created_by_username="user1",
                 storage_path="path",
@@ -152,8 +152,8 @@ class TestFileAttributesV2Model:
                 storage_filename="test.pdf",
                 file_size=0,  # Invalid: должен быть > 0
                 content_type="application/pdf",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
                 created_by_id="user1",
                 created_by_username="user1",
                 storage_path="path",
@@ -170,8 +170,8 @@ class TestFileAttributesV2Model:
                 storage_filename="test.pdf",
                 file_size=100,
                 content_type="application/pdf",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
                 created_by_id="user1",
                 created_by_username="user1",
                 storage_path="path",
@@ -190,8 +190,8 @@ class TestMigrationV1ToV2:
             "storage_filename": "report_user_timestamp_uuid.pdf",
             "file_size": 1024,
             "content_type": "application/pdf",
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "created_by_id": "user1",
             "created_by_username": "john_doe",
             "storage_path": "2025/01/13/report.pdf",
@@ -213,8 +213,8 @@ class TestMigrationV1ToV2:
             "storage_filename": "test.pdf",
             "file_size": 100,
             "content_type": "application/pdf",
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "created_by_id": "user1",
             "created_by_username": "user1",
             "created_by_fullname": "User One",
@@ -257,7 +257,7 @@ class TestReadAndMigrateIfNeeded:
 
     def test_read_v2_file_native(self):
         """Тест чтения native v2.0 файла без миграции"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         data = {
             "schema_version": "2.0",
             "file_id": str(uuid4()),
@@ -282,7 +282,7 @@ class TestReadAndMigrateIfNeeded:
 
     def test_read_v1_file_with_auto_migration(self):
         """Тест чтения v1.0 файла с автоматической миграцией"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         v1_data = {
             # НЕТ schema_version - это v1.0
             "file_id": str(uuid4()),
@@ -325,7 +325,7 @@ class TestBackwardCompatibilityV2ToV1:
 
     def test_convert_v2_to_v1_removes_new_fields(self):
         """Тест что конвертация v2→v1 удаляет новые поля"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         v2_attrs = FileAttributesV2(
             schema_version="2.0",
             file_id=uuid4(),
@@ -356,7 +356,7 @@ class TestBackwardCompatibilityV2ToV1:
 
     def test_convert_v2_to_v1_is_lossy(self):
         """Тест что конвертация v2→v1 lossy (custom_attributes теряются)"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         v2_attrs = FileAttributesV2(
             schema_version="2.0",
             file_id=uuid4(),
@@ -389,7 +389,7 @@ class TestJSONSerializationV2:
 
     def test_serialize_v2_to_json(self):
         """Тест сериализации v2.0 в JSON"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         v2_attrs = FileAttributesV2(
             file_id=uuid4(),
             original_filename="report.pdf",
