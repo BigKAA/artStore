@@ -7,7 +7,7 @@ JWT токенов для integration tests.
 
 import pytest
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from tests.utils.jwt_utils import (
     generate_test_jwt_token,
@@ -143,7 +143,7 @@ class TestJWTTokenVerification:
         """Тест что expired токен не проходит верификацию"""
         # Создаем токен с истекшим временем (expires_in = -1 минута в прошлом)
         private_key = load_private_key()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_time = now - timedelta(minutes=1)
 
         payload = {
