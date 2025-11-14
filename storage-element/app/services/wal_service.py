@@ -9,7 +9,7 @@ WAL Service обеспечивает:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import UUID, uuid4
 
@@ -102,7 +102,7 @@ class WALService:
                 file_id=file_id,
                 operation_data=operation_data,
                 user_id=user_id,
-                started_at=datetime.utcnow()
+                started_at=datetime.now(timezone.utc)
             )
 
             self.db.add(transaction)
@@ -186,7 +186,7 @@ class WALService:
                 )
 
             # Обновление статуса
-            completed_at = datetime.utcnow()
+            completed_at = datetime.now(timezone.utc)
             duration_ms = int((completed_at - transaction.started_at).total_seconds() * 1000)
 
             transaction.status = WALStatus.COMMITTED.value
@@ -280,7 +280,7 @@ class WALService:
                 )
 
             # Обновление статуса
-            completed_at = datetime.utcnow()
+            completed_at = datetime.now(timezone.utc)
             duration_ms = int((completed_at - transaction.started_at).total_seconds() * 1000)
 
             transaction.status = WALStatus.ROLLED_BACK.value
@@ -352,7 +352,7 @@ class WALService:
                 )
 
             # Обновление статуса
-            completed_at = datetime.utcnow()
+            completed_at = datetime.now(timezone.utc)
             duration_ms = int((completed_at - transaction.started_at).total_seconds() * 1000)
 
             transaction.status = WALStatus.FAILED.value
