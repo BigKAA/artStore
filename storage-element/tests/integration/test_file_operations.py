@@ -21,10 +21,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from httpx import AsyncClient, ASGITransport
-
-from app.main import app
-from app.core.config import settings
+from httpx import AsyncClient
 
 
 # Test data
@@ -70,7 +67,7 @@ class TestFileUploadIntegration:
     @pytest.mark.asyncio
     async def test_upload_file_success(self, test_file, auth_headers):
         """Тест успешной загрузки файла через API"""
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             files = {
                 "file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)
             }
@@ -107,7 +104,7 @@ class TestFileUploadIntegration:
     @pytest.mark.asyncio
     async def test_upload_file_with_custom_attributes(self, test_file, auth_headers):
         """Тест загрузки файла с custom_attributes (Template Schema v2.0)"""
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             # Note: Custom attributes should be passed via metadata field
             # They will be stored in attr.json as custom_attributes in v2.0 format
             files = {
@@ -146,7 +143,7 @@ class TestFileUploadIntegration:
         large_content = b"x" * (10 * 1024 * 1024)
         large_file = io.BytesIO(large_content)
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             files = {
                 "file": ("large_file.bin", large_file, "application/octet-stream")
             }
@@ -169,10 +166,14 @@ class TestFileUploadIntegration:
         """Тест загрузки файла в readonly mode (должен fail)"""
         # This test assumes storage is in RO or AR mode
         # Skip if storage is in EDIT or RW mode
-        if settings.app.mode.value in ["edit", "rw"]:
-            pytest.skip("Storage is in edit/rw mode, upload allowed")
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Note: Docker test container configured in EDIT mode, so this test will be skipped
+        async with AsyncClient(base_url="http://localhost:8011") as client:
+            # Check storage mode from root endpoint
+            root_response = await client.get("/")
+            if root_response.status_code == 200:
+                root_data = root_response.json()
+                if root_data.get("mode") in ["edit", "rw"]:
+                    pytest.skip("Storage is in edit/rw mode, upload allowed")
             files = {
                 "file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)
             }
@@ -196,7 +197,7 @@ class TestFileDownloadIntegration:
         # First, upload a file
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             # Upload
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             upload_response = await client.post(
@@ -219,14 +220,15 @@ class TestFileDownloadIntegration:
             # Validate headers
             assert "content-disposition" in download_response.headers
             assert TEST_FILE_NAME in download_response.headers["content-disposition"]
-            assert download_response.headers["content-type"] == TEST_FILE_CONTENT_TYPE
+            # Content-Type может включать charset (text/plain; charset=utf-8)
+            assert download_response.headers["content-type"].startswith(TEST_FILE_CONTENT_TYPE)
 
     @pytest.mark.asyncio
     async def test_download_file_not_found(self, auth_headers):
         """Тест скачивания несуществующего файла"""
         fake_file_id = "00000000-0000-0000-0000-000000000000"
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             response = await client.get(
                 f"/api/v1/files/{fake_file_id}/download",
                 headers=auth_headers
@@ -241,7 +243,7 @@ class TestFileDownloadIntegration:
         large_content = b"y" * (5 * 1024 * 1024)  # 5MB
         large_file = io.BytesIO(large_content)
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             # Upload
             files = {"file": ("large_stream.bin", large_file, "application/octet-stream")}
             upload_response = await client.post(
@@ -279,7 +281,7 @@ class TestFileMetadataIntegration:
         # Upload file first
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             # Upload
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             data = {"description": "Test metadata", "version": "1.0"}
@@ -312,13 +314,16 @@ class TestFileMetadataIntegration:
     @pytest.mark.asyncio
     async def test_update_file_metadata(self, auth_headers):
         """Тест обновления метаданных файла"""
-        if settings.app.mode.value not in ["edit", "rw"]:
-            pytest.skip("Storage not in edit/rw mode")
-
         # Upload file first
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
+            # Check storage mode from root endpoint
+            root_response = await client.get("/")
+            if root_response.status_code == 200:
+                root_data = root_response.json()
+                if root_data.get("mode") not in ["edit", "rw"]:
+                    pytest.skip("Storage not in edit/rw mode")
             # Upload
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             upload_response = await client.post(
@@ -349,7 +354,7 @@ class TestFileMetadataIntegration:
     @pytest.mark.asyncio
     async def test_list_files_pagination(self, auth_headers):
         """Тест получения списка файлов с пагинацией"""
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             # Upload multiple files
             for i in range(5):
                 test_file = io.BytesIO(f"Test file {i}".encode())
@@ -383,13 +388,16 @@ class TestFileDeleteIntegration:
     @pytest.mark.asyncio
     async def test_delete_file_success(self, auth_headers):
         """Тест успешного удаления файла"""
-        if settings.app.mode.value != "edit":
-            pytest.skip("Storage not in EDIT mode, deletion not allowed")
-
         # Upload file first
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
+            # Check storage mode from root endpoint
+            root_response = await client.get("/")
+            if root_response.status_code == 200:
+                root_data = root_response.json()
+                if root_data.get("mode") != "edit":
+                    pytest.skip("Storage not in EDIT mode, deletion not allowed")
             # Upload
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             upload_response = await client.post(
@@ -417,14 +425,17 @@ class TestFileDeleteIntegration:
     @pytest.mark.asyncio
     async def test_delete_file_invalid_mode(self, auth_headers):
         """Тест удаления файла в RW/RO mode (должен fail)"""
-        if settings.app.mode.value == "edit":
-            pytest.skip("Storage in EDIT mode, deletion allowed")
-
         # Upload file first (assuming mode was EDIT before)
         # For this test, we assume file exists from previous operations
         fake_file_id = "00000000-0000-0000-0000-000000000000"
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
+            # Check storage mode from root endpoint
+            root_response = await client.get("/")
+            if root_response.status_code == 200:
+                root_data = root_response.json()
+                if root_data.get("mode") == "edit":
+                    pytest.skip("Storage in EDIT mode, deletion allowed")
             response = await client.delete(
                 f"/api/v1/files/{fake_file_id}",
                 headers=auth_headers
@@ -442,7 +453,7 @@ class TestTemplateSchemaV2Integration:
         """Тест создания attr.json в v2.0 формате"""
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(base_url="http://localhost:8011") as client:
             # Upload file
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             data = {

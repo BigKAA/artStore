@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user, require_operator_or_admin
@@ -135,7 +135,7 @@ async def upload_file(
             "File uploaded successfully",
             extra={
                 "file_id": str(file_id),
-                "filename": file.filename,
+                "original_filename": file.filename,
                 "user_id": user.sub
             }
         )
@@ -271,7 +271,7 @@ async def download_file(
             "File download started",
             extra={
                 "file_id": str(file_id),
-                "filename": metadata.original_filename,
+                "original_filename": metadata.original_filename,
                 "user_id": user.sub
             }
         )
@@ -497,7 +497,7 @@ async def list_files(
 
         # Получение общего количества
         count_result = await db.execute(
-            select(FileMetadata).count()
+            select(func.count()).select_from(FileMetadata)
         )
         total = count_result.scalar()
 

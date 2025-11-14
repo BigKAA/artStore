@@ -77,10 +77,12 @@ def auth_headers():
 ```python
 @pytest.fixture(scope="function")
 async def async_client():
-    """AsyncClient для HTTP API testing"""
+    """AsyncClient для HTTP API testing через real HTTP requests"""
+    # Real HTTP requests к Docker test container на localhost:8011
+    base_url = os.environ.get("STORAGE_API_URL", "http://localhost:8011")
     async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test"
+        base_url=base_url,
+        timeout=30.0
     ) as client:
         yield client
 ```

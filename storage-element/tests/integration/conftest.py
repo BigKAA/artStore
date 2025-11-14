@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import AsyncClient
 
 # ВАЖНО: Установить JWT_PUBLIC_KEY_PATH ДО импорта app modules
 project_root = Path(__file__).parent.parent.parent.parent
@@ -35,6 +35,18 @@ os.environ["DB_TABLE_PREFIX"] = "test_storage"  # CRITICAL: Must match Alembic m
 os.environ["REDIS_HOST"] = "localhost"
 os.environ["REDIS_PORT"] = "6380"
 os.environ["LOG_LEVEL"] = "DEBUG"
+
+# CRITICAL: Force reload settings module IMMEDIATELY after setting env vars
+# This ensures that when models are imported, settings.database.table_prefix is correct
+import sys
+import importlib
+
+# Remove cached config module to force reload with new environment variables
+if 'app.core.config' in sys.modules:
+    del sys.modules['app.core.config']
+
+# Now when app modules import settings, they will get the test configuration
+# This must happen BEFORE any pytest fixtures import app modules
 
 
 @pytest.fixture(scope="session")
@@ -92,9 +104,10 @@ def auth_headers():
 @pytest.fixture(scope="function")
 async def async_client():
     """
-    AsyncClient для тестирования API endpoints через HTTP.
+    AsyncClient для тестирования API endpoints через real HTTP requests.
 
-    ВАЖНО: Использует httpx 0.28+ синтаксис с ASGITransport.
+    ВАЖНО: Использует real HTTP requests к Docker test container на localhost:8011.
+    Это обеспечивает true integration testing с правильной конфигурацией.
 
     Yields:
         AsyncClient: Настроенный async HTTP client
@@ -104,11 +117,12 @@ async def async_client():
         ...     response = await async_client.get("/health/live")
         ...     assert response.status_code == 200
     """
-    from app.main import app
+    # Real HTTP requests к Docker test container
+    # Порт 8011 настроен в docker-compose.test.yml
+    base_url = os.environ.get("STORAGE_API_URL", "http://localhost:8011")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
+        base_url=base_url,
         timeout=30.0
     ) as client:
         yield client
