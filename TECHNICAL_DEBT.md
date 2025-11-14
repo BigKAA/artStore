@@ -18,11 +18,130 @@
 
 ## 🔴 Критический долг
 
+### [CRITICAL] SQLAlchemy Table Prefix Configuration
+
+**Модуль**: storage-element
+**Дата добавления**: 2025-11-14 (Sprint 6)
+**Оценка сложности**: средняя
+**Приоритет**: P0 (blocks 16 integration tests)
+
+**Описание**:
+SQLAlchemy models используют f-strings для генерации `__tablename__` на уровне class definition (import time):
+```python
+class FileMetadata(Base):
+    __tablename__ = f"{settings.database.table_prefix}_files"  # Evaluated at import!
+```
+
+**Проблема**:
+1. Models импортируются при `from app.models import FileMetadata`
+2. `__tablename__` evaluates f-string IMMEDIATELY с текущим `settings.database.table_prefix`
+3. В production: `settings.database.table_prefix = "storage_elem_01"` (default из config.py:85)
+4. Test environment: `os.environ["DB_TABLE_PREFIX"] = "test_storage"` устанавливается в conftest.py AFTER imports
+5. Result: Models look for `storage_elem_01_*` tables, но Alembic создал `test_storage_*` tables
+
+**Impact**:
+- 16/39 integration tests failing с ошибкой: `ERROR: relation "storage_elem_01_wal" does not exist`
+- Test environment configuration не работает
+- Невозможно запустить integration tests для валидации кода
+
+**Attempted Fixes (ALL FAILED)**:
+1. ✗ `os.environ.setdefault()` → Too late, models уже imported
+2. ✗ Direct assignment `os.environ["DB_TABLE_PREFIX"]` → Still too late
+3. ✗ `importlib.reload()` → Reloads settings но models keep old `__tablename__`
+4. ✗ Module reload of models → Creates duplicate classes, SQLAlchemy warnings
+
+**Решение (Sprint 7)**:
+Использовать `@declared_attr` для runtime table name resolution:
+```python
+from sqlalchemy.ext.declarative import declared_attr
+
+class FileMetadata(Base):
+    @declared_attr
+    def __tablename__(cls):
+        from app.core.config import settings
+        return f"{settings.database.table_prefix}_files"
+```
+
+**План устранения**:
+1. Refactor 3 model files для использования `@declared_attr`:
+   - `app/models/file_metadata.py`
+   - `app/models/storage_config.py`
+   - `app/models/wal.py`
+2. Test с production table prefix (`storage_elem_01`)
+3. Test с test table prefix (`test_storage`)
+4. Verify all 16 blocked tests now passing
+5. Create Architecture Decision Record (ADR)
+
+**Effort**: 2-3 hours
+**Sprint**: 7
+
+**Связанные файлы**:
+- `storage-element/app/models/file_metadata.py:45`
+- `storage-element/app/models/storage_config.py`
+- `storage-element/app/models/wal.py:59`
+- `storage-element/tests/integration/conftest.py:34`
+- `storage-element/SPRINT_6_STATUS.md:62-101` (detailed analysis)
+
+**Ссылки**:
+- [SPRINT_6_STATUS.md:62](storage-element/SPRINT_6_STATUS.md#L62) - Detailed blocker analysis
+- [conftest.py:34](storage-element/tests/integration/conftest.py#L34) - Table prefix configuration
+
+---
+
+### [CRITICAL] AsyncIO Event Loop Isolation
+
+**Модуль**: storage-element
+**Дата добавления**: 2025-11-14 (Sprint 6)
+**Оценка сложности**: низкая
+**Приоритет**: P0 (blocks 2 integration tests)
+
+**Описание**:
+Database cache integration tests failing с ошибкой:
+```
+RuntimeError: Task <Task pending> attached to a different loop
+```
+
+**Проблема**:
+- pytest-asyncio fixtures используют разные event loops
+- Database session fixtures не properly scoped для async tests
+- Task created в одном loop, но executed в другом
+
+**Impact**:
+- 2 database cache tests failing: `test_cache_entry_created_on_upload`, `test_cache_consistency_with_attr_file`
+
+**Решение (Sprint 7)**:
+Proper async fixture scoping:
+```python
+# conftest.py
+@pytest.fixture(scope="function")
+async def db_session():
+    async with AsyncSessionLocal() as session:
+        yield session
+        await session.rollback()  # Cleanup after each test
+```
+
+**План устранения**:
+1. Update database session fixtures в `conftest.py`
+2. Ensure proper async scope isolation
+3. Verify both database cache tests pass
+4. Add documentation для async testing best practices
+
+**Effort**: 1 hour
+**Sprint**: 7
+
+**Связанные файлы**:
+- `storage-element/tests/integration/conftest.py` (session fixtures)
+- `storage-element/tests/integration/test_storage_service.py` (failing tests)
+- `storage-element/SPRINT_6_STATUS.md:223` (technical debt)
+
+---
+
 ### [CRITICAL] Миграция логирования на JSON формат
 
 **Модуль**: Все модули
 **Дата добавления**: 2025-01-10
 **Оценка сложности**: средняя
+
 **Описание**:
 - Все production логи ДОЛЖНЫ быть в JSON формате для интеграции с ELK Stack, Splunk и другими системами анализа
 - Текущее состояние: некоторые модули используют text формат
@@ -48,128 +167,186 @@
 - `CLAUDE.md` (требования к логированию)
 
 **Ссылки**:
-- [CLAUDE.md:53-63](file:///home/artur/Projects/artStore/CLAUDE.md#L53-L63) - Требования к логированию
+- [CLAUDE.md:53-63](CLAUDE.md#L53-L63) - Требования к логированию
 
 ---
 
-### [CRITICAL] Создание LDIF структуры LDAP хранилища
+### [CRITICAL] LDAP Infrastructure Removal (CANCELLED)
 
 **Модуль**: admin-module
 **Дата добавления**: 2025-01-10
-**Оценка сложности**: средняя
+**Status**: ❌ CANCELLED (Architecture change 2025-01-12)
+**Оценка сложности**: N/A
+
 **Описание**:
-- Отсутствует LDIF файл с базовой структурой LDAP хранилища для ArtStore
-- Необходим для инициализации LDAP сервера с правильной структурой OU, групп и маппинга на роли
-- Требуется для корректной работы LDAP аутентификации в Admin Module
+~~Отсутствует LDIF файл с базовой структурой LDAP хранилища для ArtStore~~
 
-**План устранения**:
-1. Создать базовый LDIF файл с структурой:
-   ```
-   dc=artstore,dc=local
-   ├── ou=users
-   ├── ou=groups
-   │   ├── cn=admins (role=admin)
-   │   ├── cn=operators (role=operator)
-   │   └── cn=users (role=user)
-   └── ou=service-accounts
-   ```
-2. Добавить примеры пользователей для каждой роли
-3. Настроить docker-compose.yml для автоматической загрузки LDIF при старте
-4. Документировать структуру в README
-5. Добавить инструкции по ручной настройке LDAP
-
-**Связанные файлы**:
-- Создать: `admin-module/ldap/base-structure.ldif`
-- Создать: `admin-module/ldap/test-users.ldif`
-- Обновить: `docker-compose.yml` (volume mount для LDIF)
-- Обновить: `admin-module/README.md` (документация LDAP)
-- Связано с: `admin-module/app/services/ldap_service.py`
-
-**Требования к структуре**:
-```ldif
-# Base structure
-dn: dc=artstore,dc=local
-objectClass: top
-objectClass: dcObject
-objectClass: organization
-o: ArtStore
-dc: artstore
-
-# Users organizational unit
-dn: ou=users,dc=artstore,dc=local
-objectClass: organizationalUnit
-ou: users
-
-# Groups organizational unit
-dn: ou=groups,dc=artstore,dc=local
-objectClass: organizationalUnit
-ou: groups
-
-# Admin group (maps to UserRole.ADMIN)
-dn: cn=admins,ou=groups,dc=artstore,dc=local
-objectClass: groupOfUniqueNames
-cn: admins
-uniqueMember: uid=admin,ou=users,dc=artstore,dc=local
-
-# Operator group (maps to UserRole.OPERATOR)
-dn: cn=operators,ou=groups,dc=artstore,dc=local
-objectClass: groupOfUniqueNames
-cn: operators
-uniqueMember: uid=operator,ou=users,dc=artstore,dc=local
-
-# User group (maps to UserRole.USER)
-dn: cn=users,ou=groups,dc=artstore,dc=local
-objectClass: groupOfUniqueNames
-cn: users
-uniqueMember: uid=user,ou=users,dc=artstore,dc=local
-
-# Test users
-dn: uid=admin,ou=users,dc=artstore,dc=local
-objectClass: inetOrgPerson
-objectClass: organizationalPerson
-objectClass: person
-objectClass: top
-uid: admin
-cn: Admin User
-sn: User
-givenName: Admin
-mail: admin@artstore.local
-userPassword: {SSHA}... # bcrypt hash
-
-dn: uid=operator,ou=users,dc=artstore,dc=local
-objectClass: inetOrgPerson
-uid: operator
-cn: Operator User
-sn: User
-givenName: Operator
-mail: operator@artstore.local
-userPassword: {SSHA}...
-
-dn: uid=user,ou=users,dc=artstore,dc=local
-objectClass: inetOrgPerson
-uid: user
-cn: Regular User
-sn: User
-givenName: Regular
-mail: user@artstore.local
-userPassword: {SSHA}...
-```
+**Причина отмены**:
+Требования от заказчика изменились (2025-01-12):
+- Система предназначена для M2M (machine-to-machine) authentication
+- Service Accounts вместо human users
+- OAuth 2.0 Client Credentials вместо LDAP
+- LDAP infrastructure будет удалена в Sprint 11 (Phase 4, Week 11-12)
 
 **Ссылки**:
-- [CLAUDE.md:321](file:///home/artur/Projects/artStore/CLAUDE.md#L321) - LDAP интеграция
-- [docker-compose.yml](file:///home/artur/Projects/artStore/docker-compose.yml) - LDAP сервис
+- [DEVELOPMENT_PLAN.md:220-236](DEVELOPMENT_PLAN.md#L220-L236) - Architecture change
+- [DEVELOPMENT_PLAN.md:368-378](DEVELOPMENT_PLAN.md#L368-L378) - LDAP removal Sprint 11
 
 ---
 
 ## 🟡 Важный долг
+
+### [HIGH] StorageService API Mismatch
+
+**Модуль**: storage-element
+**Дата добавления**: 2025-11-14 (Sprint 6)
+**Оценка сложности**: низкая
+**Приоритет**: P1 (blocks 6 integration tests)
+
+**Описание**:
+Integration tests используют старый API LocalStorageService который не существует:
+```python
+# OLD API (doesn't exist):
+stored_path = await storage_service.store_file(file_data=..., storage_filename=...)
+checksum = await storage_service.calculate_checksum(file_path)
+
+# CURRENT API:
+size, checksum = await storage_service.write_file(relative_path=..., file_data=...)
+```
+
+**Impact**:
+- 6 storage service tests failing с `AttributeError: 'LocalStorageService' object has no attribute 'store_file'`
+- Cannot validate storage service functionality
+- API evolution не reflected в tests
+
+**Решение (Sprint 7)**:
+Update integration tests для использования current API:
+```python
+# Updated test pattern:
+size, checksum = await storage_service.write_file(
+    relative_path=storage_filename,
+    file_data=file_content
+)
+# checksum уже returned, не нужен separate call
+```
+
+**План устранения**:
+1. Update `test_storage_service.py` для использования `write_file()` API
+2. Remove calls к non-existent `calculate_checksum()` method
+3. Update test assertions для new return format (size, checksum tuple)
+4. Verify all 6 storage service tests pass
+5. Document current API в integration test README
+
+**Effort**: 1-2 hours
+**Sprint**: 7
+
+**Связанные файлы**:
+- `storage-element/tests/integration/test_storage_service.py` (failing tests)
+- `storage-element/app/services/storage_service.py` (current API)
+- `storage-element/SPRINT_6_STATUS.md:218-221` (technical debt)
+
+---
+
+### [HIGH] datetime.utcnow() Project Audit
+
+**Модуль**: storage-element, admin-module
+**Дата добавления**: 2025-11-14 (Sprint 6)
+**Оценка сложности**: низкая
+**Приоритет**: P2 (risk mitigation)
+
+**Описание**:
+`datetime.utcnow()` deprecated и создает timezone-naive datetimes, что приводит к bugs на timezone-aware systems.
+
+**Fixed occurrences (Sprint 5-6)**:
+- ✅ `tests/utils/jwt_utils.py` - JWT token generation (Sprint 5)
+- ✅ `app/services/wal_service.py` - WAL entry timestamps (Sprint 5)
+- ✅ `app/services/file_service.py` - File creation timestamps (Sprint 6, 3 occurrences)
+
+**Risk**:
+- Potentially more occurrences в untested code paths
+- Risk of timezone bugs в production если не audited
+
+**Correct pattern**:
+```python
+# WRONG (deprecated, timezone-naive):
+datetime.utcnow()
+
+# CORRECT (timezone-aware UTC):
+from datetime import datetime, timezone
+datetime.now(timezone.utc)
+```
+
+**План устранения (Sprint 7)**:
+1. Project-wide grep для remaining `datetime.utcnow()` occurrences:
+   ```bash
+   grep -r "datetime.utcnow()" storage-element/app/ admin-module/app/
+   ```
+2. Replace all occurrences с `datetime.now(timezone.utc)`
+3. Add linting rule (pylint/flake8) для prevent regression:
+   ```python
+   # .pylintrc or pyproject.toml
+   [tool.pylint.messages_control]
+   disable = ["datetime-utcnow-deprecated"]
+   ```
+4. Document pattern в development guide
+
+**Effort**: 30 minutes
+**Sprint**: 7
+
+**Связанные файлы**:
+- `storage-element/app/services/file_service.py:139,573,597` (fixed Sprint 6)
+- `storage-element/tests/utils/jwt_utils.py` (fixed Sprint 5)
+- `storage-element/app/services/wal_service.py` (fixed Sprint 5)
+- Potentially: other files not yet audited
+
+**Ссылки**:
+- [SPRINT_6_STATUS.md:229](storage-element/SPRINT_6_STATUS.md#L229) - Technical debt
+- [SPRINT_5_REPORT.md:84-99](storage-element/SPRINT_5_REPORT.md#L84-L99) - Sprint 5 fixes
+
+---
+
+### [HIGH] Initial Admin Auto-Creation (COMPLETED)
+
+**Модуль**: admin-module
+**Дата добавления**: 2025-01-11
+**Status**: ✅ COMPLETED (Sprint 3, 2025-01-13)
+**Оценка сложности**: средняя
+
+**Описание**:
+~~При первом запуске системы необходимо автоматически создавать администратора для начальной настройки~~
+
+**Completion Summary**:
+- ✅ Initial Admin service account auto-creation implemented (Sprint 3)
+- ✅ Configurable via environment variables (`INITIAL_ADMIN_*`)
+- ✅ Protection against deletion (`is_system=True` flag)
+- ✅ Production-ready с proper bcrypt hashing
+
+**Implementation Details**:
+- Auto-created on first startup если в БД нет service accounts
+- Configurable: name, client_id, client_secret, role
+- System flag prevents accidental deletion
+- Documented в CLAUDE.md Testing Credentials
+
+**Связанные файлы**:
+- `admin-module/app/core/config.py` - InitialAdminSettings
+- `admin-module/app/db/init_db.py` - create_initial_admin()
+- `admin-module/app/main.py` - lifespan integration
+- `admin-module/tests/unit/test_initial_admin.py` - tests
+
+**Ссылки**:
+- [DEVELOPMENT_PLAN.md:88-92](DEVELOPMENT_PLAN.md#L88-L92) - Sprint 3 achievement
+- [CLAUDE.md](CLAUDE.md) - Testing Credentials updated
+
+---
 
 ### [HIGH] API Endpoint Integration Tests
 
 **Модуль**: admin-module
 **Дата добавления**: 2025-01-10
 **Оценка сложности**: средняя
+
 **Описание**:
-- API endpoint тесты в `test_auth_integration.py` требуют dependency injection для test database
+- API endpoint tests в `test_auth_integration.py` требуют dependency injection для test database
 - Текущее состояние: 3 из 9 API tests падают из-за использования production database
 - AuthService integration tests все проходят (13/13)
 
@@ -194,6 +371,7 @@ userPassword: {SSHA}...
 **Модуль**: admin-module
 **Дата добавления**: 2025-01-10
 **Оценка сложности**: средняя
+
 **Описание**:
 - Методы `create_password_reset_token` и `reset_password` возвращают заглушки
 - Нужна реализация через Redis с TTL для токенов
@@ -214,134 +392,14 @@ userPassword: {SSHA}...
 
 ---
 
-### [HIGH] Автоматическое создание администратора при первом запуске
-
-**Модуль**: admin-module
-**Дата добавления**: 2025-01-11
-**Оценка сложности**: средняя
-**Описание**:
-- При первом запуске системы необходимо автоматически создавать администратора для начальной настройки
-- Параметры администратора должны быть настраиваемы через конфигурацию
-- Создание должно происходить только если в базе данных нет пользователей
-- Необходимо логировать факт создания администратора для аудита
-
-**План устранения**:
-1. Добавить `InitialAdminSettings` в `app/core/config.py`:
-   ```python
-   class InitialAdminSettings(BaseSettings):
-       """Настройки для автоматического создания администратора при первом запуске."""
-
-       enabled: bool = Field(default=True, alias="INITIAL_ADMIN_ENABLED")
-       username: str = Field(default="admin", alias="INITIAL_ADMIN_USERNAME")
-       password: str = Field(default="admin123", alias="INITIAL_ADMIN_PASSWORD")
-       email: str = Field(default="admin@artstore.local", alias="INITIAL_ADMIN_EMAIL")
-       firstname: str = Field(default="System", alias="INITIAL_ADMIN_FIRSTNAME")
-       lastname: str = Field(default="Administrator", alias="INITIAL_ADMIN_LASTNAME")
-
-       model_config = SettingsConfigDict(env_prefix="INITIAL_ADMIN_", case_sensitive=False, extra="allow")
-
-       @field_validator("password")
-       @classmethod
-       def validate_password_strength(cls, v: str) -> str:
-           """Валидация минимальной сложности пароля."""
-           if len(v) < 8:
-               raise ValueError("Initial admin password must be at least 8 characters")
-           return v
-   ```
-
-2. Добавить `initial_admin` поле в класс `Settings`:
-   ```python
-   initial_admin: InitialAdminSettings = Field(default_factory=InitialAdminSettings)
-   ```
-
-3. Создать startup функцию в `app/db/init_db.py`:
-   ```python
-   async def create_initial_admin(settings: Settings, db: AsyncSession) -> None:
-       """
-       Создание начального администратора при первом запуске.
-
-       Выполняется только если:
-       - initial_admin.enabled = True
-       - В базе данных нет пользователей
-       """
-       # Check if any users exist
-       result = await db.execute(select(func.count()).select_from(User))
-       user_count = result.scalar()
-
-       if user_count == 0 and settings.initial_admin.enabled:
-           # Create initial admin
-           logger.info("No users found, creating initial administrator")
-           # Implementation...
-   ```
-
-4. Интегрировать в lifespan context в `app/main.py`:
-   ```python
-   @asynccontextmanager
-   async def lifespan(app: FastAPI):
-       # Database initialization
-       await init_db()
-
-       # Create initial admin if needed
-       async with AsyncSessionLocal() as db:
-           await create_initial_admin(settings, db)
-
-       yield
-
-       await close_db()
-   ```
-
-5. Добавить environment variables в `.env.example`:
-   ```bash
-   # Initial Administrator (created on first startup)
-   INITIAL_ADMIN_ENABLED=true
-   INITIAL_ADMIN_USERNAME=admin
-   INITIAL_ADMIN_PASSWORD=ChangeMe123!  # ОБЯЗАТЕЛЬНО ИЗМЕНИТЬ В PRODUCTION
-   INITIAL_ADMIN_EMAIL=admin@artstore.local
-   INITIAL_ADMIN_FIRSTNAME=System
-   INITIAL_ADMIN_LASTNAME=Administrator
-   ```
-
-6. Добавить unit tests:
-   ```python
-   # tests/unit/test_initial_admin.py
-   async def test_create_initial_admin_when_no_users()
-   async def test_skip_initial_admin_when_users_exist()
-   async def test_skip_initial_admin_when_disabled()
-   async def test_validate_password_strength()
-   ```
-
-7. Обновить документацию:
-   - `admin-module/README.md` - секция "First-time Setup"
-   - `CLAUDE.md` - добавить в Testing Credentials
-   - Docker healthcheck проверяет наличие admin пользователя
-
-**Связанные файлы**:
-- Изменить: `admin-module/app/core/config.py` - добавить InitialAdminSettings
-- Создать: `admin-module/app/db/init_db.py` - create_initial_admin функция
-- Изменить: `admin-module/app/main.py` - интегрировать в lifespan
-- Изменить: `admin-module/.env.example` - добавить INITIAL_ADMIN_* переменные
-- Изменить: `admin-module/README.md` - документировать first-time setup
-- Создать: `admin-module/tests/unit/test_initial_admin.py` - тесты
-- Изменить: `CLAUDE.md` - обновить Testing Credentials секцию
-
-**Требования безопасности**:
-- Дефолтный пароль должен быть достаточно сложным (минимум 8 символов)
-- В production ОБЯЗАТЕЛЬНО должен быть изменен через environment variables
-- Факт создания администратора логируется в audit log
-- После создания рекомендуется сменить пароль через API
-- Docker образ НЕ должен содержать production пароль в Dockerfile
-
-**Ссылки**:
-- [CLAUDE.md:367](file:///home/artur/Projects/artStore/CLAUDE.md#L367) - Testing Credentials
-- [admin-module/app/core/config.py](file:///home/artur/Projects/artStore/admin-module/app/core/config.py) - Конфигурация
-
----
+## 🟢 Средний приоритет
 
 ### [MEDIUM] pytest-asyncio Dependency
 
 **Модуль**: admin-module
 **Дата добавления**: 2025-01-10
 **Оценка сложности**: низкая
+
 **Описание**:
 - `pytest-asyncio` установлен в runtime, но отсутствует в requirements.txt
 - Может вызвать проблемы при CI/CD или на других машинах
@@ -358,13 +416,14 @@ userPassword: {SSHA}...
 
 ---
 
-## 🟢 Низкий приоритет
+## ⚪ Низкий приоритет
 
 ### [LOW] Test Coverage для API Endpoints
 
 **Модуль**: admin-module
 **Дата добавления**: 2025-01-10
 **Оценка сложности**: средняя
+
 **Описание**:
 - API endpoint tests покрывают только базовый happy path и простые error cases
 - Отсутствуют тесты для edge cases (expired tokens, concurrent requests, rate limiting)
@@ -395,6 +454,7 @@ userPassword: {SSHA}...
 **Модуль**: admin-module
 **Дата добавления**: 2025-01-10
 **Оценка сложности**: низкая
+
 **Описание**:
 - Healthcheck только проверяет `/health/live` endpoint
 - Не проверяет готовность dependencies (PostgreSQL, Redis)
@@ -423,14 +483,14 @@ userPassword: {SSHA}...
 ### Устранение долга
 1. Создать feature branch: `debt/название-долга`
 2. Реализовать решение согласно плану устранения
-3. Обновить статус в этом файле или удалить запись
+3. Обновить статус в этом файле (COMPLETED) или удалить запись
 4. Сделать commit: `fix: resolve technical debt - [название]`
 
 ### Приоритезация
-- 🔴 **CRITICAL**: Блокирует production deployment или создает security риски
-- 🟡 **HIGH**: Важно для качества, но не блокирует работу
-- 🟢 **MEDIUM**: Улучшения качества кода
-- ⚪ **LOW**: Nice to have, можно отложить
+- 🔴 **CRITICAL (P0)**: Блокирует production deployment или критические функции
+- 🟡 **HIGH (P1)**: Важно для качества, но не блокирует работу
+- 🟢 **MEDIUM (P2)**: Улучшения качества кода и maintainability
+- ⚪ **LOW (P3)**: Nice to have, можно отложить
 
 ### Ревью долга
 - Еженедельный ревью новых долгов на team meeting
@@ -439,5 +499,27 @@ userPassword: {SSHA}...
 
 ---
 
-**Последнее обновление**: 2025-01-11
-**Общее количество долгов**: 8 (2 CRITICAL, 4 HIGH, 2 LOW, 0 MEDIUM)
+## Статистика технологического долга
+
+### По приоритетам
+- 🔴 **CRITICAL**: 4 (3 active + 1 cancelled)
+- 🟡 **HIGH**: 4 (2 active + 1 completed + 1 planned for Sprint 7)
+- 🟢 **MEDIUM**: 1
+- ⚪ **LOW**: 2
+
+### По статусу
+- ✅ **COMPLETED**: 1 (Initial Admin Auto-Creation)
+- ❌ **CANCELLED**: 1 (LDAP Infrastructure)
+- ⏳ **IN PROGRESS**: 3 (Sprint 6 → Sprint 7)
+- 📋 **PLANNED**: 7
+
+### По модулям
+- **storage-element**: 4 (3 CRITICAL + 1 HIGH)
+- **admin-module**: 5 (1 CRITICAL + 2 HIGH + 2 LOW)
+- **Все модули**: 1 (1 CRITICAL - JSON logging)
+
+---
+
+**Последнее обновление**: 2025-11-14 (Sprint 6)
+**Общее количество долгов**: 12 (4 CRITICAL, 4 HIGH, 1 MEDIUM, 2 LOW, 1 CANCELLED)
+**Следующий ревью**: Sprint 7 completion
