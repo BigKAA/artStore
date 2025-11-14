@@ -21,7 +21,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.core.config import settings
@@ -39,17 +39,29 @@ def test_file():
     return io.BytesIO(TEST_FILE_CONTENT)
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def auth_headers():
     """
-    Authentication headers для integration tests.
+    Authentication headers с реальными JWT токенами для integration tests.
 
-    ВАЖНО: В production tests должны использовать реальные JWT токены.
-    Для local testing можно использовать mock authentication.
+    Использует JWT utilities для генерации валидных RS256 токенов,
+    совместимых с admin-module authentication system.
+
+    ВАЖНО: scope="function" - токен генерируется для каждого теста,
+    чтобы избежать expiration issues при длительных test runs.
+
+    Returns:
+        Dict[str, str]: HTTP headers с Authorization Bearer токеном
     """
-    # TODO: Implement real JWT token generation for integration tests
-    # For now, assuming authentication is mocked in test environment
-    return {}
+    from tests.utils.jwt_utils import create_auth_headers
+
+    # Создаем СВЕЖИЙ токен с admin ролью для полного доступа к API
+    return create_auth_headers(
+        username="integration_test_user",
+        email="integration@test.artstore.local",
+        role="admin",
+        user_id="integration_test_id"
+    )
 
 
 class TestFileUploadIntegration:
@@ -58,7 +70,7 @@ class TestFileUploadIntegration:
     @pytest.mark.asyncio
     async def test_upload_file_success(self, test_file, auth_headers):
         """Тест успешной загрузки файла через API"""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             files = {
                 "file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)
             }
@@ -95,7 +107,7 @@ class TestFileUploadIntegration:
     @pytest.mark.asyncio
     async def test_upload_file_with_custom_attributes(self, test_file, auth_headers):
         """Тест загрузки файла с custom_attributes (Template Schema v2.0)"""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Note: Custom attributes should be passed via metadata field
             # They will be stored in attr.json as custom_attributes in v2.0 format
             files = {
@@ -134,7 +146,7 @@ class TestFileUploadIntegration:
         large_content = b"x" * (10 * 1024 * 1024)
         large_file = io.BytesIO(large_content)
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             files = {
                 "file": ("large_file.bin", large_file, "application/octet-stream")
             }
@@ -160,7 +172,7 @@ class TestFileUploadIntegration:
         if settings.app.mode.value in ["edit", "rw"]:
             pytest.skip("Storage is in edit/rw mode, upload allowed")
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             files = {
                 "file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)
             }
@@ -184,7 +196,7 @@ class TestFileDownloadIntegration:
         # First, upload a file
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Upload
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             upload_response = await client.post(
@@ -214,7 +226,7 @@ class TestFileDownloadIntegration:
         """Тест скачивания несуществующего файла"""
         fake_file_id = "00000000-0000-0000-0000-000000000000"
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/files/{fake_file_id}/download",
                 headers=auth_headers
@@ -229,7 +241,7 @@ class TestFileDownloadIntegration:
         large_content = b"y" * (5 * 1024 * 1024)  # 5MB
         large_file = io.BytesIO(large_content)
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Upload
             files = {"file": ("large_stream.bin", large_file, "application/octet-stream")}
             upload_response = await client.post(
@@ -267,7 +279,7 @@ class TestFileMetadataIntegration:
         # Upload file first
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Upload
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             data = {"description": "Test metadata", "version": "1.0"}
@@ -306,7 +318,7 @@ class TestFileMetadataIntegration:
         # Upload file first
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Upload
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             upload_response = await client.post(
@@ -337,7 +349,7 @@ class TestFileMetadataIntegration:
     @pytest.mark.asyncio
     async def test_list_files_pagination(self, auth_headers):
         """Тест получения списка файлов с пагинацией"""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Upload multiple files
             for i in range(5):
                 test_file = io.BytesIO(f"Test file {i}".encode())
@@ -377,7 +389,7 @@ class TestFileDeleteIntegration:
         # Upload file first
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Upload
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             upload_response = await client.post(
@@ -412,7 +424,7 @@ class TestFileDeleteIntegration:
         # For this test, we assume file exists from previous operations
         fake_file_id = "00000000-0000-0000-0000-000000000000"
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
                 f"/api/v1/files/{fake_file_id}",
                 headers=auth_headers
@@ -430,7 +442,7 @@ class TestTemplateSchemaV2Integration:
         """Тест создания attr.json в v2.0 формате"""
         test_file = io.BytesIO(TEST_FILE_CONTENT)
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Upload file
             files = {"file": (TEST_FILE_NAME, test_file, TEST_FILE_CONTENT_TYPE)}
             data = {

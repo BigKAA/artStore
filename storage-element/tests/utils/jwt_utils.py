@@ -9,7 +9,7 @@ JWT Token Generation Utilities для Integration Tests.
 """
 
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -112,7 +112,8 @@ def generate_test_jwt_token(
     """
     private_key = load_private_key()
 
-    now = datetime.utcnow()
+    # ВАЖНО: Используем timezone-aware datetime для корректных timestamps
+    now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=expires_in_minutes)
 
     # Базовые claims согласно JWT стандарту
