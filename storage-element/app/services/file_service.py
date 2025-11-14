@@ -342,7 +342,7 @@ class FileService:
                 "File retrieved successfully",
                 extra={
                     "file_id": str(file_id),
-                    "filename": metadata.original_filename
+                    "original_filename": metadata.original_filename
                 }
             )
 
@@ -442,7 +442,7 @@ class FileService:
                 "File deleted successfully",
                 extra={
                     "file_id": str(file_id),
-                    "filename": metadata.original_filename,
+                    "original_filename": metadata.original_filename,
                     "user_id": user_id
                 }
             )
