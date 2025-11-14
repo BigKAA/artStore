@@ -10,10 +10,9 @@ from uuid import UUID
 
 from sqlalchemy import String, Integer, BigInteger, DateTime, Index, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB, TSVECTOR
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, declared_attr
 from sqlalchemy import func
 
-from app.core.config import settings
 from app.db.base import Base
 
 
@@ -42,7 +41,11 @@ class FileMetadata(Base):
     - metadata_json: Дополнительные метаданные (JSONB)
     """
 
-    __tablename__ = f"{settings.database.table_prefix}_files"
+    @declared_attr
+    def __tablename__(cls) -> str:
+        """Dynamic table name based on configuration."""
+        from app.core.config import settings
+        return f"{settings.database.table_prefix}_files"
 
     # Primary Key
     file_id: Mapped[UUID] = mapped_column(
@@ -157,32 +160,36 @@ class FileMetadata(Base):
         comment="Дополнительные метаданные (расширяемое поле)"
     )
 
-    # Indexes для оптимизации поиска
-    __table_args__ = (
-        # Full-text search index (GIN)
-        Index(
-            f"idx_{settings.database.table_prefix}_search_vector",
-            "search_vector",
-            postgresql_using="gin"
-        ),
-        # Composite index для поиска по пользователю и дате
-        Index(
-            f"idx_{settings.database.table_prefix}_user_date",
-            "created_by_id",
-            "created_at"
-        ),
-        # Index для поиска по оригинальному имени
-        Index(
-            f"idx_{settings.database.table_prefix}_filename",
-            "original_filename"
-        ),
-        # JSONB index для поиска по metadata
-        Index(
-            f"idx_{settings.database.table_prefix}_metadata",
-            "metadata_json",
-            postgresql_using="gin"
-        ),
-    )
+    @declared_attr
+    def __table_args__(cls) -> tuple:
+        """Dynamic table arguments with runtime table prefix."""
+        from app.core.config import settings
+        prefix = settings.database.table_prefix
+        return (
+            # Full-text search index (GIN)
+            Index(
+                f"idx_{prefix}_search_vector",
+                "search_vector",
+                postgresql_using="gin"
+            ),
+            # Composite index для поиска по пользователю и дате
+            Index(
+                f"idx_{prefix}_user_date",
+                "created_by_id",
+                "created_at"
+            ),
+            # Index для поиска по оригинальному имени
+            Index(
+                f"idx_{prefix}_filename",
+                "original_filename"
+            ),
+            # JSONB index для поиска по metadata
+            Index(
+                f"idx_{prefix}_metadata",
+                "metadata_json",
+                postgresql_using="gin"
+            ),
+        )
 
     def __repr__(self) -> str:
         return (

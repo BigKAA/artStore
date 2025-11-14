@@ -9,10 +9,10 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import String, DateTime, Boolean
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, declared_attr
 from sqlalchemy import func
 
-from app.core.config import settings, StorageMode
+from app.core.config import StorageMode
 from app.db.base import Base
 
 
@@ -34,7 +34,11 @@ class StorageConfig(Base):
     - last_cache_rebuild: Время последней пересборки кеша
     """
 
-    __tablename__ = f"{settings.database.table_prefix}_config"
+    @declared_attr
+    def __tablename__(cls) -> str:
+        """Dynamic table name based on configuration."""
+        from app.core.config import settings
+        return f"{settings.database.table_prefix}_config"
 
     # Singleton primary key
     id: Mapped[int] = mapped_column(

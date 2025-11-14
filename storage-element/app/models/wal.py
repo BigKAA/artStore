@@ -14,10 +14,9 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import String, DateTime, Text, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, declared_attr
 from sqlalchemy import func
 
-from app.core.config import settings
 from app.db.base import Base
 
 
@@ -56,7 +55,11 @@ class WALTransaction(Base):
     - duration_ms: Длительность в миллисекундах
     """
 
-    __tablename__ = f"{settings.database.table_prefix}_wal"
+    @declared_attr
+    def __tablename__(cls) -> str:
+        """Dynamic table name based on configuration."""
+        from app.core.config import settings
+        return f"{settings.database.table_prefix}_wal"
 
     # Primary Key
     transaction_id: Mapped[UUID] = mapped_column(
@@ -131,27 +134,31 @@ class WALTransaction(Base):
         comment="User ID инициатора операции"
     )
 
-    # Indexes для оптимизации запросов
-    __table_args__ = (
-        # Composite index для поиска по статусу и времени
-        Index(
-            f"idx_{settings.database.table_prefix}_wal_status_time",
-            "status",
-            "started_at"
-        ),
-        # Index для поиска по файлу
-        Index(
-            f"idx_{settings.database.table_prefix}_wal_file",
-            "file_id",
-            "started_at"
-        ),
-        # Index для JSONB поиска
-        Index(
-            f"idx_{settings.database.table_prefix}_wal_data",
-            "operation_data",
-            postgresql_using="gin"
-        ),
-    )
+    @declared_attr
+    def __table_args__(cls) -> tuple:
+        """Dynamic table arguments with runtime table prefix."""
+        from app.core.config import settings
+        prefix = settings.database.table_prefix
+        return (
+            # Composite index для поиска по статусу и времени
+            Index(
+                f"idx_{prefix}_wal_status_time",
+                "status",
+                "started_at"
+            ),
+            # Index для поиска по файлу
+            Index(
+                f"idx_{prefix}_wal_file",
+                "file_id",
+                "started_at"
+            ),
+            # Index для JSONB поиска
+            Index(
+                f"idx_{prefix}_wal_data",
+                "operation_data",
+                postgresql_using="gin"
+            ),
+        )
 
     def __repr__(self) -> str:
         return (
