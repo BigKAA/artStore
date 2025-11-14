@@ -24,16 +24,17 @@ if not public_key_path.exists():
 
 os.environ["JWT_PUBLIC_KEY_PATH"] = str(public_key_path)
 
-# Настройки для integration tests (если не заданы через environment)
-os.environ.setdefault("DB_HOST", "localhost")
-os.environ.setdefault("DB_PORT", "5433")
-os.environ.setdefault("DB_USERNAME", "artstore_test")
-os.environ.setdefault("DB_PASSWORD", "test_password")
-os.environ.setdefault("DB_DATABASE", "artstore_test")
-os.environ.setdefault("DB_TABLE_PREFIX", "test_storage")
-os.environ.setdefault("REDIS_HOST", "localhost")
-os.environ.setdefault("REDIS_PORT", "6380")
-os.environ.setdefault("LOG_LEVEL", "DEBUG")
+# Настройки для integration tests (ОБЯЗАТЕЛЬНО установить ДО импортов app)
+# Используем прямое присваивание чтобы гарантировать что тестовые значения используются
+os.environ["DB_HOST"] = "localhost"
+os.environ["DB_PORT"] = "5433"
+os.environ["DB_USERNAME"] = "artstore_test"
+os.environ["DB_PASSWORD"] = "test_password"
+os.environ["DB_DATABASE"] = "artstore_test"
+os.environ["DB_TABLE_PREFIX"] = "test_storage"  # CRITICAL: Must match Alembic migrations!
+os.environ["REDIS_HOST"] = "localhost"
+os.environ["REDIS_PORT"] = "6380"
+os.environ["LOG_LEVEL"] = "DEBUG"
 
 
 @pytest.fixture(scope="session")
@@ -183,10 +184,29 @@ def verify_test_environment():
     - JWT public key существует
     - Environment variables установлены
     - Тестовая БД доступна (опционально)
+    - RELOAD settings после установки environment variables
 
     Raises:
         RuntimeError: Если тестовое окружение не готово
     """
+    # CRITICAL: Перезагрузить settings ПОСЛЕ установки environment variables
+    # Без этого settings будет использовать default values из config.py
+    import importlib
+    import sys
+
+    # Удалить закешированные settings modules
+    modules_to_reload = [
+        'app.core.config',
+        'app.db.session',
+        'app.models.file_metadata',
+        'app.models.storage_config',
+        'app.models.wal',
+    ]
+
+    for module_name in modules_to_reload:
+        if module_name in sys.modules:
+            importlib.reload(sys.modules[module_name])
+
     # Проверка JWT ключа
     jwt_key_path = os.environ.get("JWT_PUBLIC_KEY_PATH")
     if not jwt_key_path or not Path(jwt_key_path).exists():
@@ -199,6 +219,7 @@ def verify_test_environment():
     # Проверка обязательных environment variables
     required_vars = [
         "DB_HOST", "DB_PORT", "DB_USERNAME", "DB_PASSWORD", "DB_DATABASE",
+        "DB_TABLE_PREFIX",  # CRITICAL for integration tests
         "REDIS_HOST", "REDIS_PORT"
     ]
 
@@ -210,10 +231,24 @@ def verify_test_environment():
             "Run: ./scripts/run_integration_tests.sh"
         )
 
+    # Verify table prefix matches test database
+    from app.core.config import settings
+    expected_prefix = "test_storage"
+    actual_prefix = settings.database.table_prefix
+
+    if actual_prefix != expected_prefix:
+        raise RuntimeError(
+            f"Table prefix mismatch!\n"
+            f"Expected: {expected_prefix}\n"
+            f"Actual: {actual_prefix}\n"
+            f"Settings not reloaded correctly. Check conftest.py setup."
+        )
+
     print("\n" + "="*60)
     print("Integration Test Environment Configuration:")
     print("="*60)
     print(f"Database: {os.environ.get('DB_USERNAME')}@{os.environ.get('DB_HOST')}:{os.environ.get('DB_PORT')}/{os.environ.get('DB_DATABASE')}")
+    print(f"Table Prefix: {settings.database.table_prefix} (verified)")
     print(f"Redis: {os.environ.get('REDIS_HOST')}:{os.environ.get('REDIS_PORT')}")
     print(f"JWT Key: {jwt_key_path}")
     print(f"Storage API: {os.environ.get('STORAGE_API_URL', 'N/A')}")

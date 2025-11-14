@@ -16,7 +16,7 @@ File Service - высокоуровневые операции с файлами
 
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator, BinaryIO, Optional
 from uuid import UUID, uuid4
@@ -136,7 +136,7 @@ class FileService:
             ...     )
         """
         file_id = uuid4()
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         transaction_id = None
 
         # Генерация имен и путей
@@ -570,7 +570,7 @@ class FileService:
             if metadata is not None:
                 db_metadata.metadata_json = metadata
 
-            db_metadata.updated_at = datetime.utcnow()
+            db_metadata.updated_at = datetime.now(timezone.utc)
             await self.db.commit()
 
             # ШАГ 3: Обновление attr.json
@@ -594,7 +594,7 @@ class FileService:
             if metadata is not None:
                 attributes.metadata = metadata
 
-            attributes.updated_at = datetime.utcnow()
+            attributes.updated_at = datetime.now(timezone.utc)
 
             # Запись обновленных атрибутов
             await write_attr_file(attr_file_path, attributes)
