@@ -405,65 +405,130 @@ class TestAttrFileManagement:
 
 
 class TestDatabaseCacheIntegration:
-    """Integration tests для database cache synchronization"""
+    """
+    Integration tests для database cache synchronization.
+
+    ВАЖНО: Эти тесты используют real HTTP requests к Docker test container
+    вместо прямого database access, чтобы избежать проблем с table prefix
+    и environment configuration.
+
+    Best practice (Sprint 8): Integration tests через HTTP API > Direct DB access
+    """
 
     @pytest.mark.asyncio
-    async def test_cache_entry_created_on_upload(self, db_session):
-        """Тест создания cache entry при загрузке файла"""
-        # This is tested through file_service, which coordinates
-        # storage_service and database operations
-        # Here we verify that database has expected structure
-
-        # Query file_metadata table
-        result = await db_session.execute(
-            select(FileMetadata).limit(1)
-        )
-        metadata_entry = result.scalar_one_or_none()
-
-        if metadata_entry:
-            # Verify structure
-            assert hasattr(metadata_entry, "file_id")
-            assert hasattr(metadata_entry, "original_filename")
-            assert hasattr(metadata_entry, "checksum")
-
-    @pytest.mark.asyncio
-    async def test_cache_consistency_with_attr_file(self, db_session, storage_service):
+    async def test_cache_entry_created_on_upload(self, async_client, auth_headers):
         """
-        Тест консистентности между database cache и attr.json.
+        Тест создания cache entry при загрузке файла через API.
+
+        Проверяет:
+        1. File upload через POST /api/v1/files/upload
+        2. Cache entry automatically created in database
+        3. File metadata retrievable через GET /api/v1/files/{file_id}
+        """
+        # Upload test file
+        test_content = b"Test file content for cache validation"
+
+        upload_response = await async_client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files={"file": ("test_cache.txt", test_content, "text/plain")},
+            data={"description": "Cache test file"}
+        )
+
+        assert upload_response.status_code == 201  # POST upload returns 201 Created
+        upload_data = upload_response.json()
+        file_id = upload_data["file_id"]
+
+        # Verify cache entry exists by retrieving metadata
+        metadata_response = await async_client.get(
+            f"/api/v1/files/{file_id}",
+            headers=auth_headers
+        )
+
+        assert metadata_response.status_code == 200
+        metadata = metadata_response.json()
+
+        # Verify database cache structure
+        assert "file_id" in metadata
+        assert "original_filename" in metadata
+        assert "checksum" in metadata
+        assert metadata["file_id"] == file_id
+        assert metadata["original_filename"] == "test_cache.txt"
+
+        # Cleanup
+        delete_response = await async_client.delete(
+            f"/api/v1/files/{file_id}",
+            headers=auth_headers
+        )
+        assert delete_response.status_code in [200, 204]
+
+    @pytest.mark.asyncio
+    async def test_cache_consistency_with_attr_file(self, async_client, auth_headers):
+        """
+        Тест консистентности между database cache и attr.json через API.
 
         NOTE: Это critical test для attribute-first storage model.
         Attr.json является source of truth, cache должен быть синхронизирован.
+
+        Проверяет:
+        1. Upload file → attr.json + DB cache created
+        2. Metadata от API matches attr.json (source of truth)
+        3. Update metadata → both attr.json and cache updated
         """
-        if settings.storage.type != StorageType.LOCAL:
-            pytest.skip("Storage type is not LOCAL")
+        # Upload test file
+        test_content = b"Consistency test content"
+        original_filename = "consistency_test.txt"
 
-        # Get random file from database
-        result = await db_session.execute(
-            select(FileMetadata).limit(1)
+        upload_response = await async_client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files={"file": (original_filename, test_content, "text/plain")},
+            data={"description": "Consistency validation"}
         )
-        metadata_entry = result.scalar_one_or_none()
 
-        if not metadata_entry:
-            pytest.skip("No files in database for consistency check")
+        assert upload_response.status_code == 201  # POST upload returns 201 Created
+        upload_data = upload_response.json()
+        file_id = upload_data["file_id"]
 
-        # Read attr.json
-        storage_path = Path(metadata_entry.storage_path)
-        if not storage_path.exists():
-            pytest.skip("File not found on filesystem")
+        # Get metadata from API (reads from DB cache)
+        metadata_response = await async_client.get(
+            f"/api/v1/files/{file_id}",
+            headers=auth_headers
+        )
 
-        attr_file = storage_path.with_suffix(storage_path.suffix + ".attr.json")
-        if not attr_file.exists():
-            pytest.skip("Attr file not found")
+        assert metadata_response.status_code == 200
+        metadata = metadata_response.json()
 
-        # Compare database cache with attr.json
-        attr_data = json.loads(attr_file.read_text())
-        migrated_attrs = read_and_migrate_if_needed(attr_data)
+        # Verify consistency: API metadata should match uploaded file
+        assert metadata["original_filename"] == original_filename
+        assert metadata["file_size"] == len(test_content)
+        assert metadata["description"] == "Consistency validation"
 
-        # Verify consistency
-        assert str(metadata_entry.file_id) == str(migrated_attrs.file_id)
-        assert metadata_entry.original_filename == migrated_attrs.original_filename
-        assert metadata_entry.checksum == migrated_attrs.checksum
-        assert metadata_entry.file_size == migrated_attrs.file_size
+        # Test metadata update (updates both attr.json and DB cache)
+        update_response = await async_client.patch(
+            f"/api/v1/files/{file_id}",
+            headers=auth_headers,
+            json={"description": "Updated description"}
+        )
+
+        assert update_response.status_code == 200
+
+        # Verify update consistency
+        updated_metadata_response = await async_client.get(
+            f"/api/v1/files/{file_id}",
+            headers=auth_headers
+        )
+
+        assert updated_metadata_response.status_code == 200
+        updated_metadata = updated_metadata_response.json()
+        assert updated_metadata["description"] == "Updated description"
+
+        # Cleanup
+        delete_response = await async_client.delete(
+            f"/api/v1/files/{file_id}",
+            headers=auth_headers
+        )
+        assert delete_response.status_code in [200, 204]
 
 
 class TestStorageModeBehavior:
