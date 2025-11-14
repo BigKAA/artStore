@@ -56,7 +56,9 @@ class TestFileAttributesModel:
 
     def test_validate_file_size_positive(self):
         """Валидация положительного размера файла"""
-        with pytest.raises(ValueError, match="File size must be positive"):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="Input should be greater than 0"):
             FileAttributes(
                 file_id=uuid4(),
                 original_filename="file.pdf",
@@ -128,7 +130,26 @@ class TestFileAttributesModel:
 
         assert attrs.created_by_fullname is None
         assert attrs.description is None
-        assert attrs.metadata == {}  # Default factory
+        assert attrs.metadata is None  # Явно передан None
+
+    def test_metadata_default_factory(self):
+        """Metadata использует default_factory когда не передан явно"""
+        attrs = FileAttributes(
+            file_id=uuid4(),
+            original_filename="file.pdf",
+            storage_filename="file_user_20250111T120000_abc123.pdf",
+            file_size=1024,
+            content_type="application/pdf",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            created_by_id="user123",
+            created_by_username="testuser",
+            storage_path="2025/01/11/12/file.pdf",
+            checksum="a" * 64
+            # metadata НЕ передан - должен использоваться default_factory
+        )
+
+        assert attrs.metadata == {}  # Default factory dict
 
     def test_metadata_field(self):
         """Поле metadata может содержать произвольные данные"""
