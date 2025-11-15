@@ -485,36 +485,138 @@ curl -X POST http://localhost:8000/api/auth/token \
 
 ## Monitoring and Logging
 
-### Advanced Monitoring Requirements
+### Sprint 14 Implementation Status: ✅ COMPLETE
 
-All modules must implement comprehensive observability:
+All modules now have comprehensive observability with OpenTelemetry distributed tracing, Prometheus metrics, and Grafana dashboards.
 
-#### OpenTelemetry Integration (Mandatory)
+### Quick Start
+
+```bash
+# 1. Start base infrastructure (if not running)
+docker-compose up -d
+
+# 2. Start monitoring stack
+docker-compose -f docker-compose.monitoring.yml up -d
+
+# 3. Access monitoring interfaces
+# Prometheus: http://localhost:9090
+# Grafana: http://localhost:3000 (admin / admin123)
+# AlertManager: http://localhost:9093
+```
+
+### Monitoring Stack Components
+
+- **Prometheus** (http://localhost:9090): Metrics collection from all modules every 15 seconds
+- **Grafana** (http://localhost:3000): Pre-configured dashboards for system overview
+- **AlertManager** (http://localhost:9093): Alert routing and notifications
+- **Node Exporter** (http://localhost:9100): Host system metrics
+
+**Full Documentation**: See `monitoring/README.md` for comprehensive setup guide, troubleshooting, and PromQL examples.
+
+### OpenTelemetry Integration (✅ Implemented)
+
+All modules (admin-module, storage-element, ingester-module, query-module) implement:
+
 - **Distributed Tracing**: Полное инструментирование всех HTTP requests, database queries, Redis operations
 - **Trace Correlation**: Уникальные trace ID для корреляции across all микросервисы
 - **Span Context Propagation**: Передача trace context через headers и message queues
 - **Performance Profiling**: Детальное профилирование критических операций
 
-#### Custom Business Metrics (Required)
-- **File Operation Metrics**: Upload/download latency, success rates, error types
-- **Search Performance**: Query response time, result relevance, cache efficiency
-- **Storage Utilization**: Disk usage, growth rates, capacity forecasting
-- **Authentication Metrics**: JWT validation time, key rotation frequency, security events
-- **System Health**: Memory usage, CPU utilization, garbage collection metrics
+**Implementation**: Each module has `app/core/observability.py` with `setup_observability()` function:
+```python
+from app.core.observability import setup_observability
 
+setup_observability(
+    app=app,
+    service_name="artstore-{module-name}",
+    service_version=settings.app.version,
+    enable_tracing=True
+)
+```
 
-#### Third-party Analytics Integration
-- **Metrics Export**: Prometheus metrics для integration с external analytics platforms (Grafana, DataDog, New Relic)
-- **Log Aggregation**: Structured logs для ELK Stack, Splunk, и других log analysis систем
-- **Trace Data**: OpenTelemetry traces для external APM platforms (Jaeger, Zipkin)
-- **Custom Dashboards**: API для integration с external monitoring и business intelligence систем
+### Prometheus Metrics (✅ Implemented)
 
-#### Standard Monitoring (Baseline)
-- Prometheus metrics at `/metrics`
-- Health checks at `/health/live` and `/health/ready`
-- Structured logging (JSON format mandatory)
-- Connection pool monitoring for database connections
-- Real-time dashboard integration (Grafana/custom dashboards)
+All modules expose metrics at `/metrics` endpoint:
+
+```bash
+# Check metrics for each module
+curl http://localhost:8000/metrics  # Admin Module
+curl http://localhost:8010/metrics  # Storage Element
+curl http://localhost:8020/metrics  # Ingester Module
+curl http://localhost:8030/metrics  # Query Module
+```
+
+**Standard Metrics**:
+- `http_requests_total` - Total HTTP requests
+- `http_request_duration_seconds` - HTTP request latency
+- `http_request_size_bytes` - HTTP request size
+- `http_response_size_bytes` - HTTP response size
+- `process_cpu_seconds_total` - CPU time
+- `process_resident_memory_bytes` - Memory usage
+
+**Custom Business Metrics** (TODO: Sprint 15):
+- File Operation Metrics: Upload/download latency, success rates, error types
+- Search Performance: Query response time, result relevance, cache efficiency
+- Storage Utilization: Disk usage, growth rates, capacity forecasting
+- Authentication Metrics: JWT validation time, key rotation frequency, security events
+
+### Grafana Dashboards (✅ Implemented)
+
+Pre-configured dashboard: **ArtStore - System Overview**
+
+Access: http://localhost:3000 → Dashboards → ArtStore → System Overview
+
+**Panels**:
+1. **Services Up**: Gauge showing number of healthy services
+2. **HTTP Requests Rate**: Time series of requests per second by service
+3. **HTTP Response Time**: p95 and p99 latency by service
+4. **HTTP Error Rate**: 5xx error percentage by service
+
+**Custom dashboards**: Add to `monitoring/grafana/dashboards/` directory for auto-loading.
+
+### Alert Rules (✅ Implemented)
+
+**Critical Alerts**:
+- `ServiceDown`: Service unavailable for 2+ minutes
+- `HighErrorRate`: Error rate >5% for 5 minutes
+- `HighResponseTime`: p95 latency >500ms for 5 minutes
+
+**Warning Alerts**:
+- `HighCPUUsage`: CPU >80% for 10 minutes
+- `HighMemoryUsage`: Memory >85% for 10 minutes
+- `ConnectionPoolExhausted`: <10% available connections
+- `LowDiskSpace`: Disk usage >80%
+
+**Alert Configuration**: See `monitoring/prometheus/alerts.yml` and `monitoring/alertmanager/alertmanager.yml`
+
+### Health Checks (Baseline)
+
+All modules implement:
+- `/health/live` - Liveness probe (is service running?)
+- `/health/ready` - Readiness probe (can service handle traffic?)
+
+### Structured Logging (Mandatory)
+
+**Production Environment** (JSON format):
+```yaml
+environment:
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"  # ОБЯЗАТЕЛЬНО для production
+```
+
+**Development Environment** (text format allowed):
+```yaml
+environment:
+  LOG_LEVEL: "DEBUG"
+  LOG_FORMAT: "text"  # Только для development
+```
+
+### Third-party Analytics Integration
+
+- **Metrics Export**: Prometheus metrics compatible with Grafana, DataDog, New Relic
+- **Log Aggregation**: JSON structured logs for ELK Stack, Splunk integration
+- **Trace Data**: OpenTelemetry traces exportable to Jaeger, Zipkin
+- **Custom Dashboards**: Grafana provisioning API для automated dashboard deployment
 
 ## Security Considerations
 

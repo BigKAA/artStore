@@ -18,6 +18,7 @@ from prometheus_client import make_asgi_app
 
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.core.observability import setup_observability
 from app.db.database import init_db, close_db
 from app.services.cache_service import cache_service
 from app.services.download_service import download_service
@@ -95,6 +96,15 @@ app = FastAPI(
     debug=settings.debug,
     lifespan=lifespan
 )
+
+# Настройка OpenTelemetry observability
+setup_observability(
+    app=app,
+    service_name="artstore-query-module",
+    service_version="1.0.0",
+    enable_tracing=True  # TODO: добавить в конфигурацию
+)
+logger.info("OpenTelemetry observability configured")
 
 # CORS middleware
 app.add_middleware(

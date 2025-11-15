@@ -13,9 +13,11 @@ from app.core.config import settings
 from app.core.database import init_db, close_db, check_db_connection, get_db
 from app.core.redis import close_redis, check_redis_connection, service_discovery, redis_client
 from app.core.logging_config import setup_logging, get_logger
+from app.core.observability import setup_observability
 from app.db.init_db import create_initial_admin
 from app.api.v1.endpoints import health, auth
 from app.middleware import RateLimitMiddleware
+from prometheus_client import make_asgi_app
 
 # Настройка логирования (JSON формат по умолчанию)
 setup_logging()
@@ -86,6 +88,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Настройка OpenTelemetry observability
+setup_observability(
+    app=app,
+    service_name=settings.monitoring.opentelemetry_service_name,
+    service_version=settings.app_version,
+    enable_tracing=settings.monitoring.opentelemetry_enabled,
+    exporter_endpoint=settings.monitoring.opentelemetry_exporter_endpoint
+)
+logger.info("OpenTelemetry observability configured")
+
 # CORS middleware
 if settings.cors.enabled:
     app.add_middleware(
@@ -104,6 +116,11 @@ logger.info("Rate limiting middleware enabled")
 # Подключаем роутеры
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
+
+# Prometheus metrics endpoint
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+logger.info("Prometheus metrics endpoint mounted at /metrics")
 
 # TODO: Добавить роутеры для:
 # - /api/v1/users (управление пользователями)
