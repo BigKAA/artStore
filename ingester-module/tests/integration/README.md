@@ -222,13 +222,17 @@ For long-running tests, increase timeout or mark with `@pytest.mark.timeout(60)`
 6. **Error Scenarios**: Test both success and failure paths
 7. **Cleanup**: Ensure resources are properly cleaned up (async clients, connections)
 
+## Related Testing Documentation
+
+- **Performance Tests**: See `tests/performance/README.md` for performance benchmarks and load testing
+- **Unit Tests**: See `tests/unit/` for component-level unit tests
+
 ## Future Enhancements
 
-- [ ] Performance benchmarks (response time, throughput)
-- [ ] Load testing (concurrent uploads)
 - [ ] Chaos engineering tests (service failures)
 - [ ] Security penetration tests
 - [ ] End-to-end workflow tests with real Storage Element
+- [ ] Multi-region deployment testing
 
 ## Contact
 
