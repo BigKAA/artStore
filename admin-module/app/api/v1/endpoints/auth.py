@@ -24,7 +24,6 @@ from app.schemas.service_account import (
 )
 from app.services.auth_service import auth_service
 from app.services.token_service import token_service
-from app.services.ldap_service import ldap_service
 from app.services.service_account_service import ServiceAccountService
 from app.api.dependencies.auth import get_current_active_user
 from app.models.user import User
@@ -38,7 +37,7 @@ async def login(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Аутентификация пользователя (локальная или LDAP).
+    Аутентификация пользователя (локальная).
 
     - **username**: Имя пользователя или email
     - **password**: Пароль
@@ -46,11 +45,10 @@ async def login(
     Возвращает access и refresh токены.
     """
     # Аутентификация пользователя
-    user = await auth_service.authenticate(
+    user = await auth_service.authenticate_local(
         db=db,
         username=credentials.username,
-        password=credentials.password,
-        ldap_service=ldap_service
+        password=credentials.password
     )
 
     if not user:

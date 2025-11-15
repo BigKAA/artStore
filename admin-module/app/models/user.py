@@ -1,6 +1,7 @@
 """
 Модель пользователя для Admin Module.
-Поддерживает как локальную аутентификацию, так и LDAP интеграцию.
+Поддерживает локальную аутентификацию через OAuth 2.0.
+Примечание: LDAP поля (ldap_dn) deprecated после Sprint 13 и не используются.
 """
 
 from datetime import datetime, timedelta
@@ -33,9 +34,7 @@ class User(Base, TimestampMixin):
     """
     Модель пользователя.
 
-    Поддерживает два типа аутентификации:
-    1. Локальная (hashed_password не None) - для system admin и сервисных аккаунтов
-    2. LDAP (ldap_dn не None) - для корпоративных пользователей
+    Поддерживает локальную аутентификацию (OAuth 2.0).
 
     Attributes:
         id: Уникальный идентификатор пользователя
@@ -43,8 +42,8 @@ class User(Base, TimestampMixin):
         email: Email адрес (уникальный)
         first_name: Имя
         last_name: Фамилия
-        hashed_password: Хеш пароля для локальной аутентификации (None для LDAP пользователей)
-        ldap_dn: Distinguished Name в LDAP (None для локальных пользователей)
+        hashed_password: Хеш пароля для локальной аутентификации
+        ldap_dn: DEPRECATED - не используется после Sprint 13 (LDAP removal)
         role: Роль пользователя в системе
         status: Текущий статус пользователя
         is_system: Флаг системного пользователя (не может быть удален)
@@ -93,7 +92,7 @@ class User(Base, TimestampMixin):
     hashed_password: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
-        comment="Хеш пароля для локальной аутентификации (None для LDAP)"
+        comment="Хеш пароля для локальной аутентификации"
     )
 
     ldap_dn: Mapped[Optional[str]] = mapped_column(
@@ -101,7 +100,7 @@ class User(Base, TimestampMixin):
         nullable=True,
         unique=True,
         index=True,
-        comment="Distinguished Name в LDAP (None для локальных пользователей)"
+        comment="DEPRECATED: Поле не используется после Sprint 13 (LDAP removal)"
     )
 
     # Authorization

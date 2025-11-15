@@ -64,7 +64,7 @@ class UserResponse(BaseModel):
     last_name: Optional[str] = Field(None, description="Фамилия")
     role: UserRole = Field(..., description="Роль пользователя")
     status: UserStatus = Field(..., description="Статус пользователя")
-    is_ldap_user: bool = Field(..., description="Флаг LDAP пользователя")
+    is_ldap_user: bool = Field(default=False, description="DEPRECATED: Всегда False после Sprint 13 (LDAP removal)")
     is_system: bool = Field(..., description="Флаг системного пользователя")
     last_login: Optional[datetime] = Field(None, description="Дата последнего входа")
     created_at: datetime = Field(..., description="Дата создания")

@@ -57,28 +57,6 @@ class RedisSettings(BaseSettings):
         return f"redis://{self.host}:{self.port}/{self.db}"
 
 
-class LDAPSettings(BaseSettings):
-    """Настройки LDAP интеграции."""
-
-    enabled: bool = Field(default=True, alias="LDAP_ENABLED")
-    server: str = Field(default="ldap://localhost:1398", alias="LDAP_SERVER")
-    bind_dn: str = Field(default="cn=Directory Manager", alias="LDAP_BIND_DN")
-    bind_password: str = Field(default="password", alias="LDAP_BIND_PASSWORD")
-    base_dn: str = Field(default="dc=artstore,dc=local", alias="LDAP_BASE_DN")
-    user_search_base: str = Field(default="ou=users,dc=artstore,dc=local", alias="LDAP_USER_SEARCH_BASE")
-    group_search_base: str = Field(default="ou=groups,dc=artstore,dc=local", alias="LDAP_GROUP_SEARCH_BASE")
-    user_object_class: str = Field(default="inetOrgPerson", alias="LDAP_USER_OBJECT_CLASS")
-    group_object_class: str = Field(default="groupOfNames", alias="LDAP_GROUP_OBJECT_CLASS")
-    username_attribute: str = Field(default="uid", alias="LDAP_USERNAME_ATTRIBUTE")
-    email_attribute: str = Field(default="mail", alias="LDAP_EMAIL_ATTRIBUTE")
-    firstname_attribute: str = Field(default="givenName", alias="LDAP_FIRSTNAME_ATTRIBUTE")
-    lastname_attribute: str = Field(default="sn", alias="LDAP_LASTNAME_ATTRIBUTE")
-    member_attribute: str = Field(default="member", alias="LDAP_MEMBER_ATTRIBUTE")
-    group_role_mapping: Dict[str, str] = Field(default_factory=dict)
-
-    model_config = SettingsConfigDict(env_prefix="LDAP_", case_sensitive=False, extra="allow")
-
-
 class JWTSettings(BaseSettings):
     """Настройки JWT аутентификации."""
 
@@ -290,7 +268,6 @@ class Settings(BaseSettings):
     # Вложенные настройки
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
-    ldap: LDAPSettings = Field(default_factory=LDAPSettings)
     jwt: JWTSettings = Field(default_factory=JWTSettings)
     cors: CORSSettings = Field(default_factory=CORSSettings)
     rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)
@@ -349,10 +326,6 @@ class Settings(BaseSettings):
         # Redis settings
         if "redis" in yaml_data:
             flat_config["redis"] = RedisSettings(**yaml_data["redis"])
-
-        # LDAP settings
-        if "ldap" in yaml_data:
-            flat_config["ldap"] = LDAPSettings(**yaml_data["ldap"])
 
         # JWT settings
         if "jwt" in yaml_data:

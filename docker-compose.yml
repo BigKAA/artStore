@@ -73,65 +73,6 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-  
-  ldap:
-    image: 389ds/dirsrv:3.1
-    container_name: artstore_ldap
-    ports:
-      - "1389:3389"
-      - "1636:3636"
-    environment:
-      DS_DM_PASSWORD: "password"
-      DS_SUFFIX_NAME: "dc=artstore,dc=local"
-    volumes:
-      - ldap_data:/data
-    networks:
-      - artstore_network
-    healthcheck:
-      test: ["CMD-SHELL", "usr/lib/dirsrv/dscontainer -H"]
-      interval: 30s
-      start_period: 30s
-      timeout: 10s
-      retries: 5
-    restart: unless-stopped
-
-  dex:
-    image: dexidp/dex:v2.44.0
-    container_name: artstore_dex
-    ports:
-      - "5556:5556" # web
-      - "5557:5557" # grpc
-      - "5558:5558" # telemetry
-    volumes:
-      - ./.utils/dex/config.yml:/etc/dex/config.yml
-    command: dex serve /etc/dex/config.yml
-    networks:
-      - artstore_network
-    restart: unless-stopped
-    depends_on:
-    - ldap
-
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider --proxy=off http://localhost:5556/dex/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  nginx:
-    image: nginx:latest
-    container_name: artstore_nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./.utils/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./.utils/nginx/certs:/etc/nginx/certs
-    command: /bin/sh -c "mkdir -p /etc/nginx/certs && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/certs/key.pem -out /etc/nginx/certs/cert.pem -subj '/C=RU/ST=Moscow/L=Moscow/O=ArtStore/OU=IT/CN=localhost' && nginx -g 'daemon off;'"
-    networks:
-      - artstore_network
-    depends_on:
-      - dex
-    restart: unless-stopped
 
 networks:
   artstore_network:
@@ -139,7 +80,6 @@ networks:
     name: artstore_network
 
 volumes:
-  ldap_data:
   postgres:
   pgadmin:
   redis:

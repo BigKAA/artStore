@@ -1,6 +1,6 @@
 """
 Authentication Service для управления аутентификацией пользователей.
-Поддерживает локальную и LDAP аутентификацию.
+Поддерживает локальную аутентификацию через OAuth 2.0 Client Credentials.
 """
 
 from datetime import datetime, timedelta
@@ -23,7 +23,6 @@ class AuthService:
 
     Функции:
     - Локальная аутентификация (username + password)
-    - LDAP аутентификация (через LDAPService)
     - Управление failed login attempts
     - Lockout mechanism
     - Password hashing и verification
@@ -95,11 +94,6 @@ class AuthService:
             logger.warning(f"User not found: {username}")
             return None
 
-        # Проверяем что это локальный пользователь (не LDAP)
-        if user.is_ldap_user:
-            logger.warning(f"Cannot authenticate LDAP user locally: {username}")
-            return None
-
         # Проверяем возможность входа
         if not user.can_login():
             logger.warning(f"User cannot login: {username} (status: {user.status})")
@@ -133,96 +127,23 @@ class AuthService:
         logger.info(f"User authenticated successfully: {username}")
         return user
 
-    async def authenticate_ldap(
-        self,
-        db: AsyncSession,
-        username: str,
-        password: str,
-        ldap_service: "LDAPService"  # type: ignore
-    ) -> Optional[User]:
-        """
-        LDAP аутентификация пользователя.
-
-        Args:
-            db: Database session
-            username: Имя пользователя LDAP
-            password: Пароль
-            ldap_service: LDAP service instance
-
-        Returns:
-            Optional[User]: Пользователь если аутентификация успешна, None иначе
-        """
-        # Аутентификация через LDAP
-        ldap_user_data = await ldap_service.authenticate(username, password)
-        if not ldap_user_data:
-            logger.warning(f"LDAP authentication failed for user: {username}")
-            return None
-
-        # Ищем или создаем пользователя в базе
-        stmt = select(User).where(User.ldap_dn == ldap_user_data["dn"])
-        result = await db.execute(stmt)
-        user = result.scalar_one_or_none()
-
-        if not user:
-            # Создаем нового пользователя из LDAP данных
-            user = User(
-                username=ldap_user_data["username"],
-                email=ldap_user_data["email"],
-                first_name=ldap_user_data.get("first_name"),
-                last_name=ldap_user_data.get("last_name"),
-                ldap_dn=ldap_user_data["dn"],
-                role=ldap_user_data["role"],  # Маппинг из LDAP групп
-                status=UserStatus.ACTIVE,
-            )
-            db.add(user)
-            logger.info(f"Created new LDAP user: {username}")
-        else:
-            # Обновляем данные существующего пользователя
-            user.email = ldap_user_data["email"]
-            user.first_name = ldap_user_data.get("first_name")
-            user.last_name = ldap_user_data.get("last_name")
-            user.role = ldap_user_data["role"]
-            logger.info(f"Updated LDAP user: {username}")
-
-        # Проверяем возможность входа
-        if not user.can_login():
-            logger.warning(f"LDAP user cannot login: {username} (status: {user.status})")
-            return None
-
-        # Обновляем last login
-        user.last_login = datetime.utcnow()
-        user.reset_failed_attempts()
-        await db.commit()
-
-        logger.info(f"LDAP user authenticated successfully: {username}")
-        return user
-
     async def authenticate(
         self,
         db: AsyncSession,
         username: str,
-        password: str,
-        ldap_service: Optional["LDAPService"] = None  # type: ignore
+        password: str
     ) -> Optional[User]:
         """
-        Универсальная аутентификация (пытается LDAP, потом локальную).
+        Аутентификация пользователя (только локальная).
 
         Args:
             db: Database session
             username: Имя пользователя
             password: Пароль
-            ldap_service: LDAP service instance (опционально)
 
         Returns:
             Optional[User]: Пользователь если аутентификация успешна, None иначе
         """
-        # Если LDAP включен, сначала пытаемся LDAP аутентификацию
-        if settings.ldap.enabled and ldap_service:
-            user = await self.authenticate_ldap(db, username, password, ldap_service)
-            if user:
-                return user
-
-        # Если LDAP не сработал, пытаемся локальную аутентификацию
         return await self.authenticate_local(db, username, password)
 
     async def get_user_by_id(self, db: AsyncSession, user_id: int) -> Optional[User]:
@@ -278,10 +199,6 @@ class AuthService:
         if not user:
             logger.warning(f"Password reset requested for unknown email: {email}")
             # Не раскрываем что пользователь не найден (security)
-            return None
-
-        if user.is_ldap_user:
-            logger.warning(f"Password reset requested for LDAP user: {email}")
             return None
 
         # TODO: Создать и сохранить reset token в Redis

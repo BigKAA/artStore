@@ -23,14 +23,12 @@ ArtStore - это распределенная система файлового
 - postgres
 - redis
 - minio
-- dex
-- ldap
 
 Логины и пароли администраторов приложений доступны в `docker-compose.yml`.
 
-Логин административного пользователя в LDAP: `cn=Directory Manager`. Пароль: `password`. Tree: `dc=artstore,dc=local`.
-
 Для работы с postgres используй инструменты, находящиеся в контейнере postgres. Если необходимой базы данных нет - создавай ее сам.
+
+**Примечание**: LDAP и Dex OIDC были удалены в Sprint 13. Система использует только OAuth 2.0 Client Credentials authentication.
 
 ### Core Architecture Concepts
 
@@ -133,7 +131,6 @@ docker exec -it artstore_postgres psql -U artstore -d artstore
 - **PgAdmin**: 5050 (admin@admin.com / password)
 - **Redis**: 6379
 - **MinIO**: 9000 (console: 9001, minioadmin / minioadmin)
-- **LDAP**: 1398 
 - **Admin Module**: 8000-8009
 - **Storage Elements**: 8010-8019
 - **Ingester Module**: 8020-8029
@@ -297,7 +294,7 @@ async_replication:
 ### Running Applications
 
 ```bash
-# Start base infrastructure (PostgreSQL, Redis, MinIO, LDAP)
+# Start base infrastructure (PostgreSQL, Redis, MinIO)
 docker-compose up -d
 
 # Build and run specific module with Docker (ОБЯЗАТЕЛЬНЫЙ МЕТОД)
