@@ -71,6 +71,7 @@ class UploadService:
         """Закрытие HTTP клиента."""
         if self._client:
             await self._client.aclose()
+            self._client = None  # Reset client after closing
             logger.info("HTTP client closed")
 
     async def upload_file(
@@ -99,7 +100,7 @@ class UploadService:
         logger.info(
             "Starting file upload",
             extra={
-                "filename": file.filename,
+                "uploaded_filename": file.filename,
                 "content_type": file.content_type,
                 "storage_mode": request.storage_mode.value,
                 "user_id": user_id
@@ -151,7 +152,7 @@ class UploadService:
                 "File uploaded successfully",
                 extra={
                     "file_id": result.get('id'),
-                    "filename": file.filename,
+                    "uploaded_filename": file.filename,
                     "file_size": file_size,
                     "user_id": user_id
                 }
