@@ -40,27 +40,56 @@ class TokenService:
 
     def _load_keys(self) -> None:
         """
-        Загрузка JWT ключей из файлов.
+        Загрузка JWT ключей из файлов или прямого PEM содержимого.
+
+        Поддерживает два варианта:
+        1. File path - путь к PEM файлу (традиционный способ)
+        2. Direct PEM content - полное PEM содержимое (для Kubernetes Secrets)
+
+        Автоматически определяет тип по наличию "-----BEGIN" в начале строки.
 
         Raises:
-            FileNotFoundError: Если ключи не найдены
+            FileNotFoundError: Если ключи-файлы не найдены
             ValueError: Если ключи повреждены
         """
         try:
-            private_key_path = Path(settings.jwt.private_key_path)
-            public_key_path = Path(settings.jwt.public_key_path)
+            # Загрузка private key
+            private_key_value = settings.jwt.private_key_path
 
-            if not private_key_path.exists():
-                raise FileNotFoundError(f"Private key not found: {private_key_path}")
+            if private_key_value.strip().startswith("-----BEGIN"):
+                # Direct PEM content (из Kubernetes Secret или env variable)
+                self._private_key = private_key_value
+                logger.info("JWT private key loaded from direct PEM content")
+            else:
+                # File path (традиционный способ)
+                private_key_path = Path(private_key_value)
 
-            if not public_key_path.exists():
-                raise FileNotFoundError(f"Public key not found: {public_key_path}")
+                if not private_key_path.exists():
+                    raise FileNotFoundError(f"Private key file not found: {private_key_path}")
 
-            with open(private_key_path, "r") as f:
-                self._private_key = f.read()
+                with open(private_key_path, "r") as f:
+                    self._private_key = f.read()
 
-            with open(public_key_path, "r") as f:
-                self._public_key = f.read()
+                logger.info(f"JWT private key loaded from file: {private_key_path}")
+
+            # Загрузка public key
+            public_key_value = settings.jwt.public_key_path
+
+            if public_key_value.strip().startswith("-----BEGIN"):
+                # Direct PEM content (из Kubernetes Secret или env variable)
+                self._public_key = public_key_value
+                logger.info("JWT public key loaded from direct PEM content")
+            else:
+                # File path (традиционный способ)
+                public_key_path = Path(public_key_value)
+
+                if not public_key_path.exists():
+                    raise FileNotFoundError(f"Public key file not found: {public_key_path}")
+
+                with open(public_key_path, "r") as f:
+                    self._public_key = f.read()
+
+                logger.info(f"JWT public key loaded from file: {public_key_path}")
 
             logger.info("JWT keys loaded successfully")
 

@@ -4,7 +4,7 @@
 Environment variables имеют приоритет над config.yaml.
 """
 
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import yaml
@@ -58,7 +58,16 @@ class RedisSettings(BaseSettings):
 
 
 class JWTSettings(BaseSettings):
-    """Настройки JWT аутентификации."""
+    """
+    Настройки JWT аутентификации с Platform-Agnostic Secret Management.
+
+    JWT ключи могут быть загружены из:
+    1. Kubernetes Secrets (полное PEM содержимое)
+    2. Environment Variables (путь к файлу или PEM содержимое)
+    3. File-based secrets (путь к файлу)
+
+    Приоритет: k8s → env → file → default path
+    """
 
     algorithm: str = Field(default="RS256", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(default=30, alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
@@ -68,6 +77,84 @@ class JWTSettings(BaseSettings):
     key_rotation_hours: int = Field(default=24, alias="JWT_KEY_ROTATION_HOURS")
 
     model_config = SettingsConfigDict(env_prefix="JWT_", case_sensitive=False, extra="allow")
+
+    @field_validator("private_key_path", mode="before")
+    @classmethod
+    def load_private_key_from_provider(cls, v: str) -> str:
+        """
+        Загрузка private key через SecretProvider с fallback chain.
+
+        Порядок загрузки:
+        1. Kubernetes Secret JWT_PRIVATE_KEY (полное PEM содержимое)
+        2. Environment Variable JWT_PRIVATE_KEY или JWT_PRIVATE_KEY_PATH
+        3. File-based secret (если ./secrets/ существует)
+        4. Provided value (default path)
+
+        Returns:
+            str: File path или PEM content (TokenService определяет тип)
+
+        Example (Kubernetes):
+            # k8s Secret с полным PEM содержимым:
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: artstore-jwt-keys
+            stringData:
+              JWT_PRIVATE_KEY: |
+                -----BEGIN RSA PRIVATE KEY-----
+                MIIEpAIBAAKCAQEA...
+                -----END RSA PRIVATE KEY-----
+        """
+        # Lazy import для избежания circular dependency
+        from app.core.secrets import get_secret
+
+        # Пробуем загрузить из SecretProvider
+        secret_from_provider = get_secret("JWT_PRIVATE_KEY")
+
+        if secret_from_provider:
+            return secret_from_provider
+
+        # Fallback на provided value (env path или default)
+        return v if v else "/path/to/private_key.pem"
+
+    @field_validator("public_key_path", mode="before")
+    @classmethod
+    def load_public_key_from_provider(cls, v: str) -> str:
+        """
+        Загрузка public key через SecretProvider с fallback chain.
+
+        Порядок загрузки:
+        1. Kubernetes Secret JWT_PUBLIC_KEY (полное PEM содержимое)
+        2. Environment Variable JWT_PUBLIC_KEY или JWT_PUBLIC_KEY_PATH
+        3. File-based secret (если ./secrets/ существует)
+        4. Provided value (default path)
+
+        Returns:
+            str: File path или PEM content (TokenService определяет тип)
+
+        Example (Kubernetes):
+            # k8s Secret с полным PEM содержимым:
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: artstore-jwt-keys
+            stringData:
+              JWT_PUBLIC_KEY: |
+                -----BEGIN PUBLIC KEY-----
+                MIIBIjANBgkqhkiG9w0BAQEF...
+                -----END PUBLIC KEY-----
+        """
+        # Lazy import для избежания circular dependency
+        from app.core.secrets import get_secret
+
+        # Пробуем загрузить из SecretProvider
+        secret_from_provider = get_secret("JWT_PUBLIC_KEY")
+
+        if secret_from_provider:
+            return secret_from_provider
+
+        # Fallback на provided value (env path или default)
+        return v if v else "/path/to/public_key.pem"
 
     @field_validator("algorithm")
     @classmethod
@@ -295,7 +382,16 @@ class SchedulerSettings(BaseSettings):
 
 
 class SecuritySettings(BaseSettings):
-    """Настройки безопасности."""
+    """
+    Настройки безопасности с Platform-Agnostic Secret Management.
+
+    Secrets могут быть загружены из:
+    1. Kubernetes Secrets (автоматически в k8s/k3s)
+    2. Environment Variables (docker-compose, development)
+    3. File-based secrets (./secrets/ directory)
+
+    Приоритет загрузки: k8s → env → file → default
+    """
 
     audit_hmac_secret: str = Field(
         default="change-me-in-production-to-secure-random-value",
@@ -309,6 +405,55 @@ class SecuritySettings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(env_prefix="SECURITY_", case_sensitive=False, extra="allow")
+
+    @field_validator("audit_hmac_secret", mode="before")
+    @classmethod
+    def load_hmac_secret_from_provider(cls, v: Any) -> str:
+        """
+        Загрузка HMAC secret через SecretProvider с fallback chain.
+
+        Порядок загрузки:
+        1. Kubernetes Secret (если в k8s)
+        2. Environment Variable (если установлен)
+        3. File-based secret (если ./secrets/ существует)
+        4. Provided value (default)
+
+        Args:
+            v: Текущее значение (из env или default)
+
+        Returns:
+            str: Loaded secret value
+
+        Example (Kubernetes):
+            # k8s Secret manifest:
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: artstore-secrets
+            stringData:
+              SECURITY_AUDIT_HMAC_SECRET: "production-hmac-secret-32-chars-min"
+
+            # Volume mount в Pod spec:
+            volumes:
+            - name: secrets
+              secret:
+                secretName: artstore-secrets
+            containers:
+            - volumeMounts:
+              - name: secrets
+                mountPath: /var/run/secrets/artstore
+        """
+        # Lazy import для избежания circular dependency
+        from app.core.secrets import get_secret
+
+        # Пробуем загрузить из SecretProvider
+        secret_from_provider = get_secret("SECURITY_AUDIT_HMAC_SECRET")
+
+        if secret_from_provider:
+            return secret_from_provider
+
+        # Fallback на provided value (env или default)
+        return v if v else "change-me-in-production-to-secure-random-value"
 
     @field_validator("audit_hmac_secret")
     @classmethod
@@ -335,7 +480,8 @@ class SecuritySettings(BaseSettings):
             if environment == "production":
                 raise ValueError(
                     "Default HMAC secret cannot be used in production. "
-                    "Please set SECURITY_AUDIT_HMAC_SECRET environment variable."
+                    "Please set SECURITY_AUDIT_HMAC_SECRET via environment variable, "
+                    "Kubernetes Secret, or file-based secret."
                 )
 
         return v
