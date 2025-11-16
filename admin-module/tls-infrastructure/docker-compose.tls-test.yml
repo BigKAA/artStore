@@ -1,0 +1,426 @@
+version: '3.8'
+
+#
+# Docker Compose для TLS Integration Tests
+#
+# Запускает все микросервисы с TLS 1.3 и mTLS authentication
+# для комплексного тестирования TLS connections.
+#
+# Usage:
+#   # Запуск test environment
+#   docker-compose -f docker-compose.tls-test.yml up -d
+#
+#   # Запуск тестов из конкретного модуля
+#   docker-compose -f docker-compose.tls-test.yml run --rm admin-module-test pytest tests/integration/test_tls_connections.py -v
+#
+#   # Остановка и очистка
+#   docker-compose -f docker-compose.tls-test.yml down -v
+#
+
+services:
+  # =============================================================================
+  # Isolated Test Infrastructure
+  # =============================================================================
+
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: artstore_postgres_tls_test
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: artstore_test
+    ports:
+      - "5433:5432"  # Different from dev (5432)
+    networks:
+      - tls-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: artstore_redis_tls_test
+    ports:
+      - "6380:6379"  # Different from dev (6379)
+    networks:
+      - tls-test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-test:
+    image: minio/minio:latest
+    container_name: artstore_minio_tls_test
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9001:9000"  # Different from dev (9000)
+      - "9002:9001"  # Console
+    networks:
+      - tls-test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - minio-test-data:/data
+
+  # =============================================================================
+  # Admin Module with TLS
+  # =============================================================================
+
+  admin-module:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: artstore_admin_tls_test
+    environment:
+      # Database
+      DB_HOST: postgres-test
+      DB_PORT: 5432
+      DB_USER: test_user
+      DB_PASSWORD: test_password
+      DB_NAME: artstore_test
+
+      # Redis
+      REDIS_HOST: redis-test
+      REDIS_PORT: 6379
+
+      # TLS Configuration
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: /app/tls/server-cert.pem
+      TLS_KEY_FILE: /app/tls/server-key.pem
+      TLS_CA_CERT_FILE: /app/tls/ca-cert.pem
+      TLS_PROTOCOL_VERSION: TLSv1.3
+      TLS_CIPHERS: "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"
+      TLS_VERIFY_MODE: CERT_REQUIRED
+
+      # mTLS Middleware
+      MTLS_ENABLED: "true"
+      MTLS_ALLOWED_CN: "ingester-client,query-client,admin-client"
+      MTLS_REQUIRED_PATHS: "/api/internal/.*"
+      MTLS_STRICT_MODE: "true"
+
+      # Logging
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text
+
+      # Initial Admin Account
+      INITIAL_ACCOUNT_ENABLED: "true"
+      INITIAL_ACCOUNT_NAME: admin-service
+      INITIAL_CLIENT_SECRET: test-secret-12345
+    ports:
+      - "8000:8000"
+    networks:
+      - tls-test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    volumes:
+      # TLS Certificates (Read-Only)
+      - ./ca/ca-cert.pem:/app/tls/ca-cert.pem:ro
+      - ./server-certs/admin-module/server-cert.pem:/app/tls/server-cert.pem:ro
+      - ./server-certs/admin-module/server-key.pem:/app/tls/server-key.pem:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "--cacert", "/app/tls/ca-cert.pem", "https://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Admin Module Test Runner
+  admin-module-test:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: test
+    container_name: artstore_admin_tls_test_runner
+    environment:
+      # Test Environment
+      TEST_MODE: "true"
+      LOG_LEVEL: DEBUG
+    networks:
+      - tls-test-network
+    depends_on:
+      admin-module:
+        condition: service_healthy
+    volumes:
+      # Test Code
+      - ../tests:/app/tests:ro
+      # TLS Certificates for test client
+      - ./ca/ca-cert.pem:/app/tls/ca-cert.pem:ro
+      - ./client-certs/admin-client-cert.pem:/app/tls/client-cert.pem:ro
+      - ./client-certs/admin-client-key.pem:/app/tls/client-key.pem:ro
+    profiles:
+      - test  # Only run when explicitly requested
+
+  # =============================================================================
+  # Storage Element with TLS
+  # =============================================================================
+
+  storage-element:
+    build:
+      context: ../../storage-element
+      dockerfile: Dockerfile
+    container_name: artstore_storage_tls_test
+    environment:
+      # Database
+      DB_HOST: postgres-test
+      DB_PORT: 5432
+      DB_USER: test_user
+      DB_PASSWORD: test_password
+      DB_NAME: artstore_test
+      DB_TABLE_PREFIX: storage_test_01
+
+      # Storage
+      STORAGE_TYPE: local
+      STORAGE_BASE_PATH: /app/data/storage
+      STORAGE_MAX_SIZE: 1073741824  # 1GB
+
+      # TLS Configuration
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: /app/tls/server-cert.pem
+      TLS_KEY_FILE: /app/tls/server-key.pem
+      TLS_CA_CERT_FILE: /app/tls/ca-cert.pem
+
+      # Logging
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text
+    ports:
+      - "8010:8010"
+    networks:
+      - tls-test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    volumes:
+      # Storage Data
+      - storage-test-data:/app/data/storage
+      # TLS Certificates
+      - ./ca/ca-cert.pem:/app/tls/ca-cert.pem:ro
+      - ./server-certs/storage-element/server-cert.pem:/app/tls/server-cert.pem:ro
+      - ./server-certs/storage-element/server-key.pem:/app/tls/server-key.pem:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "--cacert", "/app/tls/ca-cert.pem", "https://localhost:8010/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Storage Element Test Runner
+  storage-element-test:
+    build:
+      context: ../../storage-element
+      dockerfile: Dockerfile
+      target: test
+    container_name: artstore_storage_tls_test_runner
+    environment:
+      TEST_MODE: "true"
+      LOG_LEVEL: DEBUG
+    networks:
+      - tls-test-network
+    depends_on:
+      storage-element:
+        condition: service_healthy
+    volumes:
+      - ../../storage-element/tests:/app/tests:ro
+      - ./ca/ca-cert.pem:/app/tls/ca-cert.pem:ro
+      - ./client-certs/ingester-client-cert.pem:/app/tls/ingester-client-cert.pem:ro
+      - ./client-certs/ingester-client-key.pem:/app/tls/ingester-client-key.pem:ro
+      - ./client-certs/query-client-cert.pem:/app/tls/query-client-cert.pem:ro
+      - ./client-certs/query-client-key.pem:/app/tls/query-client-key.pem:ro
+    profiles:
+      - test
+
+  # =============================================================================
+  # Ingester Module with TLS
+  # =============================================================================
+
+  ingester-module:
+    build:
+      context: ../../ingester-module
+      dockerfile: Dockerfile
+    container_name: artstore_ingester_tls_test
+    environment:
+      # Admin Module
+      ADMIN_MODULE_URL: https://admin-module:8000
+
+      # Storage Element
+      STORAGE_ELEMENT_URL: https://storage-element:8010
+
+      # TLS Configuration
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: /app/tls/server-cert.pem
+      TLS_KEY_FILE: /app/tls/server-key.pem
+      TLS_CA_CERT_FILE: /app/tls/ca-cert.pem
+
+      # mTLS Client Configuration
+      MTLS_CLIENT_CERT_FILE: /app/tls/client-cert.pem
+      MTLS_CLIENT_KEY_FILE: /app/tls/client-key.pem
+
+      # Logging
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text
+
+      # Service Account
+      SERVICE_ACCOUNT_CLIENT_ID: ingester-service
+      SERVICE_ACCOUNT_CLIENT_SECRET: test-secret-ingester
+    ports:
+      - "8020:8020"
+    networks:
+      - tls-test-network
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      storage-element:
+        condition: service_healthy
+    volumes:
+      # TLS Certificates
+      - ./ca/ca-cert.pem:/app/tls/ca-cert.pem:ro
+      - ./server-certs/ingester-module/server-cert.pem:/app/tls/server-cert.pem:ro
+      - ./server-certs/ingester-module/server-key.pem:/app/tls/server-key.pem:ro
+      - ./client-certs/ingester-client-cert.pem:/app/tls/client-cert.pem:ro
+      - ./client-certs/ingester-client-key.pem:/app/tls/client-key.pem:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "--cacert", "/app/tls/ca-cert.pem", "https://localhost:8020/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ingester Module Test Runner
+  ingester-module-test:
+    build:
+      context: ../../ingester-module
+      dockerfile: Dockerfile
+      target: test
+    container_name: artstore_ingester_tls_test_runner
+    environment:
+      TEST_MODE: "true"
+      LOG_LEVEL: DEBUG
+    networks:
+      - tls-test-network
+    depends_on:
+      ingester-module:
+        condition: service_healthy
+    volumes:
+      - ../../ingester-module/tests:/app/tests:ro
+      - ./ca/ca-cert.pem:/app/tls/ca-cert.pem:ro
+      - ./client-certs/ingester-client-cert.pem:/app/tls/client-cert.pem:ro
+      - ./client-certs/ingester-client-key.pem:/app/tls/client-key.pem:ro
+    profiles:
+      - test
+
+  # =============================================================================
+  # Query Module with TLS
+  # =============================================================================
+
+  query-module:
+    build:
+      context: ../../query-module
+      dockerfile: Dockerfile
+    container_name: artstore_query_tls_test
+    environment:
+      # Database
+      DB_HOST: postgres-test
+      DB_PORT: 5432
+      DB_USER: test_user
+      DB_PASSWORD: test_password
+      DB_NAME: artstore_test
+
+      # Redis
+      REDIS_HOST: redis-test
+      REDIS_PORT: 6379
+
+      # Admin Module
+      ADMIN_MODULE_URL: https://admin-module:8000
+
+      # Storage Element
+      STORAGE_ELEMENT_URL: https://storage-element:8010
+
+      # TLS Configuration
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: /app/tls/server-cert.pem
+      TLS_KEY_FILE: /app/tls/server-key.pem
+      TLS_CA_CERT_FILE: /app/tls/ca-cert.pem
+
+      # mTLS Client Configuration
+      MTLS_CLIENT_CERT_FILE: /app/tls/client-cert.pem
+      MTLS_CLIENT_KEY_FILE: /app/tls/client-key.pem
+
+      # Logging
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text
+
+      # Service Account
+      SERVICE_ACCOUNT_CLIENT_ID: query-service
+      SERVICE_ACCOUNT_CLIENT_SECRET: test-secret-query
+    ports:
+      - "8030:8030"
+    networks:
+      - tls-test-network
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      storage-element:
+        condition: service_healthy
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    volumes:
+      # TLS Certificates
+      - ./ca/ca-cert.pem:/app/tls/ca-cert.pem:ro
+      - ./server-certs/query-module/server-cert.pem:/app/tls/server-cert.pem:ro
+      - ./server-certs/query-module/server-key.pem:/app/tls/server-key.pem:ro
+      - ./client-certs/query-client-cert.pem:/app/tls/client-cert.pem:ro
+      - ./client-certs/query-client-key.pem:/app/tls/client-key.pem:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "--cacert", "/app/tls/ca-cert.pem", "https://localhost:8030/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Query Module Test Runner
+  query-module-test:
+    build:
+      context: ../../query-module
+      dockerfile: Dockerfile
+      target: test
+    container_name: artstore_query_tls_test_runner
+    environment:
+      TEST_MODE: "true"
+      LOG_LEVEL: DEBUG
+    networks:
+      - tls-test-network
+    depends_on:
+      query-module:
+        condition: service_healthy
+    volumes:
+      - ../../query-module/tests:/app/tests:ro
+      - ./ca/ca-cert.pem:/app/tls/ca-cert.pem:ro
+      - ./client-certs/query-client-cert.pem:/app/tls/client-cert.pem:ro
+      - ./client-certs/query-client-key.pem:/app/tls/client-key.pem:ro
+    profiles:
+      - test
+
+networks:
+  tls-test-network:
+    name: artstore-tls-test
+    driver: bridge
+
+volumes:
+  postgres-test-data:
+    name: artstore_postgres_tls_test_data
+  minio-test-data:
+    name: artstore_minio_tls_test_data
+  storage-test-data:
+    name: artstore_storage_tls_test_data
