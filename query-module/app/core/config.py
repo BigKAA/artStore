@@ -200,6 +200,130 @@ class DownloadSettings(BaseSettings):
     )
 
 
+class CORSSettings(BaseSettings):
+    """
+    Настройки CORS для защиты от CSRF attacks.
+
+    CORS (Cross-Origin Resource Sharing) защищает от unauthorized cross-origin requests.
+    Sprint 16 Phase 1: Enhanced CORS configuration для production security.
+
+    Security considerations:
+    - Wildcard origins (*) запрещены в production
+    - Wildcard headers (*) НЕ рекомендуются, используйте explicit list
+    - allow_credentials требует explicit origins (не wildcard)
+    - max_age кеширует preflight requests для performance
+    """
+
+    model_config = SettingsConfigDict(env_prefix="CORS_", case_sensitive=False)
+
+    enabled: bool = Field(default=True, description="Включить CORS middleware")
+    allow_origins: list[str] = Field(
+        default=["http://localhost:4200", "http://localhost:8000"],
+        description="Whitelist разрешенных origins. Production: explicit domains только!",
+    )
+    allow_credentials: bool = Field(
+        default=True,
+        description="Разрешить credentials (cookies, authorization headers). Requires explicit origins.",
+    )
+    allow_methods: list[str] = Field(
+        default=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        description="Разрешенные HTTP methods",
+    )
+    allow_headers: list[str] = Field(
+        default=["Content-Type", "Authorization", "X-Request-ID", "X-Trace-ID"],
+        description="Разрешенные request headers. Production: explicit list вместо wildcard!",
+    )
+    expose_headers: list[str] = Field(
+        default=[],
+        description="Headers, которые будут exposed в browser (e.g., Content-Length, Content-Range)",
+    )
+    max_age: int = Field(
+        default=600,
+        description="Preflight cache duration в seconds (default: 10 minutes)",
+    )
+
+    @field_validator("allow_origins")
+    @classmethod
+    def validate_no_wildcards_in_production(cls, v: list[str]) -> list[str]:
+        """
+        Проверка запрета wildcard origins в production окружении.
+
+        Security requirement: CORS wildcards (*) запрещены в production
+        для защиты от CSRF attacks.
+
+        Raises:
+            ValueError: Если wildcard origin в production environment
+        """
+        import os
+
+        if "*" in v:
+            environment = os.getenv("ENVIRONMENT", "development")
+            if environment == "production":
+                raise ValueError(
+                    "Wildcard CORS origins ('*') are not allowed in production environment. "
+                    "Please configure explicit origin whitelist via CORS_ALLOW_ORIGINS. "
+                    "Example: CORS_ALLOW_ORIGINS=[\"https://admin.artstore.com\",\"https://query.artstore.com\"]"
+                )
+        return v
+
+    @field_validator("allow_headers")
+    @classmethod
+    def warn_wildcard_headers(cls, v: list[str]) -> list[str]:
+        """
+        Warning для wildcard headers в любом environment.
+
+        Wildcard headers (*) функционально работают, но не рекомендуются для security.
+        Explicit header list provides better security и clearer configuration.
+
+        Note: Не блокируем wildcard headers (backward compatibility),
+        но логируем warning для production awareness.
+        """
+        import os
+        import logging
+
+        if "*" in v:
+            logger = logging.getLogger(__name__)
+            environment = os.getenv("ENVIRONMENT", "development")
+
+            if environment == "production":
+                logger.warning(
+                    "CORS wildcard headers ('*') detected in production. "
+                    "Consider explicit header whitelist for better security: "
+                    "CORS_ALLOW_HEADERS=[\"Content-Type\",\"Authorization\",\"X-Request-ID\"]"
+                )
+            else:
+                logger.info(
+                    "CORS wildcard headers ('*') detected. "
+                    "For production, use explicit header list."
+                )
+
+        return v
+
+    @field_validator("allow_credentials", mode="after")
+    @classmethod
+    def validate_credentials_requires_explicit_origins(cls, v: bool, info) -> bool:
+        """
+        Валидация: allow_credentials требует explicit origins (не wildcard).
+
+        CORS spec requirement: Credentials mode несовместим с wildcard origins.
+        Browser отклонит такую configuration.
+
+        Raises:
+            ValueError: Если allow_credentials=True с wildcard origin
+        """
+        # Access other field via validation_context
+        allow_origins = info.data.get("allow_origins", [])
+
+        if v and "*" in allow_origins:
+            raise ValueError(
+                "CORS allow_credentials=True cannot be used with wildcard origins ('*'). "
+                "This violates CORS specification. "
+                "Either set allow_credentials=False OR use explicit origin whitelist."
+            )
+
+        return v
+
+
 # ========================================
 # Main Settings (Composite)
 # ========================================
@@ -218,35 +342,6 @@ class QueryModuleSettings(BaseSettings):
     host: str = Field(default="0.0.0.0", description="%>AB 4;O 70?CA:0")
     port: int = Field(default=8030, ge=1024, le=65535, description=">@B 4;O 70?CA:0")
 
-    # CORS настройки (защита от CSRF attacks)
-    cors_origins: list[str] = Field(
-        default=["http://localhost:4200", "http://localhost:8000"],
-        description="Разрешенные CORS origins (explicit whitelist)",
-    )
-    cors_allow_credentials: bool = Field(
-        default=True, description="Разрешить credentials в CORS"
-    )
-
-    @field_validator("cors_origins")
-    @classmethod
-    def validate_no_wildcards_in_production(cls, v: list[str]) -> list[str]:
-        """
-        Проверка запрета wildcard origins в production окружении.
-
-        Security requirement: CORS wildcards (*) запрещены в production
-        для защиты от CSRF attacks.
-        """
-        import os
-
-        if "*" in v:
-            environment = os.getenv("ENVIRONMENT", "development")
-            if environment == "production":
-                raise ValueError(
-                    "Wildcard CORS origins ('*') are not allowed in production environment. "
-                    "Please configure explicit origin whitelist via CORS_ORIGINS."
-                )
-        return v
-
     # Logging
     log_level: str = Field(
         default="INFO", description="#@>25=L ;>38@>20=8O (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
@@ -263,6 +358,7 @@ class QueryModuleSettings(BaseSettings):
     cache: CacheSettings = Field(default_factory=CacheSettings)
     search: SearchSettings = Field(default_factory=SearchSettings)
     download: DownloadSettings = Field(default_factory=DownloadSettings)
+    cors: CORSSettings = Field(default_factory=CORSSettings)
 
     @field_validator("log_level")
     @classmethod

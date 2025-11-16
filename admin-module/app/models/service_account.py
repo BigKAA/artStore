@@ -6,7 +6,7 @@ Service Accounts предназначены для machine-to-machine аутен
 """
 
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import String, Boolean, Enum as SQLEnum, Index, UniqueConstraint, Integer, DateTime
+from sqlalchemy import String, Boolean, Enum as SQLEnum, Index, UniqueConstraint, Integer, DateTime, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from typing import Optional
 import enum
@@ -41,11 +41,18 @@ class ServiceAccount(Base, TimestampMixin):
     через OAuth 2.0 Client Credentials flow. Заменяют User model с LDAP
     для API клиентов.
 
+    Sprint 16 Phase 1: Enhanced Password Security
+    - Password history tracking для предотвращения reuse
+    - Password change timestamp для audit logging
+    - Integration с PasswordPolicy validation
+
     Attributes:
         id: Уникальный UUID идентификатор Service Account
         name: Человекочитаемое название Service Account (например, "Production App")
         client_id: Уникальный client_id для OAuth 2.0 (автогенерируемый)
         client_secret_hash: Bcrypt хеш client_secret
+        secret_history: История предыдущих client_secret hashes (максимум 5)
+        secret_changed_at: Дата последней смены client_secret
         role: Роль Service Account в системе
         status: Текущий статус Service Account
         rate_limit: Лимит запросов в минуту (default 100)
@@ -94,6 +101,21 @@ class ServiceAccount(Base, TimestampMixin):
         String(255),
         nullable=False,
         comment="Bcrypt хеш client_secret (минимум 32 символа)"
+    )
+
+    # Sprint 16 Phase 1: Password History для предотвращения reuse
+    secret_history: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        nullable=True,
+        default=[],
+        comment="История предыдущих client_secret hashes для предотвращения reuse (максимум 5 хешей)"
+    )
+
+    secret_changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        comment="Дата последней смены client_secret (для password history tracking)"
     )
 
     # Authorization

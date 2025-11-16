@@ -3,6 +3,11 @@ Service Account Service для управления Service Accounts.
 
 Поддерживает CRUD операции, генерацию client credentials,
 управление ротацией secrets и OAuth 2.0 аутентификацию.
+
+Sprint 16 Phase 1: Enhanced Password Security
+- Password Policy integration для сильных секретов
+- Password history tracking для предотвращения reuse
+- Password expiration enforcement
 """
 
 from datetime import datetime, timedelta, timezone
@@ -21,6 +26,13 @@ from app.models.service_account import (
     ServiceAccountRole,
     ServiceAccountStatus
 )
+from app.core.config import settings
+from app.core.password_policy import (
+    PasswordPolicy,
+    PasswordValidator,
+    PasswordGenerator,
+    PasswordHistory
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,31 +43,58 @@ class ServiceAccountService:
 
     Функции:
     - CRUD операции (create, read, update, delete)
-    - Генерация secure client_secret
+    - Генерация secure client_secret с Password Policy enforcement
     - client_secret hashing и verification (bcrypt)
+    - Password history tracking для предотвращения reuse
     - Автоматическая ротация secrets
     - OAuth 2.0 Client Credentials authentication
+
+    Sprint 16 Phase 1: Enhanced Security
+    - PasswordGenerator для криптографически стойких секретов
+    - PasswordValidator для policy compliance проверки
+    - PasswordHistory для предотвращения reuse
     """
 
-    @staticmethod
-    def generate_client_secret(length: int = 48) -> str:
+    def __init__(self):
+        """Инициализация сервиса с Password Policy infrastructure."""
+        # Создание password policy из настроек
+        self.password_policy = PasswordPolicy(
+            min_length=settings.password.min_length,
+            require_uppercase=settings.password.require_uppercase,
+            require_lowercase=settings.password.require_lowercase,
+            require_digits=settings.password.require_digits,
+            require_special=settings.password.require_special,
+            max_age_days=settings.password.max_age_days,
+            history_size=settings.password.history_size
+        )
+
+        # Инициализация password components
+        self.password_validator = PasswordValidator(self.password_policy)
+        self.password_generator = PasswordGenerator(self.password_policy)
+        self.password_history = PasswordHistory(self.password_policy)
+
+    def generate_client_secret(self, length: Optional[int] = None) -> str:
         """
-        Генерация безопасного client_secret.
+        Генерация безопасного client_secret согласно Password Policy.
+
+        Sprint 16 Phase 1: Cryptographically secure generation с policy enforcement
 
         Args:
-            length: Длина секрета (default 48 символов)
+            length: Длина секрета (default: policy.min_length + 4)
 
         Returns:
-            str: Безопасный случайный секрет
+            str: Криптографически стойкий случайный секрет
 
         Example:
-            >>> secret = ServiceAccountService.generate_client_secret()
-            >>> len(secret)
-            48
+            >>> secret = service.generate_client_secret()
+            >>> len(secret) >= 12  # policy minimum
+            True
         """
-        # Используем криптографически безопасный генератор
-        alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+[]{}|;:,.<>?"
-        return ''.join(secrets.choice(alphabet) for _ in range(length))
+        # Используем PasswordGenerator для cryptographically secure generation
+        if length is None:
+            length = self.password_policy.min_length + 4  # 16 символов по умолчанию
+
+        return self.password_generator.generate(length)
 
     @staticmethod
     def hash_secret(secret: str) -> str:
@@ -137,12 +176,14 @@ class ServiceAccountService:
         # Расчет срока истечения secret (90 дней)
         secret_expires_at = ServiceAccount.calculate_secret_expiry(days=90)
 
-        # Создание Service Account
+        # Создание Service Account (Sprint 16 Phase 1: password history initialization)
         service_account = ServiceAccount(
             name=name,
             description=description,
             client_id=client_id,
             client_secret_hash=client_secret_hash,
+            secret_history=[],  # Пустая история при создании
+            secret_changed_at=datetime.now(timezone.utc),  # Initial password set
             role=role,
             status=ServiceAccountStatus.ACTIVE,
             is_system=is_system,
@@ -329,7 +370,9 @@ class ServiceAccountService:
         expiry_days: int = 90
     ) -> tuple[Optional[ServiceAccount], Optional[str]]:
         """
-        Ротация client_secret Service Account.
+        Ротация client_secret Service Account с password history tracking.
+
+        Sprint 16 Phase 1: Password history enforcement для предотвращения reuse
 
         Args:
             db: Database session
@@ -338,14 +381,50 @@ class ServiceAccountService:
 
         Returns:
             tuple[Optional[ServiceAccount], Optional[str]]: (Service Account, new plain secret)
+
+        Raises:
+            ValueError: Если новый секрет совпадает с историей (reuse detected)
         """
         service_account = await self.get_by_id(db, service_account_id)
         if not service_account:
             return None, None
 
         # Генерация нового секрета
-        new_secret = self.generate_client_secret()
-        service_account.client_secret_hash = self.hash_secret(new_secret)
+        max_attempts = 3  # Максимум попыток генерации (на случай collision с историей)
+        new_secret = None
+        new_hash = None
+
+        for attempt in range(max_attempts):
+            candidate_secret = self.generate_client_secret()
+
+            # Проверка password history - запрещаем reuse
+            current_history = service_account.secret_history or []
+            is_reused = self.password_history.check_reuse(candidate_secret, current_history)
+
+            if not is_reused:
+                new_secret = candidate_secret
+                new_hash = self.hash_secret(new_secret)
+                break
+
+            logger.warning(
+                f"Password reuse detected for Service Account {service_account.name} "
+                f"(attempt {attempt + 1}/{max_attempts})"
+            )
+
+        if new_secret is None:
+            raise ValueError(
+                f"Failed to generate unique password after {max_attempts} attempts. "
+                "This is extremely unlikely with proper random generation."
+            )
+
+        # Обновление password history
+        old_hash = service_account.client_secret_hash
+        updated_history = self.password_history.add_to_history(old_hash, current_history)
+
+        # Обновление Service Account
+        service_account.client_secret_hash = new_hash
+        service_account.secret_history = updated_history
+        service_account.secret_changed_at = datetime.now(timezone.utc)
         service_account.secret_expires_at = ServiceAccount.calculate_secret_expiry(days=expiry_days)
 
         # Если статус был EXPIRED, активируем заново
@@ -357,7 +436,8 @@ class ServiceAccountService:
 
         logger.info(
             f"Rotated secret for Service Account: {service_account.name} "
-            f"(id={service_account_id}, new_expiry={service_account.secret_expires_at})"
+            f"(id={service_account_id}, new_expiry={service_account.secret_expires_at}, "
+            f"history_size={len(updated_history)})"
         )
 
         return service_account, new_secret

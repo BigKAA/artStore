@@ -77,7 +77,7 @@ setup_observability(
 )
 logger.info("OpenTelemetry observability configured")
 
-# CORS middleware (защита от CSRF attacks)
+# CORS middleware (Sprint 16 Phase 1: Enhanced CORS security)
 if settings.cors.enabled:
     app.add_middleware(
         CORSMiddleware,
@@ -91,8 +91,9 @@ if settings.cors.enabled:
     logger.info(
         "CORS enabled",
         extra={
-            "allowed_origins": settings.cors.allow_origins,
-            "allow_credentials": settings.cors.allow_credentials,
+            "cors_origins": settings.cors.allow_origins,
+            "cors_credentials": settings.cors.allow_credentials,
+            "cors_max_age": settings.cors.max_age
         }
     )
 

@@ -107,7 +107,7 @@ setup_observability(
 )
 logger.info("OpenTelemetry observability configured")
 
-# CORS middleware
+# CORS middleware (Sprint 16 Phase 1: Enhanced CORS security)
 if settings.cors.enabled:
     app.add_middleware(
         CORSMiddleware,
@@ -115,8 +115,16 @@ if settings.cors.enabled:
         allow_credentials=settings.cors.allow_credentials,
         allow_methods=settings.cors.allow_methods,
         allow_headers=settings.cors.allow_headers,
+        max_age=settings.cors.max_age,
     )
-    logger.info("CORS enabled")
+    logger.info(
+        "CORS enabled",
+        extra={
+            "cors_origins": settings.cors.allow_origins,
+            "cors_credentials": settings.cors.allow_credentials,
+            "cors_max_age": settings.cors.max_age
+        }
+    )
 
 # Rate Limiting middleware для Service Accounts
 app.add_middleware(RateLimitMiddleware, redis_client=redis_client)

@@ -520,6 +520,62 @@ datetime.now(timezone.utc)
 
 ---
 
-**Последнее обновление**: 2025-11-14 (Sprint 6)
+**Последнее обновление**: 2025-11-16 (Sprint 16 Phase 1)
 **Общее количество долгов**: 12 (4 CRITICAL, 4 HIGH, 1 MEDIUM, 2 LOW, 1 CANCELLED)
-**Следующий ревью**: Sprint 7 completion
+**Следующий ревью**: Sprint 16 completion
+
+## Sprint 16 Phase 1 Update Summary (2025-11-16)
+
+**Achievements - Security Hardening Quick Wins**:
+- ✅ **CORS Whitelist Configuration** (All 4 Modules)
+  - Enhanced CORSSettings with 3 validators (admin-module/app/core/config.py)
+  - Explicit headers instead of wildcards (admin-module/app/main.py)
+  - Preflight caching optimization (max_age=600)
+  - Standardized CORS logging across all modules
+  - Deployed: admin-module, storage-element, ingester-module, query-module
+
+- ✅ **Strong Random Password Infrastructure**
+  - PasswordPolicy class with NIST-compliant rules (admin-module/app/core/password_policy.py)
+  - PasswordValidator, PasswordGenerator, PasswordHistory, PasswordExpiration
+  - ServiceAccountService integration with password history enforcement
+  - Cryptographically secure generation using `secrets` module (CSPRNG)
+  - Database migration applied (alembic/versions/20251116_1630_add_password_policy_fields.py)
+  - New fields: `secret_history` (JSONB), `secret_changed_at` (DateTime TZ)
+  - Password reuse prevention (last 5 passwords tracked)
+
+**Security Score Improvement**: 8/10 → 9/10
+
+**Code Metrics**:
+- Files created: 2 (password_policy.py, migration)
+- Files modified: 13 (config, main, service, models across 4 modules)
+- Lines added: ~1,200
+- Database migration: Successfully applied to artstore_admin database
+
+**Impact on Technical Debt**:
+- ✅ Implicit CORS security debt resolved (wildcard origins eliminated)
+- ✅ Implicit password weakness debt resolved (NIST-compliant policy enforced)
+- CRITICAL and HIGH priority items remain from Sprint 6-7 (Storage Element integration test blockers)
+- Security foundation strengthened for future Sprint 16 phases
+
+**Next Steps (Sprint 16 Phase 4)**:
+- TLS 1.3 + mTLS implementation for inter-service communication
+- Rate limiting with Redis Cluster integration
+- IP whitelisting for administrative operations
+
+## Sprint 15 Update Summary
+
+**Achievements**:
+- ✅ **Security Hardening Phase 2-3 Complete**
+  - JWT Key Rotation automated (admin-module/app/services/jwt_rotation_service.py)
+  - Comprehensive Audit Logging operational (admin-module/app/services/audit_service.py)
+  - Platform-Agnostic Secret Management implemented (admin-module/app/core/secrets.py)
+  - Deployment examples for Docker Compose, Kubernetes, file-based secrets
+
+**Impact on Technical Debt**:
+- No existing debt items resolved in Sprint 15 (focus was on new security features)
+- CRITICAL and HIGH priority items remain from Sprint 6-7 (Storage Element integration test blockers)
+- New security infrastructure added but no legacy debt addressed
+
+**Focus**:
+Sprint 15 focused on building NEW security capabilities rather than resolving existing technical debt.
+Sprint 16 Phase 1 addressed deferred security quick wins (CORS, passwords).

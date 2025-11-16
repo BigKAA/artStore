@@ -166,13 +166,45 @@ class JWTSettings(BaseSettings):
 
 
 class CORSSettings(BaseSettings):
-    """Настройки CORS для защиты от CSRF attacks."""
+    """
+    Настройки CORS для защиты от CSRF attacks.
+
+    CORS (Cross-Origin Resource Sharing) защищает от unauthorized cross-origin requests.
+    Sprint 16 Phase 1: Enhanced CORS configuration для production security.
+
+    Security considerations:
+    - Wildcard origins (*) запрещены в production
+    - Wildcard headers (*) НЕ рекомендуются, используйте explicit list
+    - allow_credentials требует explicit origins (не wildcard)
+    - max_age кеширует preflight requests для performance
+    """
 
     enabled: bool = Field(default=True, alias="CORS_ENABLED")
-    allow_origins: List[str] = Field(default=["http://localhost:4200"], alias="CORS_ALLOW_ORIGINS")
-    allow_credentials: bool = Field(default=True, alias="CORS_ALLOW_CREDENTIALS")
-    allow_methods: List[str] = Field(default=["GET", "POST", "PUT", "DELETE", "PATCH"], alias="CORS_ALLOW_METHODS")
-    allow_headers: List[str] = Field(default=["*"], alias="CORS_ALLOW_HEADERS")
+    allow_origins: List[str] = Field(
+        default=["http://localhost:4200"],
+        alias="CORS_ALLOW_ORIGINS",
+        description="Whitelist разрешенных origins. Production: explicit domains только!"
+    )
+    allow_credentials: bool = Field(
+        default=True,
+        alias="CORS_ALLOW_CREDENTIALS",
+        description="Разрешить credentials (cookies, authorization headers). Requires explicit origins."
+    )
+    allow_methods: List[str] = Field(
+        default=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        alias="CORS_ALLOW_METHODS",
+        description="Разрешенные HTTP methods"
+    )
+    allow_headers: List[str] = Field(
+        default=["Content-Type", "Authorization", "X-Request-ID", "X-Trace-ID"],
+        alias="CORS_ALLOW_HEADERS",
+        description="Разрешенные request headers. Production: explicit list вместо wildcard!"
+    )
+    max_age: int = Field(
+        default=600,
+        alias="CORS_MAX_AGE",
+        description="Preflight cache duration в seconds (default: 10 minutes)"
+    )
 
     model_config = SettingsConfigDict(env_prefix="CORS_", case_sensitive=False, extra="allow")
 
@@ -184,6 +216,9 @@ class CORSSettings(BaseSettings):
 
         Security requirement: CORS wildcards (*) запрещены в production
         для защиты от CSRF attacks.
+
+        Raises:
+            ValueError: Если wildcard origin в production environment
         """
         import os
 
@@ -192,8 +227,67 @@ class CORSSettings(BaseSettings):
             if environment == "production":
                 raise ValueError(
                     "Wildcard CORS origins ('*') are not allowed in production environment. "
-                    "Please configure explicit origin whitelist via CORS_ALLOW_ORIGINS."
+                    "Please configure explicit origin whitelist via CORS_ALLOW_ORIGINS. "
+                    "Example: CORS_ALLOW_ORIGINS=[\"https://admin.artstore.com\",\"https://api.artstore.com\"]"
                 )
+        return v
+
+    @field_validator("allow_headers")
+    @classmethod
+    def warn_wildcard_headers(cls, v: List[str]) -> List[str]:
+        """
+        Warning для wildcard headers в любом environment.
+
+        Wildcard headers (*) функционально работают, но не рекомендуются для security.
+        Explicit header list provides better security и clearer configuration.
+
+        Note: Не блокируем wildcard headers (backward compatibility),
+        но логируем warning для production awareness.
+        """
+        import os
+        import logging
+
+        if "*" in v:
+            logger = logging.getLogger(__name__)
+            environment = os.getenv("ENVIRONMENT", "development")
+
+            if environment == "production":
+                logger.warning(
+                    "CORS wildcard headers ('*') detected in production. "
+                    "Consider explicit header whitelist for better security: "
+                    "CORS_ALLOW_HEADERS=[\"Content-Type\",\"Authorization\",\"X-Request-ID\"]"
+                )
+            else:
+                logger.info(
+                    "CORS wildcard headers ('*') detected. "
+                    "For production, use explicit header list."
+                )
+
+        return v
+
+    @field_validator("allow_credentials", mode="after")
+    @classmethod
+    def validate_credentials_requires_explicit_origins(cls, v: bool, info) -> bool:
+        """
+        Валидация: allow_credentials требует explicit origins (не wildcard).
+
+        CORS spec requirement: Credentials mode несовместим с wildcard origins.
+        Browser отклонит такую configuration.
+
+        Raises:
+            ValueError: Если allow_credentials=True с wildcard origin
+        """
+        # Access other field via validation_context
+        # Note: info.data содержит уже валидированные поля
+        allow_origins = info.data.get("allow_origins", [])
+
+        if v and "*" in allow_origins:
+            raise ValueError(
+                "CORS allow_credentials=True cannot be used with wildcard origins ('*'). "
+                "This violates CORS specification. "
+                "Either set allow_credentials=False OR use explicit origin whitelist."
+            )
+
         return v
 
 
@@ -508,6 +602,117 @@ class SecuritySettings(BaseSettings):
         return v
 
 
+class PasswordSettings(BaseSettings):
+    """
+    Настройки Password Policy для повышенной безопасности.
+
+    Sprint 16 Phase 1: Strong Random Password Infrastructure
+
+    Compliance requirements:
+    - NIST рекомендует минимум 8 символов, мы используем 12 для повышенной безопасности
+    - Обязательная сложность паролей (uppercase, lowercase, digits, special chars)
+    - Password rotation каждые 90 дней
+    - Запрет reuse последних 5 паролей
+    """
+
+    min_length: int = Field(
+        default=12,
+        ge=8,
+        le=128,
+        alias="PASSWORD_MIN_LENGTH",
+        description="Минимальная длина пароля (рекомендуется 12+)"
+    )
+    require_uppercase: bool = Field(
+        default=True,
+        alias="PASSWORD_REQUIRE_UPPERCASE",
+        description="Требовать uppercase буквы (A-Z)"
+    )
+    require_lowercase: bool = Field(
+        default=True,
+        alias="PASSWORD_REQUIRE_LOWERCASE",
+        description="Требовать lowercase буквы (a-z)"
+    )
+    require_digits: bool = Field(
+        default=True,
+        alias="PASSWORD_REQUIRE_DIGITS",
+        description="Требовать цифры (0-9)"
+    )
+    require_special: bool = Field(
+        default=True,
+        alias="PASSWORD_REQUIRE_SPECIAL",
+        description="Требовать специальные символы (!@#$%^&*...)"
+    )
+    max_age_days: int = Field(
+        default=90,
+        ge=30,
+        le=365,
+        alias="PASSWORD_MAX_AGE_DAYS",
+        description="Максимальный возраст пароля в днях (рекомендуется 90)"
+    )
+    history_size: int = Field(
+        default=5,
+        ge=0,
+        le=24,
+        alias="PASSWORD_HISTORY_SIZE",
+        description="Количество старых паролей для проверки reuse (рекомендуется 5)"
+    )
+    expiration_warning_days: int = Field(
+        default=14,
+        ge=1,
+        le=30,
+        alias="PASSWORD_EXPIRATION_WARNING_DAYS",
+        description="За сколько дней предупреждать о скором истечении пароля"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="PASSWORD_", case_sensitive=False, extra="allow")
+
+    @field_validator("min_length")
+    @classmethod
+    def validate_min_length(cls, v: int) -> int:
+        """
+        Валидация минимальной длины пароля.
+
+        Args:
+            v: Минимальная длина
+
+        Returns:
+            int: Валидированная длина
+
+        Raises:
+            ValueError: Если длина меньше рекомендуемой
+        """
+        if v < 12:
+            import logging
+            logging.warning(
+                f"Password min_length={v} is below recommended value of 12. "
+                "Consider increasing for better security."
+            )
+        return v
+
+    @field_validator("max_age_days")
+    @classmethod
+    def validate_max_age(cls, v: int) -> int:
+        """
+        Валидация максимального возраста пароля.
+
+        Args:
+            v: Максимальный возраст в днях
+
+        Returns:
+            int: Валидированный возраст
+
+        Raises:
+            ValueError: Если возраст слишком большой
+        """
+        if v > 180:
+            import logging
+            logging.warning(
+                f"Password max_age_days={v} is longer than recommended 180 days. "
+                "Consider shorter rotation period for better security."
+            )
+        return v
+
+
 class Settings(BaseSettings):
     """Главные настройки приложения."""
 
@@ -532,6 +737,7 @@ class Settings(BaseSettings):
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     initial_admin: InitialAdminSettings = Field(default_factory=InitialAdminSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
+    password: PasswordSettings = Field(default_factory=PasswordSettings)
 
     model_config = SettingsConfigDict(
         env_file=".env",

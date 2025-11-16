@@ -59,7 +59,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             'service_account_id',
-            sa.Integer(),
+            postgresql.UUID(as_uuid=True),
             nullable=True,
             comment='ID service account (NULL для user events)'
         ),

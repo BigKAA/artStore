@@ -106,14 +106,25 @@ setup_observability(
 )
 logger.info("OpenTelemetry observability configured")
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=settings.cors_allow_credentials,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
+# CORS middleware (Sprint 16 Phase 1: Enhanced CORS security)
+if settings.cors.enabled:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors.allow_origins,
+        allow_credentials=settings.cors.allow_credentials,
+        allow_methods=settings.cors.allow_methods,
+        allow_headers=settings.cors.allow_headers,
+        expose_headers=settings.cors.expose_headers,
+        max_age=settings.cors.max_age,
+    )
+    logger.info(
+        "CORS enabled",
+        extra={
+            "cors_origins": settings.cors.allow_origins,
+            "cors_credentials": settings.cors.allow_credentials,
+            "cors_max_age": settings.cors.max_age
+        }
+    )
 
 # Prometheus metrics endpoint
 metrics_app = make_asgi_app()
