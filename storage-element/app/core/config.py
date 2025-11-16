@@ -348,6 +348,64 @@ class CORSSettings(BaseSettings):
         return v
 
 
+class TLSSettings(BaseSettings):
+    """
+    Настройки TLS 1.3 транспортного шифрования и mTLS inter-service authentication.
+
+    Sprint 16 Phase 4: TLS 1.3 + mTLS Infrastructure
+
+    TLS 1.3 Features:
+    - Транспортное шифрование всех HTTP соединений
+    - Perfect Forward Secrecy (PFS) с эфемерными ключами
+    - AEAD cipher suites only (AES-GCM, ChaCha20-Poly1305)
+
+    mTLS (Mutual TLS) Features:
+    - Certificate-based client authentication
+    - Service-to-service mutual authentication
+    - CN whitelist для trusted services
+
+    Configuration:
+        TLS_ENABLED=true
+        TLS_CERT_FILE=/app/tls/server-cert.pem
+        TLS_KEY_FILE=/app/tls/server-key.pem
+        TLS_CA_CERT_FILE=/app/tls/ca-cert.pem
+        TLS_VERIFY_MODE=CERT_REQUIRED
+    """
+    model_config = SettingsConfigDict(
+        env_prefix="TLS_",
+        case_sensitive=False
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable TLS 1.3 encryption"
+    )
+    cert_file: str = Field(
+        default="",
+        description="Path to server certificate (PEM)"
+    )
+    key_file: str = Field(
+        default="",
+        description="Path to server private key (PEM)"
+    )
+    ca_cert_file: str = Field(
+        default="",
+        description="Path to CA certificate for mTLS"
+    )
+    protocol_version: str = Field(
+        default="TLSv1.3",
+        description="Minimum TLS protocol version"
+    )
+    ciphers: str = Field(
+        default="TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256",
+        description="Allowed cipher suites"
+    )
+    verify_mode: str = Field(
+        default="CERT_OPTIONAL",
+        description="Certificate verification: CERT_NONE, CERT_OPTIONAL, CERT_REQUIRED"
+    )
+
+
 class Settings(BaseSettings):
     """
     Главная конфигурация Storage Element.
@@ -375,6 +433,7 @@ class Settings(BaseSettings):
     metrics: MetricsSettings = Field(default_factory=MetricsSettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
     cors: CORSSettings = Field(default_factory=CORSSettings)
+    tls: TLSSettings = Field(default_factory=TLSSettings)  # Sprint 16 Phase 4
 
     # WAL настройки
     wal_dir: Path = Path("./.data/wal")

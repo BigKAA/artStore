@@ -324,6 +324,31 @@ class CORSSettings(BaseSettings):
         return v
 
 
+class TLSSettings(BaseSettings):
+    """
+    TLS 1.3 + mTLS configuration (Sprint 16 Phase 4).
+
+    Configuration:
+        TLS_ENABLED=true
+        TLS_CERT_FILE=/app/tls/server-cert.pem
+        TLS_KEY_FILE=/app/tls/server-key.pem
+        TLS_CA_CERT_FILE=/app/tls/ca-cert.pem
+        TLS_VERIFY_MODE=CERT_OPTIONAL
+    """
+    model_config = SettingsConfigDict(env_prefix="TLS_", case_sensitive=False)
+
+    enabled: bool = Field(default=False, description="Enable TLS 1.3")
+    cert_file: str = Field(default="", description="Server certificate path")
+    key_file: str = Field(default="", description="Server private key path")
+    ca_cert_file: str = Field(default="", description="CA cert for mTLS")
+    protocol_version: str = Field(default="TLSv1.3", description="Min TLS version")
+    ciphers: str = Field(
+        default="TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256",
+        description="Allowed ciphers"
+    )
+    verify_mode: str = Field(default="CERT_OPTIONAL", description="Cert verification mode")
+
+
 # ========================================
 # Main Settings (Composite)
 # ========================================
@@ -359,6 +384,7 @@ class QueryModuleSettings(BaseSettings):
     search: SearchSettings = Field(default_factory=SearchSettings)
     download: DownloadSettings = Field(default_factory=DownloadSettings)
     cors: CORSSettings = Field(default_factory=CORSSettings)
+    tls: TLSSettings = Field(default_factory=TLSSettings)  # Sprint 16 Phase 4
 
     @field_validator("log_level")
     @classmethod

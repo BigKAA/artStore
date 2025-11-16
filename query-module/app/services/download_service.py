@@ -57,30 +57,86 @@ class DownloadService:
         """
         Получение HTTP клиента с lazy initialization.
 
+        Sprint 16 Phase 4: Поддержка mTLS для inter-service authentication.
+
         Returns:
-            AsyncClient: Configured httpx async client
+            AsyncClient: Configured httpx async client с mTLS support
         """
         if self._http_client is None:
-            self._http_client = AsyncClient(
-                timeout=httpx.Timeout(
+            # Конфигурация HTTP клиента
+            client_config = {
+                "timeout": httpx.Timeout(
                     connect=settings.download.connect_timeout,
                     read=settings.download.read_timeout,
                     write=settings.download.write_timeout,
                     pool=settings.download.pool_timeout
                 ),
-                limits=httpx.Limits(
+                "limits": httpx.Limits(
                     max_connections=settings.download.max_connections,
                     max_keepalive_connections=settings.download.max_keepalive_connections
                 ),
-                follow_redirects=True,
-                http2=True  # HTTP/2 для лучшей производительности
-            )
+                "follow_redirects": True,
+                "http2": True,  # HTTP/2 для лучшей производительности
+            }
+
+            # Добавление mTLS configuration если TLS enabled
+            if settings.tls.enabled:
+                import ssl
+
+                # Создание SSL context для mTLS
+                ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+
+                # CA certificate для валидации server certificate
+                if settings.tls.ca_cert_file:
+                    ssl_context.load_verify_locations(cafile=settings.tls.ca_cert_file)
+                    logger.info(
+                        "Loaded CA certificate for server validation",
+                        extra={"ca_cert": settings.tls.ca_cert_file}
+                    )
+
+                # Client certificate для mTLS authentication
+                if settings.tls.cert_file and settings.tls.key_file:
+                    ssl_context.load_cert_chain(
+                        certfile=settings.tls.cert_file,
+                        keyfile=settings.tls.key_file
+                    )
+                    logger.info(
+                        "Loaded client certificate for mTLS",
+                        extra={
+                            "cert_file": settings.tls.cert_file,
+                            "key_file": settings.tls.key_file
+                        }
+                    )
+
+                # TLS 1.3 minimum protocol version
+                if settings.tls.protocol_version == "TLSv1.3":
+                    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_3
+                elif settings.tls.protocol_version == "TLSv1.2":
+                    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+
+                # TLS 1.3 AEAD cipher suites
+                if settings.tls.ciphers:
+                    ssl_context.set_ciphers(settings.tls.ciphers)
+
+                # Добавление SSL context к клиенту
+                client_config["verify"] = ssl_context
+
+                logger.info(
+                    "mTLS enabled for Storage Element communication",
+                    extra={
+                        "protocol": settings.tls.protocol_version,
+                        "ciphers": settings.tls.ciphers
+                    }
+                )
+
+            self._http_client = AsyncClient(**client_config)
 
             logger.info(
                 "HTTP client initialized",
                 extra={
                     "connect_timeout": settings.download.connect_timeout,
-                    "max_connections": settings.download.max_connections
+                    "max_connections": settings.download.max_connections,
+                    "mtls_enabled": settings.tls.enabled
                 }
             )
 
