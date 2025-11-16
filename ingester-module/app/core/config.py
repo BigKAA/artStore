@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -156,7 +156,7 @@ class CORSSettings(BaseSettings):
         description="Preflight cache duration в seconds (default: 10 minutes)"
     )
 
-    @Field.field_validator("allow_origins")
+    @field_validator("allow_origins")
     @classmethod
     def validate_no_wildcards_in_production(cls, v: list[str]) -> list[str]:
         """
@@ -180,7 +180,7 @@ class CORSSettings(BaseSettings):
                 )
         return v
 
-    @Field.field_validator("allow_headers")
+    @field_validator("allow_headers")
     @classmethod
     def warn_wildcard_headers(cls, v: list[str]) -> list[str]:
         """
@@ -213,7 +213,7 @@ class CORSSettings(BaseSettings):
 
         return v
 
-    @Field.field_validator("allow_credentials", mode="after")
+    @field_validator("allow_credentials", mode="after")
     @classmethod
     def validate_credentials_requires_explicit_origins(cls, v: bool, info) -> bool:
         """

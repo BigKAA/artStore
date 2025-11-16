@@ -73,7 +73,7 @@ class DatabaseSettings(BaseSettings):
     port: int = 5432
     username: str = "artstore"
     password: str = "password"
-    database: str = "artstore"
+    database: str = "artstore_storage_01"
 
     # Connection pooling
     pool_size: int = 10

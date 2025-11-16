@@ -1,0 +1,85 @@
+---
+# Query Module ConfigMap
+# Высокопроизводительный поиск и получение файлов
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: query-module-config
+  namespace: artstore
+  labels:
+    app: query-module
+    component: backend
+data:
+  # Application Configuration
+  APP_NAME: "ArtStore Query Module"
+  APP_VERSION: "1.0.0"
+  APP_ENVIRONMENT: "production"
+
+  # Server Configuration
+  SERVER_HOST: "0.0.0.0"
+  SERVER_PORT: "8030"
+  SERVER_WORKERS: "4"
+
+  # Search Configuration
+  SEARCH_FULL_TEXT_ENABLED: "true"
+  SEARCH_FULL_TEXT_LANGUAGE: "russian"  # PostgreSQL full-text search language
+  SEARCH_MAX_RESULTS: "100"
+  SEARCH_DEFAULT_LIMIT: "20"
+  SEARCH_HIGHLIGHT_ENABLED: "true"
+
+  # Download Configuration
+  DOWNLOAD_CHUNK_SIZE: "8388608"  # 8MB chunks для streaming download
+  DOWNLOAD_RESUMABLE_ENABLED: "true"
+  DOWNLOAD_COMPRESSION_ENABLED: "true"
+  DOWNLOAD_CDN_ENABLED: "false"  # Включить при настройке CDN
+  DOWNLOAD_CDN_BASE_URL: ""
+
+  # Cache Configuration
+  CACHE_ENABLED: "true"
+  CACHE_TTL: "300"  # 5 минут
+  CACHE_MAX_SIZE: "1000"  # Максимум 1000 записей в локальном кеше
+
+  # Database Configuration (PostgreSQL Full-Text Search)
+  DATABASE_HOST: "postgres.artstore.svc.cluster.local"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "artstore"
+  DATABASE_POOL_SIZE: "40"  # Большой пул для высокой нагрузки поиска
+  DATABASE_MAX_OVERFLOW: "30"
+
+  # Redis Configuration (Multi-Level Caching)
+  REDIS_HOST: "redis.artstore.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_DB: "3"
+  SERVICE_DISCOVERY_CHANNEL: "artstore:service-discovery"
+  SERVICE_DISCOVERY_UPDATE_INTERVAL: "60"
+
+  # Local Storage Element Cache Configuration
+  LOCAL_STORAGE_ELEMENTS_CACHE_TTL: "300"
+
+  # Circuit Breaker Configuration
+  CIRCUIT_BREAKER_ENABLED: "true"
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD: "5"
+  CIRCUIT_BREAKER_RECOVERY_TIMEOUT: "60"
+
+  # Connection Pooling Configuration
+  HTTP_CONNECTION_POOL_SIZE: "100"
+  HTTP_CONNECTION_MAX_KEEPALIVE: "50"
+  HTTP_CONNECTION_KEEPALIVE_EXPIRY: "30"
+
+  # JWT Validation Configuration
+  JWT_ALGORITHM: "RS256"
+
+  # CORS Configuration
+  CORS_ALLOW_ORIGINS: "*"
+  CORS_ALLOW_CREDENTIALS: "true"
+  CORS_ALLOW_METHODS: "GET,POST,PUT,DELETE,PATCH"
+
+  # Monitoring Configuration
+  METRICS_ENABLED: "true"
+  METRICS_PATH: "/metrics"
+  TRACING_ENABLED: "true"
+
+  # Health Check Configuration
+  HEALTH_CHECK_ENABLED: "true"
+  HEALTH_LIVE_PATH: "/health/live"
+  HEALTH_READY_PATH: "/health/ready"

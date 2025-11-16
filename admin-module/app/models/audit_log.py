@@ -19,7 +19,8 @@ from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, ForeignKey, Integer,
     String, Text, select, desc
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+import uuid
 from sqlalchemy.orm import Session, relationship
 
 from app.models.base import Base
@@ -91,7 +92,7 @@ class AuditLog(Base):
         comment="ID пользователя (NULL для system events)"
     )
     service_account_id = Column(
-        Integer,
+        PG_UUID(as_uuid=True),
         ForeignKey("service_accounts.id", ondelete="SET NULL"),
         nullable=True,
         index=True,

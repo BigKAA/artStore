@@ -1,0 +1,112 @@
+---
+# Redis 7 StatefulSet для ArtStore
+# ВАЖНО: Redis работает в СИНХРОННОМ режиме (redis-py, не asyncio)
+# Используется для Service Discovery (Pub/Sub) и кеширования
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: artstore
+  labels:
+    app: redis
+    component: infrastructure
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service для StatefulSet
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: redis
+  selector:
+    app: redis
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: artstore
+  labels:
+    app: redis
+    component: infrastructure
+    version: "7"
+spec:
+  serviceName: redis
+  replicas: 1  # Single instance (для HA использовать Redis Sentinel или Redis Cluster)
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+        component: infrastructure
+        version: "7"
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 6379
+              name: redis
+              protocol: TCP
+          command:
+            - redis-server
+            - --appendonly
+            - "yes"  # Enable AOF persistence
+            - --appendfsync
+            - "everysec"  # Fsync every second (balance между производительностью и durability)
+          # Опционально: Redis AUTH (раскомментировать если установлен REDIS_PASSWORD)
+          # env:
+          #   - name: REDIS_PASSWORD
+          #     valueFrom:
+          #       secretKeyRef:
+          #         name: artstore-secrets
+          #         key: REDIS_PASSWORD
+          # command:
+          #   - redis-server
+          #   - --requirepass
+          #   - $(REDIS_PASSWORD)
+          #   - --appendonly
+          #   - "yes"
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app: redis
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi  # Минимум 10GB для production
+        storageClassName: managed-nfs-storage

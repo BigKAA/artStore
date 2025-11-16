@@ -1,0 +1,69 @@
+---
+# Ingester Module ConfigMap
+# Высокопроизводительное добавление и управление файлами
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingester-module-config
+  namespace: artstore
+  labels:
+    app: ingester-module
+    component: backend
+data:
+  # Application Configuration
+  APP_NAME: "ArtStore Ingester Module"
+  APP_VERSION: "1.0.0"
+  APP_ENVIRONMENT: "production"
+
+  # Server Configuration
+  SERVER_HOST: "0.0.0.0"
+  SERVER_PORT: "8020"
+  SERVER_WORKERS: "4"
+
+  # Upload Configuration
+  UPLOAD_CHUNK_SIZE: "5242880"  # 5MB chunks для streaming upload
+  UPLOAD_MAX_FILE_SIZE: "1073741824"  # 1GB максимум
+  UPLOAD_ALLOWED_EXTENSIONS: "*"  # Все расширения разрешены, или указать список
+  UPLOAD_COMPRESSION_ENABLED: "true"
+  UPLOAD_COMPRESSION_ALGORITHM: "gzip"  # gzip или brotli
+
+  # Database Configuration
+  DATABASE_HOST: "postgres.artstore.svc.cluster.local"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "artstore"
+  DATABASE_POOL_SIZE: "30"  # Больше пул для высокой нагрузки
+  DATABASE_MAX_OVERFLOW: "20"
+
+  # Redis Configuration (Service Discovery)
+  REDIS_HOST: "redis.artstore.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_DB: "2"
+  SERVICE_DISCOVERY_CHANNEL: "artstore:service-discovery"
+  SERVICE_DISCOVERY_UPDATE_INTERVAL: "60"
+
+  # Local Storage Element Cache Configuration
+  LOCAL_STORAGE_ELEMENTS_CACHE_TTL: "300"  # 5 минут кеш при недоступности Redis
+
+  # Circuit Breaker Configuration
+  CIRCUIT_BREAKER_ENABLED: "true"
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD: "5"
+  CIRCUIT_BREAKER_RECOVERY_TIMEOUT: "60"
+  CIRCUIT_BREAKER_EXPECTED_EXCEPTION: "ConnectionError,TimeoutError"
+
+  # JWT Validation Configuration
+  JWT_ALGORITHM: "RS256"
+
+  # CORS Configuration
+  CORS_ALLOW_ORIGINS: "*"
+  CORS_ALLOW_CREDENTIALS: "true"
+  CORS_ALLOW_METHODS: "GET,POST,PUT,DELETE,PATCH"
+
+  # Monitoring Configuration
+  METRICS_ENABLED: "true"
+  METRICS_PATH: "/metrics"
+  TRACING_ENABLED: "true"
+
+  # Health Check Configuration
+  HEALTH_CHECK_ENABLED: "true"
+  HEALTH_LIVE_PATH: "/health/live"
+  HEALTH_READY_PATH: "/health/ready"

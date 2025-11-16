@@ -8,13 +8,20 @@ Shared fixtures для всех тестов:
 - Test data generators
 """
 
+import os
+from pathlib import Path
+
+# ВАЖНО: Установка env переменных ДО импорта app модулей
+# Предотвращает ValidationError при загрузке config
+if "AUTH_PUBLIC_KEY_PATH" not in os.environ:
+    test_key_path = Path(__file__).parent.parent / "keys" / "public_key.pem"
+    os.environ["AUTH_PUBLIC_KEY_PATH"] = str(test_key_path)
+
 import pytest
 from datetime import datetime, timezone, timedelta
 from typing import AsyncGenerator, Generator
 from unittest.mock import Mock, AsyncMock, MagicMock, patch
-from pathlib import Path
 import tempfile
-import os
 
 import jwt
 from fastapi.testclient import TestClient

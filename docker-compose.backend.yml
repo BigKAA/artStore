@@ -1,0 +1,518 @@
+# ==============================================================================
+# ArtStore Backend Services Stack
+# ==============================================================================
+# Все 4 backend модуля системы ArtStore:
+# - Admin Module (8000-8009)
+# - Storage Element (8010-8019)
+# - Ingester Module (8020-8029)
+# - Query Module (8030-8039)
+#
+# Использование:
+#   # Запуск только backend (требует infrastructure)
+#   docker-compose -f docker-compose.infrastructure.yml -f docker-compose.backend.yml up -d
+#
+#   # Остановка
+#   docker-compose -f docker-compose.infrastructure.yml -f docker-compose.backend.yml down
+#
+# ВАЖНО: Требует запущенную infrastructure (postgres, redis, minio)
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ==============================================================================
+  # Admin Module - Authentication & Management Center
+  # ==============================================================================
+  # Роль: JWT токены (RS256), service accounts, storage elements, saga orchestration
+  # Порты: 8000-8009
+  # ==============================================================================
+  admin-module:
+    build:
+      context: ./admin-module
+      dockerfile: Dockerfile
+    container_name: artstore_admin_module
+    restart: unless-stopped
+
+    environment:
+      # Application Settings
+      APP_NAME: "ArtStore Admin Module"
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "false"
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8000"
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+
+      # Database (PostgreSQL Async via asyncpg)
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore_admin
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+
+      # Redis (SYNC режим для Service Discovery)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 0
+
+      # JWT Configuration (RS256 для distributed validation)
+      JWT_ALGORITHM: RS256
+      JWT_PRIVATE_KEY_PATH: /app/.keys/private_key.pem
+      JWT_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: 7
+
+      # Initial Service Account (auto-created on first startup)
+      INITIAL_ACCOUNT_ENABLED: ${INITIAL_ACCOUNT_ENABLED:-true}
+      INITIAL_ACCOUNT_NAME: ${INITIAL_ACCOUNT_NAME:-admin-service}
+      INITIAL_CLIENT_ID: ${INITIAL_CLIENT_ID:-}
+      INITIAL_CLIENT_SECRET: ${INITIAL_CLIENT_SECRET:-}
+
+      # CORS Configuration (CRITICAL для production!)
+      CORS_ENABLED: ${CORS_ENABLED:-true}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:4200"]}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+
+      # Logging (JSON обязательно для production)
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Metrics & Health
+      METRICS_ENABLED: "true"
+      METRICS_PATH: "/metrics"
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      # Конфигурация (read-only)
+      - ./admin-module/config.yaml:/app/config.yaml:ro
+      # JWT ключи генерируются автоматически при первом запуске
+
+    networks:
+      - artstore_network
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ==============================================================================
+  # Storage Element 01 - Physical File Storage
+  # ==============================================================================
+  # Роль: Физическое хранение файлов, metadata caching, WAL
+  # Порты: 8010-8019
+  # Режимы: edit, rw, ro, ar
+  # ==============================================================================
+  storage-element-01:
+    build:
+      context: ./storage-element
+      dockerfile: Dockerfile
+    container_name: artstore_storage_element_01
+    restart: unless-stopped
+
+    environment:
+      # Application Settings
+      APP_NAME: "Storage Element 01"
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "false"
+      APP_MODE: ${STORAGE_01_MODE:-edit}  # edit, rw, ro, ar
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8010"
+      SERVER_WORKERS: ${STORAGE_01_WORKERS:-4}
+
+      # Database (PostgreSQL Async)
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore_storage_01
+      DB_TABLE_PREFIX: storage_elem_01
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+
+      # Redis (SYNC режим для Service Discovery)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 1
+
+      # JWT Authentication (публичный ключ от Admin Module)
+      JWT_ALGORITHM: RS256
+      JWT_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+
+      # Storage Configuration
+      STORAGE_TYPE: ${STORAGE_01_TYPE:-local}  # local или s3
+      STORAGE_LOCAL_BASE_PATH: /app/.data/storage
+      STORAGE_MAX_FILE_SIZE: ${STORAGE_MAX_FILE_SIZE:-1073741824}  # 1GB
+
+      # S3 Configuration (если STORAGE_TYPE=s3)
+      STORAGE_S3_ENDPOINT_URL: ${STORAGE_S3_ENDPOINT:-http://minio:9000}
+      STORAGE_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      STORAGE_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      STORAGE_S3_BUCKET_NAME: artstore-storage-01
+      STORAGE_S3_REGION: us-east-1
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PATH: "/metrics"
+
+    ports:
+      - "8010:8010"
+
+    volumes:
+      # Persistent file storage
+      - storage_01_data:/app/.data/storage
+      # JWT public key (копируется из admin-module при старте)
+      - admin_keys:/app/.keys:ro
+
+    networks:
+      - artstore_network
+
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ==============================================================================
+  # Storage Element 02 - Additional Storage (Optional)
+  # ==============================================================================
+  storage-element-02:
+    build:
+      context: ./storage-element
+      dockerfile: Dockerfile
+    container_name: artstore_storage_element_02
+    restart: unless-stopped
+    profiles: ["multi-storage"]  # Запускается только с --profile multi-storage
+
+    environment:
+      APP_NAME: "Storage Element 02"
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "false"
+      APP_MODE: ${STORAGE_02_MODE:-rw}
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8011"
+      SERVER_WORKERS: ${STORAGE_02_WORKERS:-4}
+
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore_storage_02
+      DB_TABLE_PREFIX: storage_elem_02
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 1
+
+      JWT_ALGORITHM: RS256
+      JWT_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+
+      STORAGE_TYPE: ${STORAGE_02_TYPE:-local}
+      STORAGE_LOCAL_BASE_PATH: /app/.data/storage
+      STORAGE_MAX_FILE_SIZE: ${STORAGE_MAX_FILE_SIZE:-1073741824}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      METRICS_ENABLED: "true"
+      METRICS_PATH: "/metrics"
+
+    ports:
+      - "8011:8011"
+
+    volumes:
+      - storage_02_data:/app/.data/storage
+      - admin_keys:/app/.keys:ro
+
+    networks:
+      - artstore_network
+
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ==============================================================================
+  # Ingester Module - File Upload & Management
+  # ==============================================================================
+  # Роль: Streaming upload, compression, batch operations, saga transactions
+  # Порты: 8020-8029
+  # ==============================================================================
+  ingester-module:
+    build:
+      context: ./ingester-module
+      dockerfile: Dockerfile
+    container_name: artstore_ingester_module
+    restart: unless-stopped
+
+    environment:
+      # Application Settings
+      APP_NAME: artstore-ingester
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "false"
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8020"
+
+      # Authentication (JWT RS256)
+      AUTH_ENABLED: "true"
+      AUTH_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+      AUTH_ALGORITHM: RS256
+
+      # Storage Element Discovery (через Redis Service Discovery)
+      STORAGE_ELEMENT_DISCOVERY_ENABLED: "true"
+      STORAGE_ELEMENT_BASE_URL: http://storage-element-01:8010  # Fallback
+      STORAGE_ELEMENT_TIMEOUT: 30
+      STORAGE_ELEMENT_MAX_RETRIES: 3
+      STORAGE_ELEMENT_CONNECTION_POOL_SIZE: 100
+
+      # Redis (SYNC режим для Service Discovery)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 2
+      REDIS_MAX_CONNECTIONS: 50
+
+      # Compression Settings
+      COMPRESSION_ENABLED: "true"
+      COMPRESSION_ALGORITHM: gzip
+      COMPRESSION_LEVEL: 6
+      COMPRESSION_MIN_SIZE: 1024
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PATH: "/metrics"
+
+    ports:
+      - "8020:8020"
+
+    volumes:
+      # JWT public key
+      - admin_keys:/app/.keys:ro
+
+    networks:
+      - artstore_network
+
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      storage-element-01:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8020/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ==============================================================================
+  # Query Module - File Search & Download
+  # ==============================================================================
+  # Роль: PostgreSQL Full-Text Search, multi-level caching, CDN integration
+  # Порты: 8030-8039
+  # ==============================================================================
+  query-module:
+    build:
+      context: ./query-module
+      dockerfile: Dockerfile
+    container_name: artstore_query_module
+    restart: unless-stopped
+
+    environment:
+      # Application Settings
+      APP_NAME: query-module
+      APP_VERSION: "0.1.0"
+      DEBUG: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Database (PostgreSQL Async для Full-Text Search)
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: ${DB_USERNAME:-artstore}
+      DATABASE_PASSWORD: ${DB_PASSWORD:-password}
+      DATABASE_DATABASE: artstore_query
+      DATABASE_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DATABASE_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+
+      # Redis (SYNC режим для Service Discovery + Caching)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 3
+
+      # Cache Settings (Multi-level: Local → Redis → PostgreSQL)
+      CACHE_LOCAL_ENABLED: "true"
+      CACHE_LOCAL_TTL: 300
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_TTL: 1800
+
+      # Search Settings (PostgreSQL Full-Text)
+      SEARCH_DEFAULT_LANGUAGE: russian
+      SEARCH_MAX_RESULTS: 100
+
+      # Download Settings
+      DOWNLOAD_CONNECT_TIMEOUT: 10
+      DOWNLOAD_READ_TIMEOUT: 300
+      DOWNLOAD_MAX_CONNECTIONS: 100
+
+      # JWT Authentication
+      AUTH_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+      AUTH_ALGORITHM: RS256
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PATH: "/metrics"
+
+    ports:
+      - "8030:8030"
+
+    volumes:
+      # JWT public key
+      - admin_keys:/app/.keys:ro
+
+    networks:
+      - artstore_network
+
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8030/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  artstore_network:
+    external: true
+    name: artstore_network
+
+# ==============================================================================
+# Volumes
+# ==============================================================================
+volumes:
+  # Storage Element persistent data
+  storage_01_data:
+    name: artstore_storage_01_data
+    driver: local
+
+  storage_02_data:
+    name: artstore_storage_02_data
+    driver: local
+
+  # Shared JWT keys от Admin Module
+  admin_keys:
+    name: artstore_admin_keys
+    driver: local
+
+# ==============================================================================
+# NOTES
+# ==============================================================================
+# 1. Все модули используют JSON logging для production
+# 2. Redis работает в SYNC режиме для Service Discovery
+# 3. PostgreSQL async через asyncpg для всех модулей
+# 4. JWT публичный ключ автоматически копируется из admin-module
+# 5. Health checks на /health/live и /health/ready
+# 6. Metrics доступны на /metrics для Prometheus
+# 7. Storage Element 02 запускается с --profile multi-storage
+# 8. Resource limits предотвращают OOM
+# ==============================================================================

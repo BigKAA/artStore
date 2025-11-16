@@ -14,7 +14,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentator
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import REGISTRY
 from fastapi import FastAPI
 
@@ -83,7 +83,7 @@ def setup_observability(
 
     # === FastAPI Instrumentation ===
     # Автоматическое инструментирование HTTP endpoints
-    FastAPIInstrumentator().instrument_app(app)
+    FastAPIInstrumentor.instrument_app(app)
 
     logger.info(
         "FastAPI instrumentation complete",

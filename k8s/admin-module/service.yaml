@@ -1,0 +1,26 @@
+---
+# Admin Module Service
+# ClusterIP Service для внутреннего доступа к Admin Module
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-module
+  namespace: artstore
+  labels:
+    app: admin-module
+    component: backend
+  annotations:
+    # Prometheus service discovery
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+  selector:
+    app: admin-module
+  sessionAffinity: None  # OAuth 2.0 токены stateless, session affinity не требуется

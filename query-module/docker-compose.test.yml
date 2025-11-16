@@ -1,0 +1,158 @@
+version: '3.8'
+
+# ==========================================
+# Docker Compose для Query Module Tests
+# ==========================================
+# Изолированное тестовое окружение для unit
+# и integration tests Query Module
+# ==========================================
+
+services:
+  # ==========================================
+  # Test PostgreSQL Database
+  # ==========================================
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: query-test-postgres
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: query_test
+    ports:
+      - "5433:5432"  # Отдельный порт для тестов, не конфликтует с dev
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d query_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - query-test-network
+
+  # ==========================================
+  # Test Redis
+  # ==========================================
+  redis-test:
+    image: redis:7-alpine
+    container_name: query-test-redis
+    ports:
+      - "6380:6379"  # Отдельный порт для тестов, не конфликтует с dev
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - query-test-network
+
+  # ==========================================
+  # Test Runner - выполняет pytest с coverage
+  # ==========================================
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test  # Multi-stage build test target
+    container_name: query-test-runner
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    environment:
+      # Test database configuration
+      DATABASE_HOST: postgres-test
+      DATABASE_PORT: 5432
+      DATABASE_USER: test_user
+      DATABASE_PASSWORD: test_password
+      DATABASE_NAME: query_test
+
+      # Test Redis configuration
+      REDIS_HOST: redis-test
+      REDIS_PORT: 6379
+
+      # Test-specific settings
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text  # Human-readable для test debugging
+      TESTING: "true"
+
+      # Mock external services
+      ADMIN_MODULE_URL: http://mock-admin:8000
+      STORAGE_ELEMENT_URL: http://mock-storage:8010
+
+      # JWT configuration - для валидации mock токенов
+      JWT_ALGORITHM: RS256
+      JWT_PUBLIC_KEY_PATH: /app/.keys/test_public_key.pem
+    volumes:
+      # Mount source code для live testing
+      - ./app:/app/app:ro
+      - ./tests:/app/tests:ro
+      # Mount test coverage output
+      - ./htmlcov:/app/htmlcov
+      - ./.coverage:/app/.coverage
+    networks:
+      - query-test-network
+    command: >
+      sh -c "
+        echo 'Waiting for database initialization...' &&
+        sleep 2 &&
+        echo 'Generating test JWT public key for validation...' &&
+        mkdir -p /app/.keys &&
+        openssl genrsa -out /tmp/test_private_key.pem 2048 &&
+        openssl rsa -in /tmp/test_private_key.pem -pubout -out /app/.keys/test_public_key.pem &&
+        echo 'Running database migrations...' &&
+        alembic upgrade head &&
+        echo 'Running unit tests with coverage...' &&
+        pytest tests/unit/ -v --cov=app --cov-report=html --cov-report=term &&
+        echo 'Test execution complete!'
+      "
+
+  # ==========================================
+  # Mock Admin Module для integration tests
+  # ==========================================
+  mock-admin:
+    image: mockserver/mockserver:latest
+    container_name: query-test-mock-admin
+    ports:
+      - "8001:8000"
+    environment:
+      MOCKSERVER_INITIALIZATION_JSON_PATH: /config/admin-mock.json
+    volumes:
+      - ./tests/mocks/admin-mock.json:/config/admin-mock.json:ro
+    networks:
+      - query-test-network
+    profiles:
+      - integration  # Запускается только для integration tests
+
+  # ==========================================
+  # Mock Storage Element для integration tests
+  # ==========================================
+  mock-storage:
+    image: mockserver/mockserver:latest
+    container_name: query-test-mock-storage
+    ports:
+      - "8011:8010"
+    environment:
+      MOCKSERVER_INITIALIZATION_JSON_PATH: /config/storage-mock.json
+    volumes:
+      - ./tests/mocks/storage-mock.json:/config/storage-mock.json:ro
+    networks:
+      - query-test-network
+    profiles:
+      - integration  # Запускается только для integration tests
+
+# ==========================================
+# Test Volumes
+# ==========================================
+volumes:
+  postgres-test-data:
+    name: query-test-postgres-data
+
+# ==========================================
+# Test Network (isolated)
+# ==========================================
+networks:
+  query-test-network:
+    name: query-test-network
+    driver: bridge

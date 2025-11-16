@@ -1,0 +1,23 @@
+---
+# Storage Element Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage-element
+  namespace: artstore
+  labels:
+    app: storage-element
+    component: backend
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8010"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8010
+      targetPort: 8010
+      protocol: TCP
+      name: http
+  selector:
+    app: storage-element

@@ -1,0 +1,206 @@
+---
+# Admin Module Deployment
+# Центр аутентификации и управления системой ArtStore
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-module
+  namespace: artstore
+  labels:
+    app: admin-module
+    component: backend
+    version: "1.0.0"
+spec:
+  replicas: 2  # Минимум 2 для High Availability
+  selector:
+    matchLabels:
+      app: admin-module
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Zero downtime deployments
+  template:
+    metadata:
+      labels:
+        app: admin-module
+        component: backend
+        version: "1.0.0"
+      annotations:
+        # Prometheus scraping annotations
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: admin-module
+          image: artstore/admin-module:latest  # ОБЯЗАТЕЛЬНО указать актуальный tag в production!
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          env:
+            # ConfigMap values
+            - name: APP_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: admin-module-config
+                  key: APP_NAME
+            - name: APP_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: admin-module-config
+                  key: APP_VERSION
+            - name: SERVER_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: admin-module-config
+                  key: SERVER_HOST
+            - name: SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: admin-module-config
+                  key: SERVER_PORT
+
+            # Database Configuration
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: admin-module-config
+                  key: DATABASE_HOST
+            - name: DATABASE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: admin-module-config
+                  key: DATABASE_PORT
+            - name: DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: POSTGRES_DB
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: POSTGRES_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: POSTGRES_PASSWORD
+
+            # Redis Configuration
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: admin-module-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: admin-module-config
+                  key: REDIS_PORT
+
+            # JWT Configuration
+            - name: JWT_ALGORITHM
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: JWT_ALGORITHM
+            - name: JWT_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: JWT_PRIVATE_KEY
+            - name: JWT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: JWT_PUBLIC_KEY
+            - name: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+
+            # Initial Service Account Configuration
+            - name: INITIAL_ACCOUNT_ENABLED
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: INITIAL_ACCOUNT_ENABLED
+            - name: INITIAL_ACCOUNT_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: INITIAL_ACCOUNT_NAME
+            - name: INITIAL_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: INITIAL_CLIENT_ID
+            - name: INITIAL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: INITIAL_CLIENT_SECRET
+            - name: INITIAL_ACCOUNT_ROLE
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: INITIAL_ACCOUNT_ROLE
+
+            # Logging Configuration
+            - name: LOG_LEVEL
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: LOG_LEVEL
+            - name: LOG_FORMAT
+              valueFrom:
+                secretKeyRef:
+                  name: artstore-secrets
+                  key: LOG_FORMAT
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+      # Обеспечение распределения подов по разным узлам
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - admin-module
+                topologyKey: kubernetes.io/hostname
