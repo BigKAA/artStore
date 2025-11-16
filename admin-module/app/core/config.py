@@ -79,7 +79,7 @@ class JWTSettings(BaseSettings):
 
 
 class CORSSettings(BaseSettings):
-    """Настройки CORS."""
+    """Настройки CORS для защиты от CSRF attacks."""
 
     enabled: bool = Field(default=True, alias="CORS_ENABLED")
     allow_origins: List[str] = Field(default=["http://localhost:4200"], alias="CORS_ALLOW_ORIGINS")
@@ -88,6 +88,26 @@ class CORSSettings(BaseSettings):
     allow_headers: List[str] = Field(default=["*"], alias="CORS_ALLOW_HEADERS")
 
     model_config = SettingsConfigDict(env_prefix="CORS_", case_sensitive=False, extra="allow")
+
+    @field_validator("allow_origins")
+    @classmethod
+    def validate_no_wildcards_in_production(cls, v: List[str]) -> List[str]:
+        """
+        Проверка запрета wildcard origins в production окружении.
+
+        Security requirement: CORS wildcards (*) запрещены в production
+        для защиты от CSRF attacks.
+        """
+        import os
+
+        if "*" in v:
+            environment = os.getenv("ENVIRONMENT", "development")
+            if environment == "production":
+                raise ValueError(
+                    "Wildcard CORS origins ('*') are not allowed in production environment. "
+                    "Please configure explicit origin whitelist via CORS_ALLOW_ORIGINS."
+                )
+        return v
 
 
 class RateLimitSettings(BaseSettings):
@@ -255,6 +275,25 @@ class InitialAdminSettings(BaseSettings):
         return v.strip()
 
 
+class SchedulerSettings(BaseSettings):
+    """Настройки APScheduler для background задач."""
+
+    enabled: bool = Field(default=True, alias="SCHEDULER_ENABLED")
+    jwt_rotation_enabled: bool = Field(default=True, alias="SCHEDULER_JWT_ROTATION_ENABLED")
+    jwt_rotation_interval_hours: int = Field(default=24, alias="SCHEDULER_JWT_ROTATION_INTERVAL_HOURS")
+    timezone: str = Field(default="UTC", alias="SCHEDULER_TIMEZONE")
+
+    model_config = SettingsConfigDict(env_prefix="SCHEDULER_", case_sensitive=False, extra="allow")
+
+    @field_validator("jwt_rotation_interval_hours")
+    @classmethod
+    def validate_rotation_interval(cls, v: int) -> int:
+        """Валидация интервала ротации."""
+        if v < 1 or v > 168:  # 1 час - 1 неделя
+            raise ValueError("JWT rotation interval must be between 1 and 168 hours")
+        return v
+
+
 class Settings(BaseSettings):
     """Главные настройки приложения."""
 
@@ -276,6 +315,7 @@ class Settings(BaseSettings):
     service_discovery: ServiceDiscoverySettings = Field(default_factory=ServiceDiscoverySettings)
     saga: SagaSettings = Field(default_factory=SagaSettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
+    scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     initial_admin: InitialAdminSettings = Field(default_factory=InitialAdminSettings)
 
     model_config = SettingsConfigDict(
@@ -364,6 +404,10 @@ class Settings(BaseSettings):
         # Health settings
         if "health" in yaml_data:
             flat_config["health"] = HealthSettings(**yaml_data["health"])
+
+        # Scheduler settings
+        if "scheduler" in yaml_data:
+            flat_config["scheduler"] = SchedulerSettings(**yaml_data["scheduler"])
 
         # Initial Admin settings
         if "initial_admin" in yaml_data:

@@ -14,6 +14,7 @@ from app.core.database import init_db, close_db, check_db_connection, get_db
 from app.core.redis import close_redis, check_redis_connection, service_discovery, redis_client
 from app.core.logging_config import setup_logging, get_logger
 from app.core.observability import setup_observability
+from app.core.scheduler import init_scheduler, shutdown_scheduler
 from app.db.init_db import create_initial_admin
 from app.api.v1.endpoints import health, auth
 from app.middleware import RateLimitMiddleware
@@ -58,6 +59,10 @@ async def lifespan(app: FastAPI):
         # Инициализация Service Discovery
         service_discovery.initialize()  # Синхронный вызов
 
+        # Инициализация APScheduler для background задач
+        init_scheduler()
+        logger.info("APScheduler initialized")
+
         logger.info("Application startup complete")
 
     except Exception as e:
@@ -70,6 +75,10 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down application")
 
     try:
+        # Остановка APScheduler (с ожиданием завершения running jobs)
+        shutdown_scheduler()
+        logger.info("APScheduler shut down")
+
         service_discovery.close()  # Синхронный вызов
         close_redis()  # Синхронный вызов
         await close_db()

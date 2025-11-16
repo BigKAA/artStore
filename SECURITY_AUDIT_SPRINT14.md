@@ -306,9 +306,127 @@
 - [ ] Automated credential rotation
 - [ ] Security headers (HSTS, CSP, etc.) через reverse proxy
 
+## Implementation Roadmap
+
+### Sprint 15: Security Hardening - Phase 1-3 (Week 15)
+
+**Status**: PLANNED
+**Expected Security Score**: 8/10 (improvement from 6/10)
+**MUST HAVE Items Addressed**: 5/7 (71%)
+
+#### Phase 1: Quick Security Wins (1-2 дня)
+- ✅ **Item #5**: CORS Whitelist Configuration
+  - Удалить `allow_origins=["*"]` из всех модулей
+  - Настроить explicit origin whitelists
+  - Production validation
+
+- ✅ **Item #19**: Strong Random Passwords
+  - Генерация strong passwords (32+ chars)
+  - Обновление docker-compose.yml
+  - Документация SECURITY_SETUP.md
+
+#### Phase 2: Authentication & Logging (3-5 дней)
+- ✅ **Item #1**: JWT Key Rotation Automation
+  - Database schema для JWT key versioning
+  - Automatic rotation каждые 24 часа
+  - Distributed locking через Redis
+  - Graceful transition period (1 hour overlap)
+
+- ✅ **Item #9**: Comprehensive Audit Logging
+  - Database schema для audit logs
+  - Tamper-proof signatures (HMAC-SHA256)
+  - Logging всех security events:
+    - Authentication attempts (success/failure)
+    - Authorization failures
+    - Sensitive operations (file upload/delete/transfer)
+  - Prometheus metrics для security events
+
+#### Phase 3: Secrets Management (2-3 дня)
+- ✅ **Item #18**: Docker Secrets Integration
+  - Миграция credentials в Docker Secrets
+  - Settings updates для reading secrets
+  - Development fallback (.env)
+  - Documentation SECRETS_MANAGEMENT.md
+
+**Deliverables**:
+- Updated settings.py в всех модулях
+- Database migrations (jwt_keys, audit_logs tables)
+- JWTKeyRotationService с scheduler
+- AuditService и AuditMiddleware
+- Docker Secrets configuration
+- Security documentation
+
+---
+
+### Sprint 16: Security Hardening - Phase 4 (Week 16-17)
+
+**Status**: PLANNED
+**Expected Security Score**: 10/10 (production-ready)
+**MUST HAVE Items Addressed**: 7/7 (100%)
+
+#### Phase 4: TLS 1.3 & mTLS Implementation (5-7 дней)
+- ⏳ **Item #7**: TLS 1.3 для Inter-Service Communication
+  - Certificate generation (per service)
+  - TLS 1.3 configuration для FastAPI
+  - HTTP → HTTPS migration для всех endpoints
+  - Certificate validation
+
+- ⏳ **Item #11**: mTLS (mutual TLS)
+  - Client certificates для каждого микросервиса
+  - Certificate pinning
+  - Automatic certificate rotation
+  - Certificate renewal automation
+
+- ⏳ **Item #12**: Monitoring Endpoints Protection
+  - Reverse proxy setup (nginx/HAProxy)
+  - Authentication для Prometheus/Grafana
+  - IP whitelisting
+  - TLS encryption для monitoring endpoints
+
+**Complexity**: HIGH (requires deep networking knowledge, certificate management, testing)
+**Estimated Time**: 5-7 days
+
+**Deliverables**:
+- TLS certificates для всех сервисов
+- Updated docker-compose с TLS configuration
+- Certificate rotation scripts
+- Reverse proxy configuration
+- Updated service clients (HTTPS)
+- TLS testing suite
+
+---
+
+### Ongoing Security Improvements (SHOULD HAVE)
+
+#### Sprint 17+: Additional Security Enhancements
+- ⏳ **Item #4**: JWT Token Blacklist для Revocation
+  - Redis-based blacklist
+  - Token revocation API
+  - Cleanup jobs
+
+- ⏳ **Item #13**: Redis Authentication
+  - `requirepass` configuration
+  - Redis ACL setup
+  - Client updates
+
+- ⏳ **Item #14**: PostgreSQL Network Restrictions
+  - Docker network isolation
+  - Port exposure limits
+  - IP whitelisting
+
+#### Future Considerations (NICE TO HAVE)
+- Vault integration для secrets management
+- Filesystem-level encryption (LUKS)
+- MFA для administrative accounts
+- Virus scanning для uploaded files
+- Automated credential rotation
+- Security headers (HSTS, CSP) через reverse proxy
+
+---
+
 ## Выводы
 
-**Overall Security Score**: 6/10 (MVP acceptable, needs hardening for production)
+**Overall Security Score**: 6/10 → 8/10 (Sprint 15) → 10/10 (Sprint 16)
 
 **Strengths**:
 - ✅ OAuth 2.0 JWT RS256 authentication architecture
@@ -317,14 +435,32 @@
 - ✅ Attribute-first storage model
 - ✅ JSON structured logging
 
-**Critical Gaps**:
-- ❌ No TLS/mTLS for inter-service communication
-- ❌ No JWT key rotation
-- ❌ Default weak passwords
-- ❌ CORS misconfiguration
-- ❌ No comprehensive audit logging
+**Critical Gaps** (to be addressed):
+- ❌ No TLS/mTLS for inter-service communication → **Sprint 16**
+- ❌ No JWT key rotation → **Sprint 15 Phase 2**
+- ❌ Default weak passwords → **Sprint 15 Phase 1**
+- ❌ CORS misconfiguration → **Sprint 15 Phase 1**
+- ❌ No comprehensive audit logging → **Sprint 15 Phase 2**
+
+**Implementation Strategy**:
+1. **Sprint 15** (Week 15): Quick wins + automation (CORS, passwords, JWT rotation, audit logging, secrets)
+   - **Impact**: Security score 6/10 → 8/10
+   - **Complexity**: Medium
+   - **Risk**: Low
+
+2. **Sprint 16** (Week 16-17): TLS 1.3 & mTLS (network security hardening)
+   - **Impact**: Security score 8/10 → 10/10
+   - **Complexity**: High
+   - **Risk**: Medium (requires careful testing)
+
+3. **Sprint 17+**: Ongoing improvements (token revocation, Redis auth, etc.)
+   - **Impact**: Additional security layers
+   - **Complexity**: Low-Medium
+   - **Priority**: Lower
 
 **Recommendation**:
-Текущая реализация **acceptable для MVP/development**, но требует **существенного усиления security для production deployment**.
+- Текущая реализация **acceptable для MVP/development**
+- **Sprint 15** делает систему **acceptable для staging/pre-production**
+- **Sprint 16** делает систему **production-ready с enterprise-grade security**
 
-Приоритет: сначала реализовать все "Критические (MUST HAVE)" items из checklist.
+Приоритет: выполнить Sprint 15 для quick security wins (71% critical items), затем Sprint 16 для full production hardening (100% critical items).

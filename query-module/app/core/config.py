@@ -218,14 +218,34 @@ class QueryModuleSettings(BaseSettings):
     host: str = Field(default="0.0.0.0", description="%>AB 4;O 70?CA:0")
     port: int = Field(default=8030, ge=1024, le=65535, description=">@B 4;O 70?CA:0")
 
-    # CORS =0AB@>9:8
+    # CORS настройки (защита от CSRF attacks)
     cors_origins: list[str] = Field(
         default=["http://localhost:4200", "http://localhost:8000"],
-        description=" 07@5H5==K5 CORS origins",
+        description="Разрешенные CORS origins (explicit whitelist)",
     )
     cors_allow_credentials: bool = Field(
-        default=True, description=" 07@5H8BL credentials 2 CORS"
+        default=True, description="Разрешить credentials в CORS"
     )
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_no_wildcards_in_production(cls, v: list[str]) -> list[str]:
+        """
+        Проверка запрета wildcard origins в production окружении.
+
+        Security requirement: CORS wildcards (*) запрещены в production
+        для защиты от CSRF attacks.
+        """
+        import os
+
+        if "*" in v:
+            environment = os.getenv("ENVIRONMENT", "development")
+            if environment == "production":
+                raise ValueError(
+                    "Wildcard CORS origins ('*') are not allowed in production environment. "
+                    "Please configure explicit origin whitelist via CORS_ORIGINS."
+                )
+        return v
 
     # Logging
     log_level: str = Field(

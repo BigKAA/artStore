@@ -34,6 +34,9 @@ opentelemetry-sdk==1.29.0
 opentelemetry-instrumentation-fastapi==0.50b0
 opentelemetry-exporter-prometheus==0.50b0
 
+# Background задачи и scheduling
+apscheduler==3.10.4
+
 # Utilities
 python-dotenv==1.0.0
 pyyaml==6.0.1

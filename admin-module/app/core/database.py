@@ -4,9 +4,11 @@
 """
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool, QueuePool
 from sqlalchemy import text
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Generator
 import logging
 
 from .config import settings
@@ -27,6 +29,25 @@ engine = create_async_engine(
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
+# Создаем синхронный engine для background задач (APScheduler)
+sync_engine = create_engine(
+    settings.database.sync_url,
+    echo=settings.database.echo,
+    pool_pre_ping=True,
+    pool_size=settings.database.pool_size,
+    max_overflow=settings.database.max_overflow,
+    poolclass=QueuePool,
+)
+
+# Создаем синхронную фабрику сессий для background задач
+SyncSessionLocal = sessionmaker(
+    bind=sync_engine,
+    class_=Session,
     expire_on_commit=False,
     autocommit=False,
     autoflush=False,
@@ -55,6 +76,34 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+def get_sync_session() -> Generator[Session, None, None]:
+    """
+    Генератор для получения синхронной database session.
+    Используется в background задачах (APScheduler) и миграциях.
+
+    Yields:
+        Session: SQLAlchemy sync session
+
+    Example:
+        session = next(get_sync_session())
+        try:
+            # Работа с сессией
+            user = session.query(User).first()
+            session.commit()
+        finally:
+            session.close()
+    """
+    session = SyncSessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 async def check_db_connection() -> bool:

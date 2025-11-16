@@ -77,14 +77,24 @@ setup_observability(
 )
 logger.info("OpenTelemetry observability configured")
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # TODO: Настроить для production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS middleware (защита от CSRF attacks)
+if settings.cors.enabled:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors.allow_origins,
+        allow_credentials=settings.cors.allow_credentials,
+        allow_methods=settings.cors.allow_methods,
+        allow_headers=settings.cors.allow_headers,
+        expose_headers=settings.cors.expose_headers,
+        max_age=settings.cors.max_age,
+    )
+    logger.info(
+        "CORS enabled",
+        extra={
+            "allowed_origins": settings.cors.allow_origins,
+            "allow_credentials": settings.cors.allow_credentials,
+        }
+    )
 
 # Подключение API router
 app.include_router(api_router, prefix="/api/v1")

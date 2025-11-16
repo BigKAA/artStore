@@ -4,7 +4,7 @@
 
 **ArtStore** - распределенная система файлового хранилища с микросервисной архитектурой для долгосрочного хранения документов.
 
-**Статус**: Week 14 (Sprint 14) - ✅ PRODUCTION HARDENING COMPLETE
+**Статус**: Week 15 (Sprint 15) - 📋 SECURITY HARDENING IMPLEMENTATION (PLANNED)
 
 **Ключевые изменения архитектуры** (2025-01-15):
 1. **Упрощение аутентификации**: От LDAP к OAuth 2.0 Client Credentials (Service Accounts) ✅ РЕАЛИЗОВАНО (Sprint 3)
@@ -44,14 +44,19 @@
 - **Security Audit**: 26 issues identified с приоритизацией ✅
 - **Documentation**: monitoring/README.md, CLAUDE.md обновлен ✅
 
-⏳ **В процессе (Sprint 15+)**:
-- **Current Priority**: Security Hardening Implementation (Sprint 15)
-- **Architecture refinement**: Service Discovery (Redis Pub/Sub coordination)
+⏳ **В процессе (Sprint 15 - PLANNED)**:
+- **Current Priority**: Security Hardening Implementation Phase 1-3
+- **Phase 1** (1-2 дня): CORS Whitelist + Strong Random Passwords
+- **Phase 2** (3-5 дней): JWT Key Rotation + Comprehensive Audit Logging
+- **Phase 3** (2-3 дня): Docker Secrets Management
+- **Expected**: Security Score 6/10 → 8/10, 5/7 MUST HAVE items complete
 
-📋 **Запланировано (Sprint 15+)**:
-- **Security Implementation**: TLS 1.3, JWT key rotation, CORS fixes (Sprint 15)
-- **Admin UI**: Angular interface (Sprint 16+)
-- **Performance Optimization**: Custom business metrics (Sprint 16+)
+📋 **Запланировано (Sprint 16+)**:
+- **Sprint 16**: Security Hardening Phase 4 - TLS 1.3 + mTLS (2 недели)
+- **Sprint 17+**: Admin UI Angular interface
+- **Sprint 17+**: Custom Business Metrics (file ops, search performance, storage utilization)
+- **Sprint 18+**: Performance Optimization
+- **Week 24**: Production-Ready with HA components
 
 ---
 
@@ -864,6 +869,86 @@ async def test_feature(db_session):
 
 **Note**: CI/CD Automation НЕ в scope проекта
 
+#### Sprint 15: Security Hardening Implementation - Phase 1-3 (Week 15)
+**Status**: PLANNED
+**Priority**: P1 (CRITICAL для production)
+**Pre-conditions**:
+- Sprint 14 monitoring infrastructure operational ✅
+- Security audit completed with 26 issues identified ✅
+- MUST HAVE security items prioritized ✅
+
+**Planned Achievements**:
+
+**Phase 1: Quick Security Wins** (Week 15.1, 1-2 дня):
+- [ ] **CORS Whitelist Configuration**
+  - Заменить `allow_origins=["*"]` на explicit whitelist во всех модулях
+  - Конфигурируемый через environment variables
+  - Поддержка multiple origins для development/staging/production
+  - Implementation: admin-module, storage-element, ingester-module, query-module
+- [ ] **Strong Random Passwords**
+  - Генерация secure random passwords для всех сервисов
+  - PostgreSQL password (32 chars, alphanumeric + symbols)
+  - Grafana admin password (24 chars)
+  - Redis requirepass (32 chars)
+  - Docker Compose .env template с placeholders
+  - Documentation для password generation process
+
+**Phase 2: Authentication & Logging** (Week 15.2, 3-5 дней):
+- [ ] **JWT Key Rotation Automation**
+  - Automatic rotation каждые 24 часа
+  - Admin Module coordination через distributed lock (Redis)
+  - Graceful transition period (старый + новый ключ валидны 1 час)
+  - Key versioning и storage в PostgreSQL
+  - Background scheduler (APScheduler) для rotation tasks
+  - Metrics для monitoring rotation events
+- [ ] **Comprehensive Audit Logging**
+  - Structured audit logs для всех security events
+  - Authentication attempts (success/failure) с IP, user-agent, timestamp
+  - Authorization failures с resource, action, reason
+  - Sensitive operations (file upload, delete, transfer) с full context
+  - Tamper-proof log signatures (HMAC-SHA256)
+  - Separate audit log storage (PostgreSQL audit_logs table)
+  - Retention policy: 7 years minimum
+  - Prometheus metrics для audit events
+
+**Phase 3: Secrets Management** (Week 15.3, 2-3 дня):
+- [ ] **Docker Secrets Integration**
+  - Migrate PostgreSQL credentials to Docker Secrets
+  - Migrate Redis password to Docker Secrets
+  - Migrate JWT private key to Docker Secrets
+  - Update docker-compose.yml для всех модулей
+  - Secret rotation procedures documentation
+  - Development mode fallback (local .env files)
+- [ ] **Environment Variables Hardening**
+  - Remove sensitive data from docker-compose.yml
+  - .env.example templates для всех модулей
+  - Secret generation scripts (generate_secrets.sh)
+  - CI/CD integration guidelines (GitHub Actions secrets)
+
+**Deferred to Sprint 16** (High Complexity):
+- **TLS 1.3 Configuration** (1 week): Certificate infrastructure setup
+- **mTLS Inter-Service Communication** (1 week): Mutual TLS implementation
+
+**Expected Metrics**:
+- **Security Score Improvement**: 6/10 → 8/10 (after Phase 1-3)
+- **MUST HAVE Items Completed**: 5/7 (71%)
+- **Critical Security Gaps Closed**: CORS, Passwords, JWT Rotation, Audit Logging, Secrets
+- **Files Modified**: ~15 (all modules main.py, docker-compose.yml, settings)
+- **New Components**: JWT rotation scheduler, audit logging middleware, secrets management layer
+- **Documentation**: Security hardening guide, secrets rotation procedures
+
+**Success Criteria**:
+- ✅ CORS configured with explicit whitelists (no wildcards)
+- ✅ All default passwords replaced with strong random values
+- ✅ JWT keys rotate automatically every 24 hours
+- ✅ Comprehensive audit logging operational (all security events logged)
+- ✅ Docker Secrets managing all sensitive credentials
+- ✅ Security score improved to 8/10
+- ✅ Zero plain-text secrets in docker-compose.yml
+- ✅ Prometheus metrics tracking security events
+
+**Expected Outcome**: Critical security hardening complete, production deployment blockers reduced from 6 to 2 (only TLS/mTLS remaining for Sprint 16)
+
 ---
 
 ## Key Milestones
@@ -879,6 +964,8 @@ async def test_feature(db_session):
 **✅ Week 12 (Sprint 12)**: Query Module MVP COMPLETE - 73% coverage, integration tests foundation
 **✅ Week 13 (Sprint 13)**: LDAP infrastructure removal COMPLETE - ~2000 LOC removed, OAuth 2.0 only
 **✅ Week 14 (Sprint 14)**: Production Hardening COMPLETE - OpenTelemetry, Prometheus, Grafana, Security Audit (26 issues)
+**📋 Week 15 (Sprint 15)**: Security Hardening Phase 1-3 - CORS, Passwords, JWT Rotation, Audit Logging, Secrets Management
+**📋 Week 16 (Sprint 16)**: Security Hardening Phase 4 - TLS 1.3 + mTLS inter-service communication
 **📋 Week 24**: Production-Ready with HA components
 
 ---

@@ -6,6 +6,7 @@ from .base import Base, TimestampMixin
 from .user import User, UserRole, UserStatus
 from .storage_element import StorageElement, StorageMode, StorageType, StorageStatus
 from .service_account import ServiceAccount, ServiceAccountRole, ServiceAccountStatus
+from .jwt_key import JWTKey
 
 __all__ = [
     # Base
@@ -24,4 +25,6 @@ __all__ = [
     "ServiceAccount",
     "ServiceAccountRole",
     "ServiceAccountStatus",
+    # JWT Key Rotation
+    "JWTKey",
 ]

@@ -222,6 +222,60 @@ class HealthSettings(BaseSettings):
     readiness_path: str = "/health/ready"
 
 
+class CORSSettings(BaseSettings):
+    """Настройки CORS для защиты от CSRF attacks"""
+    model_config = SettingsConfigDict(
+        env_prefix="CORS_",
+        case_sensitive=False
+    )
+
+    enabled: bool = True
+    allow_origins: list[str] = Field(
+        default=["http://localhost:4200", "http://localhost:8000"],
+        description="Разрешенные CORS origins (explicit whitelist)"
+    )
+    allow_credentials: bool = Field(
+        default=True,
+        description="Разрешить credentials в CORS запросах"
+    )
+    allow_methods: list[str] = Field(
+        default=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        description="Разрешенные HTTP методы"
+    )
+    allow_headers: list[str] = Field(
+        default=["*"],
+        description="Разрешенные request headers"
+    )
+    expose_headers: list[str] = Field(
+        default=[],
+        description="Headers, которые будут exposed в browser"
+    )
+    max_age: int = Field(
+        default=600,
+        description="Max age для preflight cache (seconds)"
+    )
+
+    @field_validator("allow_origins")
+    @classmethod
+    def validate_no_wildcards_in_production(cls, v: list[str]) -> list[str]:
+        """
+        Проверка запрета wildcard origins в production окружении.
+
+        Security requirement: CORS wildcards (*) запрещены в production
+        для защиты от CSRF attacks.
+        """
+        import os
+
+        if "*" in v:
+            environment = os.getenv("ENVIRONMENT", "development")
+            if environment == "production":
+                raise ValueError(
+                    "Wildcard CORS origins ('*') are not allowed in production environment. "
+                    "Please configure explicit origin whitelist via CORS_ALLOW_ORIGINS."
+                )
+        return v
+
+
 class Settings(BaseSettings):
     """
     Главная конфигурация Storage Element.
@@ -248,6 +302,7 @@ class Settings(BaseSettings):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     metrics: MetricsSettings = Field(default_factory=MetricsSettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
+    cors: CORSSettings = Field(default_factory=CORSSettings)
 
     # WAL настройки
     wal_dir: Path = Path("./.data/wal")
