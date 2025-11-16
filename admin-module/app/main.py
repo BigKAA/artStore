@@ -16,8 +16,8 @@ from app.core.logging_config import setup_logging, get_logger
 from app.core.observability import setup_observability
 from app.core.scheduler import init_scheduler, shutdown_scheduler
 from app.db.init_db import create_initial_admin
-from app.api.v1.endpoints import health, auth
-from app.middleware import RateLimitMiddleware
+from app.api.v1.endpoints import health, auth, jwt_keys
+from app.middleware import RateLimitMiddleware, AuditMiddleware
 from prometheus_client import make_asgi_app
 
 # Настройка логирования (JSON формат по умолчанию)
@@ -122,9 +122,14 @@ if settings.cors.enabled:
 app.add_middleware(RateLimitMiddleware, redis_client=redis_client)
 logger.info("Rate limiting middleware enabled")
 
+# Audit Logging middleware для security compliance
+app.add_middleware(AuditMiddleware)
+logger.info("Audit logging middleware enabled")
+
 # Подключаем роутеры
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
+app.include_router(jwt_keys.router, prefix="/api/v1/jwt-keys", tags=["jwt-keys"])
 
 # Prometheus metrics endpoint
 metrics_app = make_asgi_app()

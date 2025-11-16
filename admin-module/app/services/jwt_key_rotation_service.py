@@ -20,6 +20,12 @@ from sqlalchemy.orm import Session
 
 from app.core.redis import get_redis
 from app.models.jwt_key import JWTKey
+from app.core.metrics import (
+    record_jwt_rotation,
+    update_jwt_keys_count,
+    update_jwt_key_expiry,
+    record_rotation_lock_attempt
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +84,7 @@ class JWTKeyRotationService:
         """
         lock_acquired = False
         lock_value = f"{int(time.time() * 1000)}"  # Уникальный идентификатор lock
+        start_time = time.time()  # Измеряем время выполнения
 
         try:
             # Попытка получить distributed lock с retry logic
@@ -111,23 +118,37 @@ class JWTKeyRotationService:
             session.add(new_key)
             session.commit()
 
+            duration = time.time() - start_time
+
             logger.info(
                 f"JWT key rotation completed successfully. "
                 f"New key version: {new_key.version[:8]}..., "
-                f"expires_at: {new_key.expires_at.isoformat()}"
+                f"expires_at: {new_key.expires_at.isoformat()}, "
+                f"duration: {duration:.2f}s"
             )
 
             # Метрики для Prometheus
-            self._record_rotation_metrics(success=True, deactivated_count=deactivated_count)
+            self._record_rotation_metrics(
+                success=True,
+                deactivated_count=deactivated_count,
+                duration_seconds=duration,
+                session=session
+            )
 
             return True
 
         except Exception as e:
+            duration = time.time() - start_time
             logger.error(f"JWT key rotation failed: {e}", exc_info=True)
             session.rollback()
 
             # Метрики для Prometheus
-            self._record_rotation_metrics(success=False, error=str(e))
+            self._record_rotation_metrics(
+                success=False,
+                error=str(e),
+                duration_seconds=duration,
+                session=session
+            )
 
             return False
 
@@ -161,6 +182,7 @@ class JWTKeyRotationService:
 
                 if acquired:
                     logger.debug(f"Lock acquired on attempt {attempt + 1}")
+                    record_rotation_lock_attempt(result="acquired")
                     return True
 
                 # Lock занят, ждем перед retry
@@ -173,8 +195,11 @@ class JWTKeyRotationService:
 
             except RedisError as e:
                 logger.error(f"Redis error during lock acquisition: {e}")
+                record_rotation_lock_attempt(result="failed")
                 return False
 
+        # Все retry attempts исчерпаны
+        record_rotation_lock_attempt(result="timeout")
         return False
 
     def _release_lock(self, lock_value: str) -> bool:
@@ -339,6 +364,8 @@ class JWTKeyRotationService:
     def _record_rotation_metrics(
         self,
         success: bool,
+        duration_seconds: float,
+        session: Session,
         deactivated_count: int = 0,
         error: Optional[str] = None
     ) -> None:
@@ -347,26 +374,49 @@ class JWTKeyRotationService:
 
         Args:
             success: Успешность ротации
+            duration_seconds: Время выполнения ротации в секундах
+            session: Database session для подсчета ключей
             deactivated_count: Количество деактивированных ключей
             error: Текст ошибки если ротация failed
-
-        Note:
-            Placeholder для будущей интеграции с Prometheus.
-            Будет реализовано в Phase 2 с остальными metrics.
         """
-        # TODO: Интеграция с Prometheus metrics
-        # Пример будущей реализации:
-        # from prometheus_client import Counter, Gauge
-        #
-        # jwt_rotation_total = Counter('jwt_rotation_total', 'Total JWT key rotations')
-        # jwt_rotation_success = Counter('jwt_rotation_success', 'Successful JWT key rotations')
-        # jwt_rotation_failed = Counter('jwt_rotation_failed', 'Failed JWT key rotations')
-        # jwt_keys_deactivated = Counter('jwt_keys_deactivated', 'Deactivated JWT keys')
-        #
-        # jwt_rotation_total.inc()
-        # if success:
-        #     jwt_rotation_success.inc()
-        #     jwt_keys_deactivated.inc(deactivated_count)
+        try:
+            # Запись основных метрик ротации
+            record_jwt_rotation(success=success, duration_seconds=duration_seconds)
+
+            if success:
+                # Обновление счетчиков ключей
+                all_keys = session.query(JWTKey).all()
+                active_keys = [key for key in all_keys if key.is_active]
+
+                update_jwt_keys_count(
+                    active_count=len(active_keys),
+                    total_count=len(all_keys)
+                )
+
+                # Обновление времени до истечения latest ключа
+                latest_key = JWTKey.get_latest_active_key(session)
+                if latest_key:
+                    now = datetime.now(timezone.utc)
+                    time_until_expiry = latest_key.expires_at - now
+                    hours_until_expiry = time_until_expiry.total_seconds() / 3600
+
+                    update_jwt_key_expiry(hours_until_expiry=hours_until_expiry)
+
+                logger.debug(
+                    f"Recorded rotation metrics: success={success}, "
+                    f"duration={duration_seconds:.2f}s, "
+                    f"active_keys={len(active_keys)}, total_keys={len(all_keys)}, "
+                    f"deactivated={deactivated_count}"
+                )
+            else:
+                logger.warning(
+                    f"Recorded failed rotation metrics: duration={duration_seconds:.2f}s, "
+                    f"error={error}"
+                )
+
+        except Exception as e:
+            # Не прерываем rotation из-за ошибки метрик
+            logger.warning(f"Failed to record rotation metrics: {e}", exc_info=True)
         # else:
         #     jwt_rotation_failed.inc()
 

@@ -1,5 +1,5 @@
 """
->45;8 107K 40==KE Admin Module.
+Models для Admin Module.
 """
 
 from .base import Base, TimestampMixin
@@ -7,6 +7,7 @@ from .user import User, UserRole, UserStatus
 from .storage_element import StorageElement, StorageMode, StorageType, StorageStatus
 from .service_account import ServiceAccount, ServiceAccountRole, ServiceAccountStatus
 from .jwt_key import JWTKey
+from .audit_log import AuditLog
 
 __all__ = [
     # Base
@@ -27,4 +28,6 @@ __all__ = [
     "ServiceAccountStatus",
     # JWT Key Rotation
     "JWTKey",
+    # Audit Logging
+    "AuditLog",
 ]

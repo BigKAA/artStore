@@ -294,6 +294,74 @@ class SchedulerSettings(BaseSettings):
         return v
 
 
+class SecuritySettings(BaseSettings):
+    """Настройки безопасности."""
+
+    audit_hmac_secret: str = Field(
+        default="change-me-in-production-to-secure-random-value",
+        alias="SECURITY_AUDIT_HMAC_SECRET",
+        description="Секретный ключ для HMAC подписей audit logs (минимум 32 символа)"
+    )
+    audit_retention_days: int = Field(
+        default=2555,  # ~7 лет (365 * 7)
+        alias="SECURITY_AUDIT_RETENTION_DAYS",
+        description="Срок хранения audit logs в днях (minimum 7 лет для compliance)"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="SECURITY_", case_sensitive=False, extra="allow")
+
+    @field_validator("audit_hmac_secret")
+    @classmethod
+    def validate_hmac_secret(cls, v: str) -> str:
+        """
+        Валидация HMAC secret.
+
+        Args:
+            v: HMAC secret для валидации
+
+        Returns:
+            str: Валидированный secret
+
+        Raises:
+            ValueError: Если secret слишком короткий
+        """
+        if len(v) < 32:
+            raise ValueError("HMAC secret must be at least 32 characters for security")
+
+        # Warning для production
+        import os
+        if v == "change-me-in-production-to-secure-random-value":
+            environment = os.getenv("ENVIRONMENT", "development")
+            if environment == "production":
+                raise ValueError(
+                    "Default HMAC secret cannot be used in production. "
+                    "Please set SECURITY_AUDIT_HMAC_SECRET environment variable."
+                )
+
+        return v
+
+    @field_validator("audit_retention_days")
+    @classmethod
+    def validate_retention_period(cls, v: int) -> int:
+        """
+        Валидация срока хранения audit logs.
+
+        Args:
+            v: Срок хранения в днях
+
+        Returns:
+            int: Валидированный срок хранения
+
+        Raises:
+            ValueError: Если срок хранения меньше минимального (7 лет)
+        """
+        min_retention_days = 365 * 7  # 7 лет minimum для compliance
+        if v < min_retention_days:
+            raise ValueError(f"Audit log retention must be at least {min_retention_days} days (7 years) for compliance")
+
+        return v
+
+
 class Settings(BaseSettings):
     """Главные настройки приложения."""
 
@@ -317,6 +385,7 @@ class Settings(BaseSettings):
     health: HealthSettings = Field(default_factory=HealthSettings)
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     initial_admin: InitialAdminSettings = Field(default_factory=InitialAdminSettings)
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -412,6 +481,10 @@ class Settings(BaseSettings):
         # Initial Admin settings
         if "initial_admin" in yaml_data:
             flat_config["initial_admin"] = InitialAdminSettings(**yaml_data["initial_admin"])
+
+        # Security settings
+        if "security" in yaml_data:
+            flat_config["security"] = SecuritySettings(**yaml_data["security"])
 
         return cls(**flat_config)
 

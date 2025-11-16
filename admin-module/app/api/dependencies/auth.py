@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_db, get_sync_session
 from app.models.user import User, UserRole, UserStatus
 from app.services.token_service import token_service
 from app.services.auth_service import auth_service
@@ -37,8 +37,13 @@ async def get_current_user(
     # Извлекаем токен
     token = credentials.credentials
 
-    # Валидируем токен и получаем user_id
-    user_id = token_service.get_user_id_from_token(token)
+    # Валидируем токен и получаем user_id (с multi-version support)
+    sync_session = next(get_sync_session())
+    try:
+        user_id = token_service.get_user_id_from_token(token, session=sync_session)
+    finally:
+        sync_session.close()
+
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -159,8 +164,13 @@ async def get_optional_current_user(
         return None
 
     try:
-        # Пытаемся получить пользователя
-        user_id = token_service.get_user_id_from_token(credentials.credentials)
+        # Пытаемся получить пользователя (с multi-version support)
+        sync_session = next(get_sync_session())
+        try:
+            user_id = token_service.get_user_id_from_token(credentials.credentials, session=sync_session)
+        finally:
+            sync_session.close()
+
         if not user_id:
             return None
 

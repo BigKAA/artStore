@@ -6,7 +6,7 @@ Authentication endpoints.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_db, get_sync_session
 from app.core.config import settings
 from app.schemas.auth import (
     LoginRequest,
@@ -58,8 +58,12 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Создаем токены
-    access_token, refresh_token = token_service.create_token_pair(user)
+    # Создаем токены с database-backed keys
+    sync_session = next(get_sync_session())
+    try:
+        access_token, refresh_token = token_service.create_token_pair(user, session=sync_session)
+    finally:
+        sync_session.close()
 
     return TokenResponse(
         access_token=access_token,
@@ -81,42 +85,54 @@ async def refresh_token(
 
     Возвращает новый access токен и тот же refresh токен.
     """
-    # Валидируем refresh токен
-    payload = token_service.validate_token(request.refresh_token, token_type="refresh")
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token",
-            headers={"WWW-Authenticate": "Bearer"},
+    # Валидируем refresh токен с multi-version support
+    sync_session = next(get_sync_session())
+    try:
+        payload = token_service.validate_token(
+            request.refresh_token,
+            token_type="refresh",
+            session=sync_session
         )
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    # Получаем пользователя
-    user_id = int(payload.get("sub"))
-    user = await auth_service.get_user_by_id(db, user_id)
+        # Получаем пользователя
+        user_id = int(payload.get("sub"))
+        user = await auth_service.get_user_by_id(db, user_id)
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Проверяем что пользователь активен
+        if not user.can_login():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"User is {user.status.value}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Создаем новый access токен с database-backed key
+        new_access_token = token_service.refresh_access_token(
+            request.refresh_token,
+            user,
+            session=sync_session
         )
-
-    # Проверяем что пользователь активен
-    if not user.can_login():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"User is {user.status.value}",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Создаем новый access токен
-    new_access_token = token_service.refresh_access_token(request.refresh_token, user)
-    if not new_access_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Failed to refresh token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        if not new_access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to refresh token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    finally:
+        sync_session.close()
 
     return TokenResponse(
         access_token=new_access_token,
@@ -303,13 +319,18 @@ async def oauth2_token(
             }
         )
 
-    # Создаем токены
+    # Создаем токены с database-backed keys
     from datetime import datetime as dt, timezone
     issued_at = dt.now(timezone.utc)
 
-    access_token, refresh_token = token_service.create_service_account_token_pair(
-        service_account
-    )
+    sync_session = next(get_sync_session())
+    try:
+        access_token, refresh_token = token_service.create_service_account_token_pair(
+            service_account,
+            session=sync_session
+        )
+    finally:
+        sync_session.close()
 
     return OAuth2TokenResponse(
         access_token=access_token,
