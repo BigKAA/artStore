@@ -18,7 +18,7 @@ services:
   # PostgreSQL 15 - Primary Database (Async via asyncpg)
   # ==============================================================================
   postgres:
-    image: postgres:15-alpine
+    image: postgres:15
     container_name: artstore_postgres
     restart: unless-stopped
 
@@ -26,7 +26,6 @@ services:
       POSTGRES_USER: ${DB_USERNAME:-artstore}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
       POSTGRES_DB: artstore
-      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=ru_RU.UTF-8"
       # Отключаем TRUST для production безопасности
       POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_AUTH_METHOD:-md5}
 
@@ -52,10 +51,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
           memory: 2G
         reservations:
-          cpus: '0.5'
           memory: 512M
 
   # ==============================================================================
@@ -68,15 +65,6 @@ services:
     image: redis:7-alpine
     container_name: artstore_redis
     restart: unless-stopped
-
-    # Redis command с optional password protection
-    command: >
-      redis-server
-      --appendonly yes
-      --appendfsync everysec
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
 
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -97,17 +85,19 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
           memory: 1G
         reservations:
-          cpus: '0.25'
           memory: 256M
 
   # ==============================================================================
   # MinIO - S3-Compatible Object Storage
   # ==============================================================================
+  # ВАЖНО: Используем версию 2025-04-22 - последнюю с полным admin UI
+  # Версии после 2025-05 удалили admin функции из Community Edition веб-консоли
+  # См: https://github.com/minio/minio/discussions/21316
+  # ==============================================================================
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: artstore_minio
     restart: unless-stopped
 
@@ -123,7 +113,15 @@ services:
 
     volumes:
       - minio_data:/data
+      # - ./scripts/minio-setup.sh:/minio-setup.sh:ro
 
+    # command: 
+    #   - /bin/sh
+    #   - -c
+    #   - |
+    #     chmod +x /minio-setup.sh
+    #     /minio-setup.sh &
+    #     minio server /data --console-address ":9001"
     command: server /data --console-address ":9001"
 
     networks:
@@ -139,17 +137,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
           memory: 1G
         reservations:
-          cpus: '0.25'
           memory: 256M
 
   # ==============================================================================
   # PgAdmin 4 - PostgreSQL Management Interface (Optional)
   # ==============================================================================
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:9.10
     container_name: artstore_pgadmin
     restart: unless-stopped
 
@@ -169,16 +165,13 @@ services:
       - artstore_network
 
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
 
     deploy:
       resources:
         limits:
-          cpus: '0.5'
           memory: 512M
         reservations:
-          cpus: '0.1'
           memory: 128M
 
 # ==============================================================================

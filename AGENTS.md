@@ -40,7 +40,7 @@ ArtStore - распределенная система файлового хра
 
 ## Набор утилит
 
-Базовые утилиты запускай в docker или podman при помощи docker-compose.yml:
+Базовые утилиты запускай в docker или podman при помощи docker-compose.infrastructure.yml:
 
 - postgres
 - redis
@@ -48,13 +48,13 @@ ArtStore - распределенная система файлового хра
 - dex
 - ldap
 
-Логины и пароли администраторов приложений доступны в `docker-compose.yml`.
+Логины и пароли администраторов приложений доступны в `docker-compose.infrastructure.yml`.
 
 Для работы с postgres используй инструменты, находящиеся в контейнере postgres.
 
 Если необходимой базы данных нет - создавай ее сам.
 
-В файлах docker-compose модулей должны быть только модули. Для инфраструтктуры используй docker-compose.yml в корне проекта.
+В файлах docker-compose модулей должны быть только модули. Для инфраструтктуры используй docker-compose.infrastructure.yml в корне проекта.
 
 ## Ключевые архитектурные принципы
 
@@ -176,8 +176,6 @@ WAL → Attr File → Vector Clock → DB Cache → Commit
 - Exponential backoff retry при временных сбоях
 
 ## Запуск приложений и отладка
-
-Важно! Вместо `docker-compose` используй `podman-compose`.
 
 Для запуска приложений используй `docker-compose-app.yml` в корне проекта.
 
