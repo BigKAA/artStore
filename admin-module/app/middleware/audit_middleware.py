@@ -168,8 +168,6 @@ class AuditMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             status_code = response.status_code
 
-            return response
-
         except Exception as e:
             status_code = 500
             error_message = str(e)
@@ -178,65 +176,68 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         finally:
             # Проверяем необходимость логирования
-            if not self._should_log_request(request.url.path, status_code):
-                return
+            should_log = self._should_log_request(request.url.path, status_code)
 
-            # Вычисляем длительность request
-            duration_ms = (time.time() - start_time) * 1000
+            if should_log:
+                # Вычисляем длительность request
+                duration_ms = (time.time() - start_time) * 1000
 
-            # Извлекаем actor information
-            actor_info = self._extract_actor_from_token(request)
+                # Извлекаем actor information
+                actor_info = self._extract_actor_from_token(request)
 
-            # Определяем action из HTTP method
-            method_to_action = {
-                "GET": "read",
-                "POST": "create",
-                "PUT": "update",
-                "PATCH": "update",
-                "DELETE": "delete"
-            }
-            action = method_to_action.get(request.method, "unknown")
+                # Определяем action из HTTP method
+                method_to_action = {
+                    "GET": "read",
+                    "POST": "create",
+                    "PUT": "update",
+                    "PATCH": "update",
+                    "DELETE": "delete"
+                }
+                action = method_to_action.get(request.method, "unknown")
 
-            # Формируем event type
-            path_parts = request.url.path.split("/")
-            resource_type = path_parts[-1] if len(path_parts) > 1 else "unknown"
-            event_type = f"http_{action}_{resource_type}"
+                # Формируем event type
+                path_parts = request.url.path.split("/")
+                resource_type = path_parts[-1] if len(path_parts) > 1 else "unknown"
+                event_type = f"http_{action}_{resource_type}"
 
-            # Дополнительные данные
-            data = {
-                "method": request.method,
-                "path": request.url.path,
-                "query_params": str(request.query_params),
-                "status_code": status_code,
-                "duration_ms": round(duration_ms, 2)
-            }
+                # Дополнительные данные
+                data = {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "query_params": str(request.query_params),
+                    "status_code": status_code,
+                    "duration_ms": round(duration_ms, 2)
+                }
 
-            # Severity
-            if status_code >= 500:
-                severity = "error"
-            elif status_code >= 400:
-                severity = "warning"
-            else:
-                severity = "info"
+                # Severity
+                if status_code >= 500:
+                    severity = "error"
+                elif status_code >= 400:
+                    severity = "warning"
+                else:
+                    severity = "info"
 
-            # Создаем audit log entry
-            try:
-                sync_session = next(get_sync_session())
+                # Создаем audit log entry
                 try:
-                    self.audit_service.log_security_event(
-                        session=sync_session,
-                        event_type=event_type,
-                        severity=severity,
-                        success=(status_code < 400),
-                        user_id=actor_info["user_id"],
-                        service_account_id=actor_info["service_account_id"],
-                        error_message=error_message,
-                        request=request,
-                        data=data
-                    )
-                finally:
-                    sync_session.close()
+                    sync_session = next(get_sync_session())
+                    try:
+                        self.audit_service.log_security_event(
+                            session=sync_session,
+                            event_type=event_type,
+                            severity=severity,
+                            success=(status_code < 400),
+                            user_id=actor_info["user_id"],
+                            service_account_id=actor_info["service_account_id"],
+                            error_message=error_message,
+                            request=request,
+                            data=data
+                        )
+                    finally:
+                        sync_session.close()
 
-            except Exception as e:
-                # Не прерываем request из-за audit logging failure
-                logger.error(f"Failed to create audit log: {e}", exc_info=True)
+                except Exception as e:
+                    # Не прерываем request из-за audit logging failure
+                    logger.error(f"Failed to create audit log: {e}", exc_info=True)
+
+        # Возвращаем response ПОСЛЕ finally блока
+        return response

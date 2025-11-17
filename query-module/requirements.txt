@@ -37,7 +37,7 @@ pytest-asyncio==0.24.0
 pytest-cov==6.0.0
 pytest-mock==3.14.0
 pytest-timeout==2.3.1
-httpx-mock==0.1.1
+pytest-httpx==0.35.0
 
 # Code quality
 black==24.10.0

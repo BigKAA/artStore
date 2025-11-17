@@ -110,10 +110,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
           memory: 1G
         reservations:
-          cpus: '0.25'
           memory: 256M
 
   # ==============================================================================
@@ -210,14 +208,16 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
           memory: 2G
         reservations:
-          cpus: '0.5'
           memory: 512M
 
   # ==============================================================================
-  # Storage Element 02 - Additional Storage (Optional)
+  # Storage Element 02 - S3 Storage (Testing)
+  # ==============================================================================
+  # Роль: Хранение файлов в S3 (MinIO) для тестирования
+  # Режим: edit (полный CRUD доступ)
+  # ВАЖНО: Требует ручного создания bucket artstore-storage-02 в MinIO!
   # ==============================================================================
   storage-element-02:
     build:
@@ -225,13 +225,12 @@ services:
       dockerfile: Dockerfile
     container_name: artstore_storage_element_02
     restart: unless-stopped
-    profiles: ["multi-storage"]  # Запускается только с --profile multi-storage
 
     environment:
-      APP_NAME: "Storage Element 02"
+      APP_NAME: "Storage Element 02 (S3)"
       APP_VERSION: "0.1.0"
       APP_DEBUG: "false"
-      APP_MODE: ${STORAGE_02_MODE:-rw}
+      APP_MODE: edit  # Режим edit для тестирования
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "8011"
       SERVER_WORKERS: ${STORAGE_02_WORKERS:-4}
@@ -253,9 +252,16 @@ services:
       JWT_ALGORITHM: RS256
       JWT_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
 
-      STORAGE_TYPE: ${STORAGE_02_TYPE:-local}
-      STORAGE_LOCAL_BASE_PATH: /app/.data/storage
+      # S3 Storage Configuration
+      STORAGE_TYPE: s3
       STORAGE_MAX_FILE_SIZE: ${STORAGE_MAX_FILE_SIZE:-1073741824}
+
+      # MinIO S3 Settings
+      STORAGE_S3_ENDPOINT_URL: http://minio:9000
+      STORAGE_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      STORAGE_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      STORAGE_S3_BUCKET_NAME: artstore-storage-02
+      STORAGE_S3_REGION: us-east-1
 
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: json
@@ -267,7 +273,7 @@ services:
       - "8011:8011"
 
     volumes:
-      - storage_02_data:/app/.data/storage
+      # JWT public key (НЕТ volume для storage - используется S3)
       - admin_keys:/app/.keys:ro
 
     networks:
@@ -280,6 +286,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8011/health/live"]
@@ -291,10 +299,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
           memory: 2G
         reservations:
-          cpus: '0.5'
           memory: 512M
 
   # ==============================================================================
@@ -370,7 +376,7 @@ services:
         condition: service_healthy
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8020/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:8020/api/v1/health/live"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -379,10 +385,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
           memory: 2G
         reservations:
-          cpus: '0.5'
           memory: 512M
 
   # ==============================================================================
@@ -472,10 +476,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
           memory: 2G
         reservations:
-          cpus: '0.5'
           memory: 512M
 
 # ==============================================================================

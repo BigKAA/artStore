@@ -73,12 +73,11 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     LOG_FORMAT=json
 
-# Expose port
-EXPOSE 8010
+# Expose port (actual port определяется через SERVER_PORT environment variable)
+EXPOSE 8010 8011
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8010/health/live || exit 1
+# Health check определен в docker-compose.yml для каждого instance
+# (порт зависит от SERVER_PORT environment variable)
 
-# Запуск приложения
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]
+# Запуск приложения (использует настройки из config.py + environment variables)
+CMD ["python", "-m", "app.main"]

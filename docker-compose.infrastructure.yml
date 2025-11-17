@@ -113,15 +113,7 @@ services:
 
     volumes:
       - minio_data:/data
-      # - ./scripts/minio-setup.sh:/minio-setup.sh:ro
 
-    # command: 
-    #   - /bin/sh
-    #   - -c
-    #   - |
-    #     chmod +x /minio-setup.sh
-    #     /minio-setup.sh &
-    #     minio server /data --console-address ":9001"
     command: server /data --console-address ":9001"
 
     networks:

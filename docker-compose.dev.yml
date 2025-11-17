@@ -79,8 +79,8 @@ services:
       - ./storage-element/data/storage:/app/.data/storage:rw
       # Логи
       - ./storage-element/logs:/app/logs:rw
-      # JWT public key
-      - ./admin-module/.keys/public_key.pem:/app/.keys/public_key.pem:ro
+      # JWT keys directory (монтируем всю директорию)
+      - ./admin-module/.keys:/app/.keys:ro
 
     ports:
       - "8010:8010"
@@ -106,7 +106,8 @@ services:
       - ./storage-element/app:/app/app:rw
       - ./storage-element/data/storage-02:/app/.data/storage:rw
       - ./storage-element/logs-02:/app/logs:rw
-      - ./admin-module/.keys/public_key.pem:/app/.keys/public_key.pem:ro
+      # JWT keys directory (монтируем всю директорию)
+      - ./admin-module/.keys:/app/.keys:ro
 
     ports:
       - "8011:8011"
@@ -131,8 +132,8 @@ services:
       - ./ingester-module/app:/app/app:rw
       # Логи
       - ./ingester-module/logs:/app/logs:rw
-      # JWT public key
-      - ./admin-module/.keys/public_key.pem:/app/.keys/public_key.pem:ro
+      # JWT keys directory (монтируем всю директорию)
+      - ./admin-module/.keys:/app/.keys:ro
 
     ports:
       - "8020:8020"
@@ -157,8 +158,8 @@ services:
       - ./query-module/app:/app/app:rw
       # Логи
       - ./query-module/logs:/app/logs:rw
-      # JWT public key
-      - ./admin-module/.keys/public_key.pem:/app/.keys/public_key.pem:ro
+      # JWT keys directory (монтируем всю директорию)
+      - ./admin-module/.keys:/app/.keys:ro
 
     ports:
       - "8030:8030"
