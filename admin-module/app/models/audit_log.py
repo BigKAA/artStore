@@ -98,10 +98,17 @@ class AuditLog(Base):
         index=True,
         comment="ID service account (NULL для user events)"
     )
+    admin_user_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="ID admin user (NULL для non-admin events)"
+    )
     actor_type = Column(
         String(20),
         nullable=False,
-        comment="Тип актора: user, service_account, system"
+        comment="Тип актора: user, service_account, admin_user, system"
     )
 
     # Resource Information
@@ -181,6 +188,7 @@ class AuditLog(Base):
     # Relationships
     user = relationship("User", foreign_keys=[user_id], lazy="joined")
     service_account = relationship("ServiceAccount", foreign_keys=[service_account_id], lazy="joined")
+    admin_user = relationship("AdminUser", foreign_keys=[admin_user_id], lazy="joined")
 
     def __repr__(self) -> str:
         """String representation."""
@@ -226,6 +234,7 @@ class AuditLog(Base):
         actor_type: str = "system",
         user_id: Optional[int] = None,
         service_account_id: Optional[int] = None,
+        admin_user_id: Optional[uuid.UUID] = None,
         resource_type: Optional[str] = None,
         resource_id: Optional[str] = None,
         ip_address: Optional[str] = None,
@@ -244,9 +253,10 @@ class AuditLog(Base):
             event_type: Тип события (e.g., "login_success")
             action: Действие (e.g., "login")
             success: Успешность операции
-            actor_type: Тип актора (user, service_account, system)
+            actor_type: Тип актора (user, service_account, admin_user, system)
             user_id: ID пользователя (опционально)
             service_account_id: ID service account (опционально)
+            admin_user_id: ID admin user (опционально)
             resource_type: Тип ресурса (опционально)
             resource_id: ID ресурса (опционально)
             ip_address: IP адрес (опционально)
@@ -279,7 +289,8 @@ class AuditLog(Base):
             "success": success,
             "actor_type": actor_type,
             "user_id": user_id,
-            "service_account_id": service_account_id,
+            "service_account_id": str(service_account_id) if service_account_id else None,
+            "admin_user_id": str(admin_user_id) if admin_user_id else None,
             "resource_type": resource_type,
             "resource_id": resource_id,
             "severity": severity,
@@ -296,6 +307,7 @@ class AuditLog(Base):
             severity=severity,
             user_id=user_id,
             service_account_id=service_account_id,
+            admin_user_id=admin_user_id,
             actor_type=actor_type,
             resource_type=resource_type,
             resource_id=resource_id,
@@ -334,7 +346,8 @@ class AuditLog(Base):
             "success": self.success,
             "actor_type": self.actor_type,
             "user_id": self.user_id,
-            "service_account_id": self.service_account_id,
+            "service_account_id": str(self.service_account_id) if self.service_account_id else None,
+            "admin_user_id": str(self.admin_user_id) if self.admin_user_id else None,
             "resource_type": self.resource_type,
             "resource_id": self.resource_id,
             "severity": self.severity,
@@ -380,7 +393,7 @@ class AuditLog(Base):
         cls,
         session: Session,
         actor_type: str,
-        actor_id: int,
+        actor_id,  # int для user, UUID для service_account/admin_user
         limit: int = 100
     ) -> List["AuditLog"]:
         """
@@ -388,8 +401,8 @@ class AuditLog(Base):
 
         Args:
             session: Database session
-            actor_type: Тип актора (user, service_account)
-            actor_id: ID актора
+            actor_type: Тип актора (user, service_account, admin_user)
+            actor_id: ID актора (int для user, UUID для service_account/admin_user)
             limit: Максимальное количество записей (default: 100)
 
         Returns:
@@ -406,6 +419,13 @@ class AuditLog(Base):
             stmt = (
                 select(cls)
                 .where(cls.service_account_id == actor_id)
+                .order_by(desc(cls.created_at))
+                .limit(limit)
+            )
+        elif actor_type == "admin_user":
+            stmt = (
+                select(cls)
+                .where(cls.admin_user_id == actor_id)
                 .order_by(desc(cls.created_at))
                 .limit(limit)
             )

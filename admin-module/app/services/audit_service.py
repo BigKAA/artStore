@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.models.service_account import ServiceAccount
+from app.models.admin_user import AdminUser
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,7 @@ class AuditService:
         username: Optional[str] = None,
         user_id: Optional[int] = None,
         service_account_id: Optional[int] = None,
+        admin_user_id: Optional[uuid.UUID] = None,
         error_message: Optional[str] = None,
         request: Optional[Request] = None,
         data: Optional[Dict[str, Any]] = None
@@ -93,6 +96,7 @@ class AuditService:
             username: Username пользователя (опционально)
             user_id: ID пользователя (опционально)
             service_account_id: ID service account (опционально)
+            admin_user_id: ID admin user (опционально)
             error_message: Текст ошибки (опционально)
             request: FastAPI Request (опционально)
             data: Дополнительные данные (опционально)
@@ -116,6 +120,8 @@ class AuditService:
             actor_type = "user"
         elif service_account_id:
             actor_type = "service_account"
+        elif admin_user_id:
+            actor_type = "admin_user"
         else:
             actor_type = "system"
 
@@ -138,6 +144,7 @@ class AuditService:
             actor_type=actor_type,
             user_id=user_id,
             service_account_id=service_account_id,
+            admin_user_id=admin_user_id,
             ip_address=context["ip_address"],
             user_agent=context["user_agent"],
             request_id=context["request_id"],
@@ -152,6 +159,7 @@ class AuditService:
         session: Session,
         user_id: Optional[int] = None,
         service_account_id: Optional[int] = None,
+        admin_user_id: Optional[uuid.UUID] = None,
         request: Optional[Request] = None
     ) -> AuditLog:
         """
@@ -161,6 +169,7 @@ class AuditService:
             session: Database session
             user_id: ID пользователя (опционально)
             service_account_id: ID service account (опционально)
+            admin_user_id: ID admin user (опционально)
             request: FastAPI Request (опционально)
 
         Returns:
@@ -173,6 +182,8 @@ class AuditService:
             actor_type = "user"
         elif service_account_id:
             actor_type = "service_account"
+        elif admin_user_id:
+            actor_type = "admin_user"
         else:
             actor_type = "system"
 
@@ -184,6 +195,7 @@ class AuditService:
             actor_type=actor_type,
             user_id=user_id,
             service_account_id=service_account_id,
+            admin_user_id=admin_user_id,
             ip_address=context["ip_address"],
             user_agent=context["user_agent"],
             request_id=context["request_id"],
@@ -416,6 +428,103 @@ class AuditService:
             request_id=context["request_id"],
             severity="warning",
             error_message=reason or "Access denied"
+        )
+
+    @classmethod
+    def log_admin_login_attempt(
+        cls,
+        session: Session,
+        admin_user_id: uuid.UUID,
+        success: bool,
+        reason: Optional[str] = None,
+        request: Optional[Request] = None
+    ) -> AuditLog:
+        """
+        Логирование попытки входа администратора Admin UI.
+
+        Args:
+            session: Database session
+            admin_user_id: ID admin user
+            success: Успешность входа
+            reason: Причина (если неудача)
+            request: FastAPI Request (опционально)
+
+        Returns:
+            AuditLog: Созданный audit log entry
+
+        Example:
+            audit_log = AuditService.log_admin_login_attempt(
+                session=db,
+                admin_user_id=admin.id,
+                success=False,
+                reason="Account locked",
+                request=request
+            )
+        """
+        context = cls._extract_request_context(request)
+
+        event_type = "admin_login_success" if success else "admin_login_failed"
+        severity = "info" if success else "warning"
+
+        return AuditLog.create_entry(
+            session=session,
+            event_type=event_type,
+            action="login",
+            success=success,
+            actor_type="admin_user",
+            admin_user_id=admin_user_id,
+            ip_address=context["ip_address"],
+            user_agent=context["user_agent"],
+            request_id=context["request_id"],
+            data={"reason": reason} if reason else None,
+            severity=severity,
+            error_message=reason if not success else None
+        )
+
+    @classmethod
+    def log_password_change(
+        cls,
+        session: Session,
+        admin_user_id: uuid.UUID,
+        message: str,
+        request: Optional[Request] = None
+    ) -> AuditLog:
+        """
+        Логирование смены пароля администратора.
+
+        Args:
+            session: Database session
+            admin_user_id: ID admin user
+            message: Сообщение о результате смены пароля
+            request: FastAPI Request (опционально)
+
+        Returns:
+            AuditLog: Созданный audit log entry
+
+        Example:
+            audit_log = AuditService.log_password_change(
+                session=db,
+                admin_user_id=admin.id,
+                message="Admin password changed successfully",
+                request=request
+            )
+        """
+        context = cls._extract_request_context(request)
+
+        return AuditLog.create_entry(
+            session=session,
+            event_type="admin_password_change",
+            action="update",
+            success=True,
+            actor_type="admin_user",
+            admin_user_id=admin_user_id,
+            resource_type="admin_user",
+            resource_id=str(admin_user_id),
+            ip_address=context["ip_address"],
+            user_agent=context["user_agent"],
+            request_id=context["request_id"],
+            data={"message": message},
+            severity="info"
         )
 
 

@@ -259,6 +259,69 @@ class TokenService:
         refresh_token = self.create_refresh_token(user, session=session)
         return access_token, refresh_token
 
+    def create_token_from_data(
+        self,
+        data: Dict,
+        expires_delta: timedelta,
+        token_type: str = "access"
+    ) -> str:
+        """
+        Generic метод создания токена с произвольными данными.
+
+        Используется для Admin Users и Service Accounts, где нет legacy User model.
+
+        Args:
+            data: Payload для токена (должен включать 'sub', 'type', и т.д.)
+            expires_delta: Время жизни токена
+            token_type: Тип токена для логирования ("access" или "refresh")
+
+        Returns:
+            str: Закодированный JWT токен
+
+        Raises:
+            ValueError: Если ключ недоступен
+
+        Examples:
+            >>> token_data = {
+            ...     "sub": "admin",
+            ...     "type": "admin_user",
+            ...     "role": "super_admin",
+            ...     "jti": secrets.token_urlsafe(16)
+            ... }
+            >>> token = service.create_token_from_data(
+            ...     data=token_data,
+            ...     expires_delta=timedelta(minutes=30),
+            ...     token_type="access"
+            ... )
+        """
+        now = datetime.now(timezone.utc)
+        expire = now + expires_delta
+
+        # Создаем claims с timestamp полями
+        claims = {
+            **data,
+            "iat": now,
+            "exp": expire,
+            "nbf": now
+        }
+
+        # Используем file-based ключ (для Admin Users DB keys не используются)
+        if not self._private_key:
+            raise ValueError("No private key available")
+
+        token = jwt.encode(
+            claims,
+            self._private_key,
+            algorithm=settings.jwt.algorithm
+        )
+
+        logger.info(
+            f"Created {token_type} token for {data.get('sub')} "
+            f"(type={data.get('type')}, expires: {expire})"
+        )
+
+        return token
+
     def decode_token(self, token: str, session: Optional[Session] = None) -> Dict:
         """
         Декодирование и валидация JWT токена с multi-version support.

@@ -15,8 +15,8 @@ from app.core.redis import close_redis, check_redis_connection, service_discover
 from app.core.logging_config import setup_logging, get_logger
 from app.core.observability import setup_observability
 from app.core.scheduler import init_scheduler, shutdown_scheduler
-from app.db.init_db import create_initial_admin
-from app.api.v1.endpoints import health, auth, jwt_keys
+from app.db.init_db import create_initial_admin, create_initial_admin_user
+from app.api.v1.endpoints import health, auth, jwt_keys, admin_auth
 from app.middleware import RateLimitMiddleware, AuditMiddleware
 from prometheus_client import make_asgi_app
 
@@ -43,6 +43,8 @@ async def lifespan(app: FastAPI):
         async for db in get_db():
             try:
                 await create_initial_admin(settings, db)
+                # Создание initial admin user для Admin UI
+                await create_initial_admin_user(settings, db)
             finally:
                 await db.close()
             break  # Получаем только одну сессию
@@ -137,6 +139,7 @@ logger.info("Audit logging middleware enabled")
 # Подключаем роутеры
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
+app.include_router(admin_auth.router, prefix="/api/v1", tags=["admin-authentication"])
 app.include_router(jwt_keys.router, prefix="/api/v1/jwt-keys", tags=["jwt-keys"])
 
 # Prometheus metrics endpoint

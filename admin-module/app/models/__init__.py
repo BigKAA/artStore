@@ -4,6 +4,7 @@ Models для Admin Module.
 
 from .base import Base, TimestampMixin
 from .user import User, UserRole, UserStatus
+from .admin_user import AdminUser, AdminRole
 from .storage_element import StorageElement, StorageMode, StorageType, StorageStatus
 from .service_account import ServiceAccount, ServiceAccountRole, ServiceAccountStatus
 from .jwt_key import JWTKey
@@ -13,10 +14,13 @@ __all__ = [
     # Base
     "Base",
     "TimestampMixin",
-    # User
+    # User (legacy LDAP)
     "User",
     "UserRole",
     "UserStatus",
+    # Admin User (Admin UI authentication)
+    "AdminUser",
+    "AdminRole",
     # Storage Element
     "StorageElement",
     "StorageMode",
