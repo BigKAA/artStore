@@ -6,24 +6,24 @@ import { Routes } from '@angular/router';
 
 import { authGuard } from './guards/auth-guard';
 import { LoginComponent } from './pages/login/login';
+import { MainLayoutComponent } from './components/layout/main-layout';
 import { DashboardComponent } from './pages/dashboard/dashboard';
+import { AdminUsersComponent } from './pages/admin-users/admin-users';
+import { StorageElementsComponent } from './pages/storage-elements/storage-elements';
+import { FilesComponent } from './pages/files/files';
 
 /**
  * Application Routes
  *
  * Маршруты:
  * - /login (публичный) - страница входа
- * - /dashboard (защищенный) - главная страница админ панели
- * - / (redirect) - автоматический redirect на dashboard или login
+ * - / (защищенный layout) - основной layout с sidebar и header
+ *   - /dashboard - главная страница админ панели
+ *   - /admin-users - управление пользователями
+ *   - /storage-elements - управление элементами хранения
+ *   - /files - управление файлами
  */
 export const routes: Routes = [
-  // Default route - redirect на dashboard (guard перенаправит на login если не авторизован)
-  {
-    path: '',
-    redirectTo: '/dashboard',
-    pathMatch: 'full',
-  },
-
   // Login page (публичный маршрут)
   {
     path: 'login',
@@ -31,12 +31,47 @@ export const routes: Routes = [
     title: 'Login - ArtStore Admin',
   },
 
-  // Dashboard (защищенный маршрут)
+  // Main layout с защищенными маршрутами
   {
-    path: 'dashboard',
-    component: DashboardComponent,
+    path: '',
+    component: MainLayoutComponent,
     canActivate: [authGuard],
-    title: 'Dashboard - ArtStore Admin',
+    children: [
+      // Default route - redirect на dashboard
+      {
+        path: '',
+        redirectTo: '/dashboard',
+        pathMatch: 'full',
+      },
+
+      // Dashboard (главная страница)
+      {
+        path: 'dashboard',
+        component: DashboardComponent,
+        title: 'Dashboard - ArtStore Admin',
+      },
+
+      // Admin Users Management
+      {
+        path: 'admin-users',
+        component: AdminUsersComponent,
+        title: 'Admin Users - ArtStore Admin',
+      },
+
+      // Storage Elements Management
+      {
+        path: 'storage-elements',
+        component: StorageElementsComponent,
+        title: 'Storage Elements - ArtStore Admin',
+      },
+
+      // Files Management
+      {
+        path: 'files',
+        component: FilesComponent,
+        title: 'Files - ArtStore Admin',
+      },
+    ],
   },
 
   // Wildcard route - redirect на dashboard

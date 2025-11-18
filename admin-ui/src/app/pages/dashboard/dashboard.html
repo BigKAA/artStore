@@ -1,17 +1,163 @@
 <div class="container-fluid py-4">
-  <div class="row">
+  <!-- Page Header -->
+  <div class="row mb-4">
     <div class="col-12">
-      <h1 class="h2 mb-4">
+      <h1 class="h2 mb-2">
         <i class="bi bi-speedometer2 me-2"></i>
         Dashboard
       </h1>
-      <div class="alert alert-success">
-        <i class="bi bi-check-circle-fill me-2"></i>
-        <strong>Welcome to ArtStore Admin!</strong> You are successfully authenticated.
-      </div>
-      <div class="card">
+      <p class="text-muted">Welcome to ArtStore Admin Panel</p>
+    </div>
+  </div>
+
+  <!-- Stats Cards -->
+  <div class="row g-3 mb-4">
+    <!-- Total Files -->
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card border-0 shadow-sm h-100">
         <div class="card-body">
-          <p class="mb-0">Dashboard content будет реализован в следующих фазах разработки.</p>
+          <div class="d-flex align-items-center justify-content-between">
+            <div>
+              <p class="text-muted small mb-1">Total Files</p>
+              <h3 class="mb-0">0</h3>
+            </div>
+            <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+              <i class="bi bi-file-earmark-fill"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Storage Elements -->
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between">
+            <div>
+              <p class="text-muted small mb-1">Storage Elements</p>
+              <h3 class="mb-0">0</h3>
+            </div>
+            <div class="stat-icon bg-success bg-opacity-10 text-success">
+              <i class="bi bi-hdd-stack-fill"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin Users -->
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between">
+            <div>
+              <p class="text-muted small mb-1">Admin Users</p>
+              <h3 class="mb-0">1</h3>
+            </div>
+            <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+              <i class="bi bi-people-fill"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Storage Used -->
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between">
+            <div>
+              <p class="text-muted small mb-1">Storage Used</p>
+              <h3 class="mb-0">0 GB</h3>
+            </div>
+            <div class="stat-icon bg-info bg-opacity-10 text-info">
+              <i class="bi bi-pie-chart-fill"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content Row -->
+  <div class="row g-3">
+    <!-- Quick Actions -->
+    <div class="col-12 col-lg-6">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom">
+          <h5 class="card-title mb-0">Quick Actions</h5>
+        </div>
+        <div class="card-body">
+          <div class="d-grid gap-2">
+            <a href="/admin-users" class="btn btn-outline-primary btn-lg text-start">
+              <i class="bi bi-person-plus-fill me-2"></i>
+              Create Admin User
+            </a>
+            <a href="/storage-elements" class="btn btn-outline-success btn-lg text-start">
+              <i class="bi bi-hdd-fill me-2"></i>
+              Add Storage Element
+            </a>
+            <a href="/files" class="btn btn-outline-info btn-lg text-start">
+              <i class="bi bi-cloud-upload-fill me-2"></i>
+              Upload Files
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- System Status -->
+    <div class="col-12 col-lg-6">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom">
+          <h5 class="card-title mb-0">System Status</h5>
+        </div>
+        <div class="card-body">
+          <div class="d-flex flex-column gap-3">
+            <!-- Admin Module -->
+            <div class="d-flex align-items-center justify-content-between">
+              <div class="d-flex align-items-center gap-2">
+                <span class="status-indicator bg-success"></span>
+                <span>Admin Module</span>
+              </div>
+              <span class="badge bg-success">Online</span>
+            </div>
+
+            <!-- Storage Elements -->
+            <div class="d-flex align-items-center justify-content-between">
+              <div class="d-flex align-items-center gap-2">
+                <span class="status-indicator bg-secondary"></span>
+                <span>Storage Elements</span>
+              </div>
+              <span class="badge bg-secondary">Not Configured</span>
+            </div>
+
+            <!-- Database -->
+            <div class="d-flex align-items-center justify-content-between">
+              <div class="d-flex align-items-center gap-2">
+                <span class="status-indicator bg-success"></span>
+                <span>Database</span>
+              </div>
+              <span class="badge bg-success">Connected</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Activity (placeholder) -->
+    <div class="col-12">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white border-bottom">
+          <h5 class="card-title mb-0">Recent Activity</h5>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-info mb-0">
+            <i class="bi bi-info-circle-fill me-2"></i>
+            Activity logging будет реализован в следующих фазах разработки.
+          </div>
         </div>
       </div>
     </div>

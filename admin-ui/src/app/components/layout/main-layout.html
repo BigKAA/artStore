@@ -1,0 +1,42 @@
+<!-- ArtStore Admin UI - Main Layout Template -->
+<div class="main-layout" [class.sidebar-collapsed]="sidebarCollapsed">
+  <!-- Sidebar -->
+  <app-sidebar
+    [collapsed]="sidebarCollapsed"
+    (linkClick)="closeSidebar()"
+  ></app-sidebar>
+
+  <!-- Main Content Area -->
+  <div class="main-content">
+    <!-- Header -->
+    <app-header
+      [user]="currentUser$ | async"
+      (toggleSidebar)="toggleSidebar()"
+    ></app-header>
+
+    <!-- Page Content -->
+    <main class="content-body">
+      <router-outlet></router-outlet>
+    </main>
+
+    <!-- Footer -->
+    <footer class="content-footer">
+      <div class="container-fluid">
+        <div class="row">
+          <div class="col-12 text-center text-muted small py-3">
+            <p class="mb-0">
+              ArtStore Admin UI v1.0.0 | © 2025 |
+              <a href="#" class="text-muted text-decoration-none">Documentation</a> |
+              <a href="#" class="text-muted text-decoration-none">Support</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Mobile Overlay (закрыть sidebar при клике вне его на мобильных) -->
+  @if (shouldShowOverlay()) {
+    <div class="sidebar-overlay" (click)="closeSidebar()"></div>
+  }
+</div>

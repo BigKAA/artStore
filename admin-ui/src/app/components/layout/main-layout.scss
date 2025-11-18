@@ -1,0 +1,73 @@
+/**
+ * ArtStore Admin UI - Main Layout Styles
+ * Адаптивный layout с sidebar и header
+ */
+
+.main-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: #f8f9fa;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin-left: 250px; // Sidebar width
+  transition: margin-left 0.3s ease-in-out;
+}
+
+// Когда sidebar свернут
+.sidebar-collapsed .main-content {
+  margin-left: 0;
+}
+
+.content-body {
+  flex: 1;
+  padding: 1.5rem;
+  margin-top: 60px; // Header height
+  overflow-y: auto;
+}
+
+.content-footer {
+  border-top: 1px solid #dee2e6;
+  background-color: #fff;
+}
+
+// Mobile overlay для закрытия sidebar
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1040;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+// Responsive для мобильных
+@media (max-width: 767.98px) {
+  .main-content {
+    margin-left: 0;
+  }
+
+  .content-body {
+    padding: 1rem;
+  }
+
+  .sidebar-overlay {
+    display: block;
+  }
+}
+
+// Animation
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

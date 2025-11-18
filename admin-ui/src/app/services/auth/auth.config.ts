@@ -47,14 +47,14 @@ export const defaultAuthConfig: AuthConfig = {
   // API Base URL (должен быть настроен через environment)
   apiBaseUrl: 'http://localhost:8000',
 
-  // OAuth 2.0 Client Credentials endpoint
-  tokenEndpoint: '/api/auth/token',
+  // Admin authentication endpoints (Admin Module v1 API)
+  tokenEndpoint: '/api/v1/admin-auth/login',
 
   // Token refresh endpoint
-  refreshEndpoint: '/api/auth/refresh',
+  refreshEndpoint: '/api/v1/admin-auth/refresh',
 
-  // User info endpoint (для получения данных о пользователе)
-  userInfoEndpoint: '/api/auth/me',
+  // User info endpoint (для получения данных об admin пользователе)
+  userInfoEndpoint: '/api/v1/admin-auth/me',
 
   // Время жизни токенов (согласно CLAUDE.md)
   accessTokenExpiry: 1800,  // 30 minutes
@@ -72,14 +72,14 @@ export const defaultAuthConfig: AuthConfig = {
 };
 
 /**
- * OAuth 2.0 Client Credentials Request
+ * Admin Login Request
  */
 export interface LoginRequest {
-  /** Client ID service account */
-  client_id: string;
+  /** Admin username */
+  username: string;
 
-  /** Client Secret service account */
-  client_secret: string;
+  /** Admin password */
+  password: string;
 }
 
 /**

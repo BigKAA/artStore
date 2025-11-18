@@ -12,7 +12,7 @@
                 <i class="bi bi-box-seam text-primary" style="font-size: 3rem;"></i>
               </div>
               <h1 class="h3 mb-1 fw-bold">ArtStore Admin</h1>
-              <p class="text-muted small">OAuth 2.0 Client Authentication</p>
+              <p class="text-muted small">Admin Panel Authentication</p>
             </div>
 
             <!-- Error Alert -->
@@ -27,32 +27,32 @@
 
             <!-- Login Form -->
             <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" novalidate>
-              <!-- Client ID Field -->
+              <!-- Username Field -->
               <div class="mb-3">
-                <label for="clientId" class="form-label fw-semibold">
-                  Client ID
+                <label for="username" class="form-label fw-semibold">
+                  Username
                   <span class="text-danger">*</span>
                 </label>
                 <div class="input-group">
                   <span class="input-group-text bg-light border-end-0">
-                    <i class="bi bi-person-badge"></i>
+                    <i class="bi bi-person-fill"></i>
                   </span>
                   <input
                     type="text"
                     class="form-control border-start-0"
-                    [class.is-invalid]="isFieldInvalid('clientId')"
-                    [class.is-valid]="isFieldValid('clientId')"
-                    id="clientId"
-                    formControlName="clientId"
-                    placeholder="Enter your Client ID"
+                    [class.is-invalid]="isFieldInvalid('username')"
+                    [class.is-valid]="isFieldValid('username')"
+                    id="username"
+                    formControlName="username"
+                    placeholder="Enter your username"
                     autocomplete="username"
                   />
-                  @if (isFieldInvalid('clientId')) {
+                  @if (isFieldInvalid('username')) {
                     <div class="invalid-feedback">
-                      {{ getErrorMessage('clientId') }}
+                      {{ getErrorMessage('username') }}
                     </div>
                   }
-                  @if (isFieldValid('clientId')) {
+                  @if (isFieldValid('username')) {
                     <div class="valid-feedback">
                       Looks good!
                     </div>
@@ -60,28 +60,28 @@
                 </div>
                 <div class="form-text">
                   <i class="bi bi-info-circle me-1"></i>
-                  Your service account client ID (minimum 3 characters)
+                  Your admin username (minimum 3 characters)
                 </div>
               </div>
 
-              <!-- Client Secret Field -->
+              <!-- Password Field -->
               <div class="mb-3">
-                <label for="clientSecret" class="form-label fw-semibold">
-                  Client Secret
+                <label for="password" class="form-label fw-semibold">
+                  Password
                   <span class="text-danger">*</span>
                 </label>
                 <div class="input-group">
                   <span class="input-group-text bg-light border-end-0">
-                    <i class="bi bi-key-fill"></i>
+                    <i class="bi bi-lock-fill"></i>
                   </span>
                   <input
                     [type]="showPassword ? 'text' : 'password'"
                     class="form-control border-start-0 border-end-0"
-                    [class.is-invalid]="isFieldInvalid('clientSecret')"
-                    [class.is-valid]="isFieldValid('clientSecret')"
-                    id="clientSecret"
-                    formControlName="clientSecret"
-                    placeholder="Enter your Client Secret"
+                    [class.is-invalid]="isFieldInvalid('password')"
+                    [class.is-valid]="isFieldValid('password')"
+                    id="password"
+                    formControlName="password"
+                    placeholder="Enter your password"
                     autocomplete="current-password"
                   />
                   <button
@@ -92,12 +92,12 @@
                   >
                     <i class="bi" [class.bi-eye-slash-fill]="showPassword" [class.bi-eye-fill]="!showPassword"></i>
                   </button>
-                  @if (isFieldInvalid('clientSecret')) {
+                  @if (isFieldInvalid('password')) {
                     <div class="invalid-feedback">
-                      {{ getErrorMessage('clientSecret') }}
+                      {{ getErrorMessage('password') }}
                     </div>
                   }
-                  @if (isFieldValid('clientSecret')) {
+                  @if (isFieldValid('password')) {
                     <div class="valid-feedback">
                       Looks good!
                     </div>
@@ -105,7 +105,7 @@
                 </div>
                 <div class="form-text">
                   <i class="bi bi-shield-lock me-1"></i>
-                  Your service account secret (minimum 8 characters)
+                  Your admin password (minimum 8 characters)
                 </div>
               </div>
 
@@ -146,10 +146,10 @@
             <div class="mt-4 pt-4 border-top text-center">
               <p class="text-muted small mb-2">
                 <i class="bi bi-shield-check me-1"></i>
-                Secured with OAuth 2.0 Client Credentials
+                Secured with JWT Authentication
               </p>
               <p class="text-muted small mb-0">
-                Need access? Contact your administrator to create a service account.
+                Need access? Contact your system administrator.
               </p>
             </div>
           </div>

@@ -41,17 +41,17 @@ export class AuthService {
   private refreshTokenSubject$ = new BehaviorSubject<boolean>(false);
 
   /**
-   * Выполнить login с использованием OAuth 2.0 Client Credentials
+   * Выполнить login admin пользователя
    *
-   * @param clientId - Client ID service account
-   * @param clientSecret - Client Secret service account
+   * @param username - Admin username
+   * @param password - Admin password
    * @returns Observable с token response
    */
-  login(clientId: string, clientSecret: string): Observable<TokenResponse> {
+  login(username: string, password: string): Observable<TokenResponse> {
     const url = `${this.config.apiBaseUrl}${this.config.tokenEndpoint}`;
     const body: LoginRequest = {
-      client_id: clientId,
-      client_secret: clientSecret,
+      username: username,
+      password: password,
     };
 
     const headers = new HttpHeaders({

@@ -90,7 +90,7 @@ export class LoginComponent implements OnInit, OnDestroy {
    */
   private initForm(): void {
     this.loginForm = this.fb.group({
-      clientId: [
+      username: [
         '',
         [
           Validators.required,
@@ -98,7 +98,7 @@ export class LoginComponent implements OnInit, OnDestroy {
           Validators.maxLength(100),
         ],
       ],
-      clientSecret: [
+      password: [
         '',
         [
           Validators.required,
@@ -156,13 +156,13 @@ export class LoginComponent implements OnInit, OnDestroy {
     }
 
     // Получить значения из формы
-    const { clientId, clientSecret } = this.loginForm.value;
+    const { username, password } = this.loginForm.value;
 
     // Dispatch login action
     this.store.dispatch(
       AuthActions.login({
-        clientId,
-        clientSecret,
+        username,
+        password,
       })
     );
   }
@@ -193,7 +193,7 @@ export class LoginComponent implements OnInit, OnDestroy {
     }
 
     if (field.hasError('required')) {
-      return `${fieldName === 'clientId' ? 'Client ID' : 'Client Secret'} is required`;
+      return `${fieldName === 'username' ? 'Username' : 'Password'} is required`;
     }
 
     if (field.hasError('minlength')) {

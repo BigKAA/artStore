@@ -11,7 +11,7 @@ import { User } from './auth.state';
  */
 export const login = createAction(
   '[Auth] Login',
-  props<{ clientId: string; clientSecret: string }>()
+  props<{ username: string; password: string }>()
 );
 
 /**

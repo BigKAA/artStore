@@ -3,6 +3,7 @@
  * NgRx Effects для интеграции AuthService с store
  */
 import { inject, Injectable } from '@angular/core';
+import { Router } from '@angular/router';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import { of, EMPTY } from 'rxjs';
@@ -32,6 +33,7 @@ export class AuthEffects {
   private actions$ = inject(Actions);
   private authService = inject(AuthService);
   private store = inject(Store<AppState>);
+  private router = inject(Router);
 
   /**
    * Effect: Login
@@ -42,8 +44,8 @@ export class AuthEffects {
   login$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.login),
-      switchMap(({ clientId, clientSecret }) =>
-        this.authService.login(clientId, clientSecret).pipe(
+      switchMap(({ username, password }) =>
+        this.authService.login(username, password).pipe(
           // После успешного login - получить user info
           switchMap((tokenResponse) =>
             this.authService.getUserInfo().pipe(
@@ -175,14 +177,20 @@ export class AuthEffects {
   /**
    * Effect: Logout
    *
-   * Очистить токены из AuthService и показать уведомление
+   * Очистить токены из AuthService, показать уведомление и перенаправить на login
    */
   logout$ = createEffect(
     () =>
       this.actions$.pipe(
         ofType(AuthActions.logout),
         tap(() => {
+          console.log('[AuthEffects] Logout effect triggered');
+
+          // Сначала очистить токены
           this.authService.logout();
+          console.log('[AuthEffects] Tokens cleared');
+
+          // Показать уведомление
           this.store.dispatch(
             UiActions.addNotification({
               notification: {
@@ -193,6 +201,11 @@ export class AuthEffects {
               },
             })
           );
+          console.log('[AuthEffects] Notification dispatched');
+
+          // Перенаправить на login страницу
+          this.router.navigate(['/login']);
+          console.log('[AuthEffects] Navigation to /login triggered');
         })
       ),
     { dispatch: false }
