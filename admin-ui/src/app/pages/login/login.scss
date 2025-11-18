@@ -1,0 +1,246 @@
+/**
+ * ArtStore Admin UI - Login Page Styles
+ * Bootstrap 5 based responsive design
+ */
+
+// Login Container
+.login-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-attachment: fixed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+
+  // Alternative gradient backgrounds (<>6=> ?5@5:;NG0BL)
+  // background: linear-gradient(135deg, #0061ff 0%, #60efff 100%);
+  // background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  // background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+}
+
+// Card Styles
+.card {
+  border-radius: 1rem;
+  backdrop-filter: blur(10px);
+  background-color: rgba(255, 255, 255, 0.98);
+  animation: fadeInUp 0.5s ease-out;
+
+  .card-body {
+    position: relative;
+  }
+}
+
+// Logo Icon
+.bi-box-seam {
+  animation: bounceIn 0.8s ease-out;
+}
+
+// Form Styles
+.form-label {
+  color: #333;
+  font-size: 0.95rem;
+}
+
+.form-control,
+.input-group-text {
+  border-color: #e0e0e0;
+
+  &:focus {
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.15);
+  }
+}
+
+.input-group-text {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  border-right: none;
+}
+
+.form-control.border-start-0 {
+  border-left: none;
+
+  &:focus {
+    border-left: none;
+  }
+}
+
+// Button Styles
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  transition: all 0.3s ease;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+}
+
+.btn-outline-secondary {
+  border-color: #e0e0e0;
+  color: #6c757d;
+
+  &:hover:not(:disabled) {
+    background-color: #f8f9fa;
+    border-color: #e0e0e0;
+    color: #495057;
+  }
+
+  &:focus {
+    box-shadow: none;
+  }
+}
+
+// Alert Styles
+.alert {
+  border-radius: 0.5rem;
+  animation: slideInDown 0.3s ease-out;
+}
+
+// Form Text (helper text)
+.form-text {
+  font-size: 0.825rem;
+  color: #6c757d;
+}
+
+// Validation Feedback
+.invalid-feedback {
+  font-size: 0.825rem;
+  animation: shake 0.3s ease-in-out;
+}
+
+.valid-feedback {
+  font-size: 0.825rem;
+}
+
+// Loading Spinner
+.spinner-border-sm {
+  width: 1rem;
+  height: 1rem;
+  border-width: 0.15em;
+}
+
+// Animations
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bounceIn {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.8;
+  }
+  70% {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-5px);
+  }
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(5px);
+  }
+}
+
+// Responsive Adjustments
+@media (max-width: 576px) {
+  .card-body {
+    padding: 1.5rem !important;
+  }
+
+  .btn-lg {
+    font-size: 1rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .h3 {
+    font-size: 1.5rem;
+  }
+}
+
+// Accessibility - Reduce Motion
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .bi-box-seam,
+  .alert,
+  .invalid-feedback {
+    animation: none;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+// Dark Mode Support (1C4CI0O ?>445@6:0)
+@media (prefers-color-scheme: dark) {
+  .card {
+    background-color: rgba(30, 30, 30, 0.98);
+
+    .form-label {
+      color: #e0e0e0;
+    }
+
+    .form-text {
+      color: #a0a0a0;
+    }
+
+    .text-muted {
+      color: #a0a0a0 !important;
+    }
+  }
+}
