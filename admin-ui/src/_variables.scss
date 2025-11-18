@@ -1,0 +1,37 @@
+// ArtStore Admin UI - Custom Bootstrap Variables
+// Цветовая палитра: Салатовый (Lime Green)
+
+// Primary Colors
+$primary: #A3D977;        // Салатовый
+$primary-dark: #8BC34A;   // Насыщенный салатовый
+$primary-light: #C5E1A5;  // Светло-салатовый
+
+// Secondary Colors (светлые тона)
+$secondary: #81C784;  // Мятный зеленый
+$success: #81C784;    // Светло-зеленый
+$info: #64B5F6;       // Светло-голубой
+$warning: #FFD54F;    // Светло-желтый
+$danger: #E57373;     // Светло-красный
+
+// Neutral Colors - Light Theme
+$light-bg: #FAFAFA;
+$light-bg-secondary: #FFFFFF;
+$light-text-primary: #212121;
+$light-text-secondary: #757575;
+$light-border: #E0E0E0;
+
+// Neutral Colors - Dark Theme
+$dark-bg-primary: #263238;
+$dark-bg-secondary: #37474F;
+$dark-text-primary: #FFFFFF;
+$dark-text-secondary: #B0BEC5;
+
+// Bootstrap Overrides
+$body-bg: $light-bg;
+$body-color: $light-text-primary;
+
+$border-radius: 0.375rem;
+$font-size-base: 1rem;
+
+// Spacing
+$spacer: 1rem;

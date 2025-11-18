@@ -1,0 +1,18 @@
+<!-- ArtStore Admin UI - Sidebar Template -->
+<aside class="sidebar" [class.sidebar-open]="sidebarOpen$ | async">
+  <nav class="sidebar-nav">
+    @for (item of menuItems; track item.route) {
+      <a
+        [routerLink]="item.route"
+        routerLinkActive="active"
+        class="sidebar-link"
+      >
+        <i [class]="'bi ' + item.icon"></i>
+        <span class="sidebar-label">{{ item.label }}</span>
+        @if (item.badge) {
+          <span class="badge bg-danger ms-auto">{{ item.badge }}</span>
+        }
+      </a>
+    }
+  </nav>
+</aside>

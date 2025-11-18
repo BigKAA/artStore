@@ -1,0 +1,96 @@
+<!-- ArtStore Admin UI - Navbar Template -->
+<nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+  <div class="container-fluid">
+    <!-- Sidebar Toggle Button -->
+    <button
+      class="btn btn-link navbar-toggler-icon me-2"
+      type="button"
+      (click)="toggleSidebar()"
+      aria-label="Toggle sidebar"
+    >
+      <i class="bi bi-list"></i>
+    </button>
+
+    <!-- Application Logo & Title -->
+    <a class="navbar-brand d-flex align-items-center" href="/">
+      <img src="/assets/logo.svg" alt="ArtStore" height="32" class="me-2" />
+      <span class="fw-bold">ArtStore Admin</span>
+    </a>
+
+    <!-- Spacer -->
+    <div class="flex-grow-1"></div>
+
+    <!-- Navbar Actions -->
+    <div class="d-flex align-items-center gap-2">
+      <!-- Theme Toggle -->
+      <button
+        class="btn btn-link nav-link"
+        type="button"
+        (click)="toggleTheme()"
+        [attr.aria-label]="(currentTheme$ | async) === 'light' ? 'Switch to dark mode' : 'Switch to light mode'"
+      >
+        @if ((currentTheme$ | async) === 'light') {
+          <i class="bi bi-moon-fill"></i>
+        } @else {
+          <i class="bi bi-sun-fill"></i>
+        }
+      </button>
+
+      <!-- Notifications (placeholder) -->
+      <button
+        class="btn btn-link nav-link position-relative"
+        type="button"
+        aria-label="Notifications"
+      >
+        <i class="bi bi-bell"></i>
+        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+          3
+        </span>
+      </button>
+
+      <!-- User Profile Dropdown -->
+      @if (isAuthenticated$ | async) {
+        <div class="dropdown">
+          <button
+            class="btn btn-link nav-link dropdown-toggle d-flex align-items-center gap-2"
+            type="button"
+            id="userDropdown"
+            data-bs-toggle="dropdown"
+            aria-expanded="false"
+          >
+            <div class="avatar avatar-sm bg-primary text-white rounded-circle d-flex align-items-center justify-content-center">
+              {{ (displayName$ | async)?.charAt(0)?.toUpperCase() || 'U' }}
+            </div>
+            <span class="d-none d-md-inline">{{ displayName$ | async }}</span>
+          </button>
+
+          <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+            <li>
+              <a class="dropdown-item" href="/profile">
+                <i class="bi bi-person me-2"></i>
+                Профиль
+              </a>
+            </li>
+            <li>
+              <a class="dropdown-item" href="/settings">
+                <i class="bi bi-gear me-2"></i>
+                Настройки
+              </a>
+            </li>
+            <li><hr class="dropdown-divider" /></li>
+            <li>
+              <button class="dropdown-item" type="button" (click)="logout()">
+                <i class="bi bi-box-arrow-right me-2"></i>
+                Выход
+              </button>
+            </li>
+          </ul>
+        </div>
+      } @else {
+        <a href="/login" class="btn btn-primary btn-sm">
+          Войти
+        </a>
+      }
+    </div>
+  </div>
+</nav>

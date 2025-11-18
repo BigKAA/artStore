@@ -1,0 +1,68 @@
+/**
+ * ArtStore Admin UI - Navbar Styles
+ */
+
+.navbar {
+  height: 64px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background-color: var(--bg-secondary) !important;
+
+  .navbar-brand {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-decoration: none;
+
+    &:hover {
+      color: var(--bs-primary);
+    }
+  }
+
+  .btn-link {
+    color: var(--text-primary);
+    text-decoration: none;
+    padding: 0.5rem;
+
+    &:hover {
+      color: var(--bs-primary);
+    }
+
+    &:focus {
+      outline: none;
+      box-shadow: none;
+    }
+  }
+
+  .nav-link {
+    font-size: 1.25rem;
+  }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .dropdown-menu {
+    min-width: 200px;
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+
+    .dropdown-item {
+      color: var(--text-primary);
+
+      &:hover {
+        background-color: var(--bg-primary);
+        color: var(--bs-primary);
+      }
+    }
+
+    .dropdown-divider {
+      border-color: var(--border-color);
+    }
+  }
+}

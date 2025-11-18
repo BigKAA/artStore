@@ -24,7 +24,7 @@
 
 ---
 
-## Текущий статус проекта (Week 16, Sprint 16)
+## Текущий статус проекта (Week 17, Sprint 17)
 
 ✅ **Завершено (Sprints 1-16)**:
 - **Admin Module**: ✅ 95% COMPLETE (OAuth 2.0 ✅, JWT RS256 ✅, Service Accounts ✅, LDAP removal ✅, Security hardening ✅)
@@ -38,6 +38,14 @@
   - Unit tests 100% (56/56 Ingester Module, 71/71 Query Module) ✅
   - Performance tests 100% (6/6 benchmarks + load tests) ✅
   - Code coverage: 73%+ Query Module, 88-100% Utils ✅
+
+🔄 **В работе (Sprint 17 - Week 17)**:
+- **Admin UI**: 15% STARTED (Angular 20 ✅, Bootstrap 5 ✅, Playwright MCP ✅, проект инициализирован ✅)
+  - Angular CLI 20.3.10 установлен ✅
+  - Bootstrap 5 интегрирован с кастомной темой (салатовый #A3D977) ✅
+  - Light/Dark mode CSS variables готовы ✅
+  - Проект успешно собирается ✅
+  - **Next**: NgRx store, layout компоненты, authentication service
 
 ✅ **Мониторинг и Observability (Sprint 14)**:
 - **OpenTelemetry**: Distributed tracing для всех модулей ✅
@@ -56,10 +64,10 @@
 - **Phase 5** ✅ COMPLETE: TLS Integration Tests (85+ tests, Docker test environment, comprehensive documentation)
 - **Achievement**: Production-ready security infrastructure с comprehensive TLS/mTLS protection, security score 9/10
 
-📋 **Запланировано (Sprint 17+)**:
-- **Sprint 17**: Admin UI Angular interface development
-- **Sprint 18**: Custom Business Metrics (file ops, search performance, storage utilization)
-- **Sprint 19**: Performance Optimization (CDN integration, caching improvements)
+📋 **Запланировано (Sprint 17-19)**:
+- **Sprint 17** 🔄 IN PROGRESS: Admin UI Phase 1 (Authentication, Layout, Dashboard)
+- **Sprint 18**: Admin UI Phase 2 (Service Accounts management, Storage Elements list)
+- **Sprint 19**: Admin UI Phase 3 (Storage Elements CRUD, File Manager, Metrics)
 - **Week 24**: Production-Ready with HA components
 
 ---

@@ -1,0 +1,23 @@
+/**
+ * ArtStore Admin UI - Footer Styles
+ */
+
+.footer {
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  min-height: 60px;
+
+  a {
+    color: var(--text-secondary);
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: var(--bs-primary);
+    }
+  }
+
+  .badge {
+    font-weight: normal;
+    font-size: 0.75rem;
+  }
+}

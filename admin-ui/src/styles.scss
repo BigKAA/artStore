@@ -1,0 +1,38 @@
+/* ArtStore Admin UI - Global Styles */
+
+// 1. Импорт кастомных переменных (до Bootstrap)
+@import 'variables';
+
+// 2. Импорт Bootstrap
+@import 'bootstrap/scss/bootstrap';
+
+// 3. CSS Variables для динамического переключения темы
+:root {
+  --bg-primary: #{$light-bg};
+  --bg-secondary: #{$light-bg-secondary};
+  --text-primary: #{$light-text-primary};
+  --text-secondary: #{$light-text-secondary};
+  --border-color: #{$light-border};
+}
+
+[data-theme="dark"] {
+  --bg-primary: #{$dark-bg-primary};
+  --bg-secondary: #{$dark-bg-secondary};
+  --text-primary: #{$dark-text-primary};
+  --text-secondary: #{$dark-text-secondary};
+  --border-color: #{$dark-bg-secondary};
+}
+
+// 4. Глобальные стили
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+}
+
+// Плавное переключение темы
+* {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
