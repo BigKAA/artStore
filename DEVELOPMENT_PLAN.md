@@ -40,12 +40,18 @@
   - Code coverage: 73%+ Query Module, 88-100% Utils ✅
 
 🔄 **В работе (Sprint 17 - Week 17)**:
-- **Admin UI**: 15% STARTED (Angular 20 ✅, Bootstrap 5 ✅, Playwright MCP ✅, проект инициализирован ✅)
+- **Admin UI**: 35% IN PROGRESS (Angular 20 ✅, Authentication ✅, Layout ✅, Navigation ✅)
   - Angular CLI 20.3.10 установлен ✅
   - Bootstrap 5 интегрирован с кастомной темой (салатовый #A3D977) ✅
   - Light/Dark mode CSS variables готовы ✅
-  - Проект успешно собирается ✅
-  - **Next**: NgRx store, layout компоненты, authentication service
+  - NgRx store infrastructure (auth, ui) ✅
+  - Authentication service (JWT RS256) ✅
+  - Login integration с Admin Module backend ✅
+  - Main Layout (Header, Sidebar, MainLayoutComponent) ✅
+  - Dashboard с navigation и Quick Actions ✅
+  - Logout functionality (implemented, требует debugging) 🔄
+  - Page scaffolds (AdminUsers, Files, StorageElements) ✅
+  - **Next**: Fix logout event binding, Admin User Management CRUD, JWT refresh interceptor
 
 ✅ **Мониторинг и Observability (Sprint 14)**:
 - **OpenTelemetry**: Distributed tracing для всех модулей ✅

@@ -66,7 +66,11 @@
             <div class="dropdown-divider"></div>
 
             <!-- Logout -->
-            <button class="dropdown-item text-danger" (click)="onLogout()">
+            <button
+              type="button"
+              class="dropdown-item text-danger"
+              (click)="onLogout(); $event.stopPropagation()"
+            >
               <i class="bi bi-box-arrow-right me-2"></i>
               Logout
             </button>

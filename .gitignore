@@ -213,3 +213,4 @@ __marimo__/
 #.serena/
 .claude/
 .utils/nginx/certs/
+.playwright-mcp/
