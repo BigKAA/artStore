@@ -1,12 +1,14 @@
 import { ApplicationConfig, provideBrowserGlobalErrorListeners, provideZoneChangeDetection, isDevMode } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideStore } from '@ngrx/store';
 import { provideStoreDevtools } from '@ngrx/store-devtools';
 import { provideEffects } from '@ngrx/effects';
 
 import { routes } from './app.routes';
-import { authReducer } from './store/auth/auth.reducer';
+import { authReducer, AuthEffects } from './store/auth';
 import { uiReducer } from './store/ui/ui.reducer';
+import { authInterceptor } from './services/auth';
 
 /**
  * ArtStore Admin UI Application Configuration
@@ -18,14 +20,19 @@ export const appConfig: ApplicationConfig = {
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
 
+    // HTTP Client с JWT interceptor
+    provideHttpClient(
+      withInterceptors([authInterceptor])
+    ),
+
     // NgRx Store configuration
     provideStore({
       auth: authReducer,
       ui: uiReducer,
     }),
 
-    // NgRx Effects (пока без effects, будут добавлены позже)
-    provideEffects([]),
+    // NgRx Effects (Authentication effects)
+    provideEffects([AuthEffects]),
 
     // NgRx DevTools (только в development режиме)
     provideStoreDevtools({

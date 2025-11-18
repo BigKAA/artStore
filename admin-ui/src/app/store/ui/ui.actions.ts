@@ -69,3 +69,18 @@ export const setLanguage = createAction(
   '[UI] Set Language',
   props<{ language: string }>()
 );
+
+/**
+ * Namespace export для удобства использования
+ */
+export const UiActions = {
+  setTheme,
+  toggleTheme,
+  toggleSidebar,
+  addNotification,
+  removeNotification,
+  clearNotifications,
+  showGlobalLoading,
+  hideGlobalLoading,
+  setLanguage,
+};

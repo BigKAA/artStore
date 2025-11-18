@@ -24,7 +24,7 @@ export const authReducer = createReducer(
   on(AuthActions.loginSuccess, (state, { accessToken, refreshToken, user }) => ({
     ...state,
     accessToken,
-    refreshToken,
+    refreshToken: refreshToken ?? null,
     currentUser: user,
     isAuthenticated: true,
     loading: false,
@@ -76,7 +76,7 @@ export const authReducer = createReducer(
   on(AuthActions.restoreSessionSuccess, (state, { accessToken, refreshToken, user }) => ({
     ...state,
     accessToken,
-    refreshToken,
+    refreshToken: refreshToken ?? null,
     currentUser: user,
     isAuthenticated: true,
     loading: false,
