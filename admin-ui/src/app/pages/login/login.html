@@ -46,7 +46,6 @@
                     formControlName="clientId"
                     placeholder="Enter your Client ID"
                     autocomplete="username"
-                    [disabled]="(loading$ | async) ?? false"
                   />
                   @if (isFieldInvalid('clientId')) {
                     <div class="invalid-feedback">
@@ -84,13 +83,11 @@
                     formControlName="clientSecret"
                     placeholder="Enter your Client Secret"
                     autocomplete="current-password"
-                    [disabled]="(loading$ | async) ?? false"
                   />
                   <button
                     class="btn btn-outline-secondary border-start-0"
                     type="button"
                     (click)="togglePasswordVisibility()"
-                    [disabled]="(loading$ | async) ?? false"
                     title="{{ showPassword ? 'Hide' : 'Show' }} password"
                   >
                     <i class="bi" [class.bi-eye-slash-fill]="showPassword" [class.bi-eye-fill]="!showPassword"></i>
@@ -120,7 +117,6 @@
                     type="checkbox"
                     id="rememberMe"
                     formControlName="rememberMe"
-                    [disabled]="(loading$ | async) ?? false"
                   />
                   <label class="form-check-label" for="rememberMe">
                     Remember me for 7 days

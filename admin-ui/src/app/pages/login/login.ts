@@ -77,6 +77,7 @@ export class LoginComponent implements OnInit, OnDestroy {
 
     this.initForm();
     this.setupAuthRedirect();
+    this.setupLoadingStateHandler();
   }
 
   ngOnDestroy(): void {
@@ -121,6 +122,23 @@ export class LoginComponent implements OnInit, OnDestroy {
       .subscribe(() => {
         // Redirect на requested URL или dashboard после успешного входа
         this.router.navigate([this.returnUrl]);
+      });
+  }
+
+  /**
+   * Настройка обработки loading состояния для disable/enable формы
+   */
+  private setupLoadingStateHandler(): void {
+    this.loading$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((loading) => {
+        if (loading) {
+          // Disable форму во время loading
+          this.loginForm.disable({ emitEvent: false });
+        } else {
+          // Enable форму после loading
+          this.loginForm.enable({ emitEvent: false });
+        }
       });
   }
 

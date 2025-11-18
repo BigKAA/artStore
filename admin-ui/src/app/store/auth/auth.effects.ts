@@ -213,7 +213,7 @@ export class AuthEffects {
         // Проверить, есть ли сохраненные токены
         if (!accessToken) {
           console.log('No saved tokens found');
-          return EMPTY;
+          return of(AuthActions.restoreSessionFailure());
         }
 
         // Проверить, валиден ли токен
@@ -223,7 +223,7 @@ export class AuthEffects {
           if (refreshToken) {
             return of(AuthActions.refreshToken());
           }
-          return EMPTY;
+          return of(AuthActions.restoreSessionFailure());
         }
 
         // Токен валиден - получить user info
@@ -249,7 +249,7 @@ export class AuthEffects {
             if (refreshToken) {
               return of(AuthActions.refreshToken());
             }
-            return EMPTY;
+            return of(AuthActions.restoreSessionFailure());
           })
         );
       })
