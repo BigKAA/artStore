@@ -9,6 +9,7 @@ import { LoginComponent } from './pages/login/login';
 import { MainLayoutComponent } from './components/layout/main-layout';
 import { DashboardComponent } from './pages/dashboard/dashboard';
 import { AdminUsersComponent } from './pages/admin-users/admin-users';
+import { ServiceAccountsComponent } from './pages/service-accounts/service-accounts';
 import { StorageElementsComponent } from './pages/storage-elements/storage-elements';
 import { FilesComponent } from './pages/files/files';
 
@@ -56,6 +57,13 @@ export const routes: Routes = [
         path: 'admin-users',
         component: AdminUsersComponent,
         title: 'Admin Users - ArtStore Admin',
+      },
+
+      // Service Accounts Management
+      {
+        path: 'service-accounts',
+        component: ServiceAccountsComponent,
+        title: 'Service Accounts - ArtStore Admin',
       },
 
       // Storage Elements Management

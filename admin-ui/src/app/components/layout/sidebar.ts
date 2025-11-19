@@ -58,6 +58,11 @@ export class SidebarComponent {
       label: 'Admin Users',
     },
     {
+      path: '/service-accounts',
+      icon: 'bi-key-fill',
+      label: 'Service Accounts',
+    },
+    {
       path: '/storage-elements',
       icon: 'bi-hdd-stack-fill',
       label: 'Storage Elements',
