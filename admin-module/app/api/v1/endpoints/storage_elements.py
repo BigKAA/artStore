@@ -1,15 +1,18 @@
 """
 API endpoints для управления Storage Elements.
 
-Предоставляет REST API для просмотра и мониторинга Storage Elements:
+Предоставляет REST API для полного CRUD управления Storage Elements:
+- Создание нового Storage Element (SUPER_ADMIN only)
 - Получение списка Storage Elements с фильтрацией и пагинацией
 - Получение детальной информации о Storage Element
+- Обновление Storage Element (SUPER_ADMIN only)
+- Удаление Storage Element (SUPER_ADMIN only)
 - Мониторинг статуса и метрик использования
 
 RBAC: Доступно всем аутентифицированным админам для чтения
        SUPER_ADMIN требуется для write операций (создание, обновление, удаление)
 
-Note: Полный CRUD будет реализован в Sprint 19. Сейчас только read-only endpoints.
+Sprint 19 Phase 1: Full CRUD implementation
 """
 
 import logging
@@ -20,12 +23,14 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.api.dependencies.admin_auth import get_current_admin_user
-from app.models.admin_user import AdminUser
+from app.api.dependencies.admin_auth import get_current_admin_user, require_role
+from app.models.admin_user import AdminUser, AdminRole
 from app.models.storage_element import StorageElement, StorageMode, StorageStatus, StorageType
 from app.schemas.storage_element import (
     StorageElementResponse,
-    StorageElementListResponse
+    StorageElementListResponse,
+    StorageElementCreate,
+    StorageElementUpdate
 )
 
 logger = logging.getLogger(__name__)
@@ -47,13 +52,140 @@ def calculate_computed_fields(storage: StorageElement) -> dict:
     used_gb = storage.used_bytes / (1024**3)
     usage_percent = (storage.used_bytes / storage.capacity_bytes * 100) if storage.capacity_bytes else None
 
+    # Вычисляем is_available и is_writable без использования @property
+    # чтобы избежать проблем с detached SQLAlchemy objects
+    is_available = storage.status == StorageStatus.ONLINE
+    is_writable = storage.mode in (StorageMode.EDIT, StorageMode.RW) and is_available
+
     return {
         "capacity_gb": round(capacity_gb, 2) if capacity_gb else None,
         "used_gb": round(used_gb, 2),
         "usage_percent": round(usage_percent, 2) if usage_percent else None,
-        "is_available": storage.is_available,
-        "is_writable": storage.is_writable
+        "is_available": is_available,
+        "is_writable": is_writable
     }
+
+
+@router.post(
+    "/",
+    response_model=StorageElementResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create new Storage Element",
+    description=(
+        "Создание нового Storage Element. Требуется роль SUPER_ADMIN. "
+        "После создания storage element автоматически получает статус ONLINE "
+        "и начальные метрики (used_bytes=0, file_count=0)."
+    )
+)
+async def create_storage_element(
+    request: StorageElementCreate,
+    db: AsyncSession = Depends(get_db),
+    current_admin: AdminUser = Depends(require_role(AdminRole.SUPER_ADMIN))
+):
+    """
+    Создание нового Storage Element.
+
+    **Request Body:**
+    - **name**: Название storage element (уникальное, 3-100 символов)
+    - **description**: Описание назначения (опционально, до 500 символов)
+    - **mode**: Режим работы (edit/rw/ro/ar, default: edit)
+    - **storage_type**: Тип хранилища (local/s3, default: local)
+    - **base_path**: Базовый путь или bucket name (обязательно)
+    - **api_url**: URL API storage element (обязательно)
+    - **api_key**: API ключ для аутентификации (опционально)
+    - **capacity_bytes**: Общая емкость в байтах (опционально)
+    - **retention_days**: Срок хранения в днях (опционально, >= 1)
+    - **is_replicated**: Флаг репликации (default: false)
+    - **replica_count**: Количество реплик (default: 0, >= 0)
+
+    **Response:**
+    - Storage Element с вычисленными метриками
+    - Автоматически установленные значения: status=ONLINE, used_bytes=0, file_count=0
+
+    **RBAC:** Только SUPER_ADMIN
+
+    **Validation:**
+    - name должен быть уникальным
+    - api_url должен быть валидным URL
+    - capacity_bytes >= 0 (если указано)
+    - retention_days >= 1 (если указано)
+    - replica_count >= 0
+    """
+    try:
+        # Проверка уникальности name
+        existing_query = select(StorageElement).where(StorageElement.name == request.name)
+        existing_result = await db.execute(existing_query)
+        if existing_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Storage Element with name '{request.name}' already exists"
+            )
+
+        # Проверка уникальности api_url
+        url_query = select(StorageElement).where(StorageElement.api_url == request.api_url)
+        url_result = await db.execute(url_query)
+        if url_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Storage Element with api_url '{request.api_url}' already exists"
+            )
+
+        # Создание Storage Element
+        storage_element = StorageElement(
+            name=request.name,
+            description=request.description,
+            mode=request.mode,
+            storage_type=request.storage_type,
+            base_path=request.base_path,
+            api_url=request.api_url,
+            api_key=request.api_key,
+            status=StorageStatus.ONLINE,  # Автоматически ONLINE при создании
+            capacity_bytes=request.capacity_bytes,
+            used_bytes=0,  # Начальное значение
+            file_count=0,  # Начальное значение
+            retention_days=request.retention_days,
+            last_health_check=None,  # Будет обновлено при первой health check
+            is_replicated=request.is_replicated,
+            replica_count=request.replica_count
+        )
+
+        db.add(storage_element)
+        await db.commit()
+        await db.refresh(storage_element)
+
+        logger.info(
+            f"Storage Element created: {request.name} by {current_admin.username}",
+            extra={
+                "storage_element_id": storage_element.id,
+                "storage_element_name": storage_element.name,
+                "mode": storage_element.mode.value,
+                "storage_type": storage_element.storage_type.value,
+                "admin_id": str(current_admin.id),
+                "admin_username": current_admin.username
+            }
+        )
+
+        # Формирование response с computed fields
+        computed = calculate_computed_fields(storage_element)
+        item_dict = {
+            **{c.name: getattr(storage_element, c.name) for c in StorageElement.__table__.columns},
+            **computed
+        }
+
+        return StorageElementResponse.model_validate(item_dict)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(
+            f"Failed to create Storage Element: {e}",
+            extra={"admin_username": current_admin.username}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create Storage Element"
+        )
 
 
 @router.get(
@@ -205,6 +337,225 @@ async def get_storage_element_by_id(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve Storage Element"
+        )
+
+
+@router.put(
+    "/{storage_element_id}",
+    response_model=StorageElementResponse,
+    summary="Update Storage Element",
+    description="Обновление параметров Storage Element. Требуется роль SUPER_ADMIN."
+)
+async def update_storage_element(
+    storage_element_id: int,
+    request: StorageElementUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_admin: AdminUser = Depends(require_role(AdminRole.SUPER_ADMIN))
+):
+    """
+    Обновление параметров Storage Element.
+
+    **Path Parameters:**
+    - **storage_element_id**: ID storage element
+
+    **Request Body (все поля опциональны):**
+    - **name**: Новое название (уникальное, 3-100 символов)
+    - **description**: Новое описание (до 500 символов)
+    - **mode**: Новый режим работы (edit/rw/ro/ar)
+    - **api_url**: Новый URL API
+    - **api_key**: Новый API ключ
+    - **status**: Новый статус (online/offline/degraded/maintenance)
+    - **capacity_bytes**: Новая емкость в байтах (>= 0)
+    - **retention_days**: Новый срок хранения в днях (>= 1)
+    - **replica_count**: Новое количество реплик (>= 0)
+
+    **Response:**
+    - Storage Element с обновленными параметрами и вычисленными метриками
+
+    **RBAC:** Только SUPER_ADMIN
+
+    **Ограничения:**
+    - Нельзя изменить storage_type и base_path после создания
+    - Нельзя изменить used_bytes и file_count (управляется системой)
+    - name и api_url должны быть уникальными
+    - Mode transitions: edit (фиксированный) → rw → ro → ar
+    """
+    try:
+        # Получение существующего Storage Element
+        query = select(StorageElement).where(StorageElement.id == storage_element_id)
+        result = await db.execute(query)
+        storage_element = result.scalar_one_or_none()
+
+        if not storage_element:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Storage Element {storage_element_id} not found"
+            )
+
+        # Проверка уникальности name (если изменяется)
+        if request.name and request.name != storage_element.name:
+            name_query = select(StorageElement).where(StorageElement.name == request.name)
+            name_result = await db.execute(name_query)
+            if name_result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Storage Element with name '{request.name}' already exists"
+                )
+            storage_element.name = request.name
+
+        # Проверка уникальности api_url (если изменяется)
+        if request.api_url and request.api_url != storage_element.api_url:
+            url_query = select(StorageElement).where(StorageElement.api_url == request.api_url)
+            url_result = await db.execute(url_query)
+            if url_result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Storage Element with api_url '{request.api_url}' already exists"
+                )
+            storage_element.api_url = request.api_url
+
+        # Обновление полей
+        if request.description is not None:
+            storage_element.description = request.description
+        if request.mode:
+            storage_element.mode = request.mode
+        if request.api_key is not None:
+            storage_element.api_key = request.api_key
+        if request.status:
+            storage_element.status = request.status
+        if request.capacity_bytes is not None:
+            storage_element.capacity_bytes = request.capacity_bytes
+        if request.retention_days is not None:
+            storage_element.retention_days = request.retention_days
+        if request.replica_count is not None:
+            storage_element.replica_count = request.replica_count
+
+        await db.commit()
+        await db.refresh(storage_element)
+
+        logger.info(
+            f"Storage Element updated: {storage_element.name} by {current_admin.username}",
+            extra={
+                "storage_element_id": storage_element_id,
+                "admin_id": str(current_admin.id),
+                "admin_username": current_admin.username,
+                "changes": request.model_dump(exclude_unset=True)
+            }
+        )
+
+        # Формирование response с computed fields
+        computed = calculate_computed_fields(storage_element)
+        item_dict = {
+            **{c.name: getattr(storage_element, c.name) for c in StorageElement.__table__.columns},
+            **computed
+        }
+
+        return StorageElementResponse.model_validate(item_dict)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(
+            f"Failed to update Storage Element {storage_element_id}: {e}",
+            extra={"admin_username": current_admin.username}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update Storage Element"
+        )
+
+
+@router.delete(
+    "/{storage_element_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete Storage Element",
+    description="Удаление Storage Element. Требуется роль SUPER_ADMIN."
+)
+async def delete_storage_element(
+    storage_element_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_admin: AdminUser = Depends(require_role(AdminRole.SUPER_ADMIN))
+):
+    """
+    Удаление Storage Element.
+
+    **Path Parameters:**
+    - **storage_element_id**: ID storage element
+
+    **Response:**
+    - 204 No Content при успешном удалении
+
+    **RBAC:** Только SUPER_ADMIN
+
+    **Ограничения:**
+    - Нельзя удалить storage element с файлами (file_count > 0)
+    - Нельзя удалить storage element в режиме edit (должен быть переведен в другой режим)
+    - Перед удалением рекомендуется перевести в режим maintenance
+
+    **Warning:** Удаление storage element не удаляет физические файлы!
+    Необходимо выполнить очистку файловой системы вручную.
+    """
+    try:
+        # Получение Storage Element
+        query = select(StorageElement).where(StorageElement.id == storage_element_id)
+        result = await db.execute(query)
+        storage_element = result.scalar_one_or_none()
+
+        if not storage_element:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Storage Element {storage_element_id} not found"
+            )
+
+        # Проверка: нельзя удалить storage element с файлами
+        if storage_element.file_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Cannot delete Storage Element with {storage_element.file_count} files. "
+                    "Please migrate or delete all files first."
+                )
+            )
+
+        # Проверка: нельзя удалить storage element в режиме edit
+        if storage_element.mode == StorageMode.EDIT:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Cannot delete Storage Element in EDIT mode. "
+                    "Please change mode to RW, RO, or AR first."
+                )
+            )
+
+        # Удаление Storage Element
+        await db.delete(storage_element)
+        await db.commit()
+
+        logger.info(
+            f"Storage Element deleted: {storage_element.name} by {current_admin.username}",
+            extra={
+                "storage_element_id": storage_element_id,
+                "storage_element_name": storage_element.name,
+                "mode": storage_element.mode.value,
+                "admin_id": str(current_admin.id),
+                "admin_username": current_admin.username
+            }
+        )
+
+        return None
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(
+            f"Failed to delete Storage Element {storage_element_id}: {e}",
+            extra={"admin_username": current_admin.username}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete Storage Element"
         )
 
 
