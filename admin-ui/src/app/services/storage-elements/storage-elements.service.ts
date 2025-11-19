@@ -151,6 +151,27 @@ export class StorageElementsService {
   }
 
   /**
+   * Создание нового Storage Element
+   */
+  createStorageElement(data: any): Observable<StorageElement> {
+    return this.http.post<StorageElement>(this.apiUrl, data);
+  }
+
+  /**
+   * Обновление Storage Element
+   */
+  updateStorageElement(id: number, data: any): Observable<StorageElement> {
+    return this.http.put<StorageElement>(`${this.apiUrl}/${id}`, data);
+  }
+
+  /**
+   * Удаление Storage Element
+   */
+  deleteStorageElement(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.apiUrl}/${id}`);
+  }
+
+  /**
    * Вспомогательная функция: Форматирование размера
    */
   formatSize(gb: number | null): string {

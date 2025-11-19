@@ -6,7 +6,28 @@
       <h2 class="mb-1">Storage Elements</h2>
       <p class="text-muted mb-0">Monitor and manage physical storage locations</p>
     </div>
+    <div>
+      <button type="button" class="btn btn-primary" (click)="openCreateModal()">
+        <i class="bi bi-plus-circle me-2"></i>Create Storage Element
+      </button>
+    </div>
   </div>
+
+  <!-- Success Message -->
+  @if (successMessage) {
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+      <i class="bi bi-check-circle me-2"></i>{{ successMessage }}
+      <button type="button" class="btn-close" (click)="successMessage = null"></button>
+    </div>
+  }
+
+  <!-- Error Message -->
+  @if (error && !isSubmitting) {
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+      <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
+      <button type="button" class="btn-close" (click)="error = null"></button>
+    </div>
+  }
 
   <!-- Summary Statistics Card (if available) -->
   @if (summary) {
@@ -272,13 +293,29 @@
 
                   <!-- Actions -->
                   <td>
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-outline-primary"
-                      (click)="viewDetails(element)"
-                      title="View Details">
-                      <i class="bi bi-eye"></i>
-                    </button>
+                    <div class="btn-group btn-group-sm" role="group">
+                      <button
+                        type="button"
+                        class="btn btn-outline-primary"
+                        (click)="viewDetails(element)"
+                        title="View Details">
+                        <i class="bi bi-eye"></i>
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-outline-warning"
+                        (click)="openEditModal(element)"
+                        title="Edit Storage Element">
+                        <i class="bi bi-pencil-square"></i>
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-outline-danger"
+                        (click)="openDeleteModal(element)"
+                        title="Delete Storage Element">
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               }
@@ -494,6 +531,408 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" (click)="closeDetailsModal()">
             Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- Create Storage Element Modal -->
+@if (showCreateModal) {
+  <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0, 0, 0, 0.5);">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <i class="bi bi-plus-circle me-2"></i>Create Storage Element
+          </h5>
+          <button type="button" class="btn-close" (click)="closeCreateModal()"></button>
+        </div>
+        <div class="modal-body">
+          @if (error) {
+            <div class="alert alert-danger" role="alert">
+              <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
+            </div>
+          }
+
+          <form>
+            <!-- Name -->
+            <div class="mb-3">
+              <label for="createName" class="form-label">Name <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="createName"
+                     [(ngModel)]="formData.name" name="name"
+                     [class.is-invalid]="formErrors.name"
+                     placeholder="Enter storage element name">
+              @if (formErrors.name) {
+                <div class="invalid-feedback d-block">{{ formErrors.name }}</div>
+              }
+            </div>
+
+            <!-- Description -->
+            <div class="mb-3">
+              <label for="createDescription" class="form-label">Description</label>
+              <textarea class="form-control" id="createDescription" rows="2"
+                        [(ngModel)]="formData.description" name="description"
+                        placeholder="Optional description"></textarea>
+            </div>
+
+            <!-- Mode and Storage Type -->
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label for="createMode" class="form-label">Mode <span class="text-danger">*</span></label>
+                <select class="form-select" id="createMode"
+                        [(ngModel)]="formData.mode" name="mode">
+                  @for (mode of modes; track mode) {
+                    <option [value]="mode">{{ storageElementsService.getModeDescription(mode) }}</option>
+                  }
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="createStorageType" class="form-label">Storage Type <span class="text-danger">*</span></label>
+                <select class="form-select" id="createStorageType"
+                        [(ngModel)]="formData.storage_type" name="storage_type">
+                  @for (type of types; track type) {
+                    <option [value]="type">{{ type.toUpperCase() }}</option>
+                  }
+                </select>
+              </div>
+            </div>
+
+            <!-- Base Path -->
+            <div class="mb-3">
+              <label for="createBasePath" class="form-label">Base Path <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="createBasePath"
+                     [(ngModel)]="formData.base_path" name="base_path"
+                     [class.is-invalid]="formErrors.base_path"
+                     placeholder="/path/to/storage">
+              @if (formErrors.base_path) {
+                <div class="invalid-feedback d-block">{{ formErrors.base_path }}</div>
+              }
+            </div>
+
+            <!-- API URL -->
+            <div class="mb-3">
+              <label for="createApiUrl" class="form-label">API URL <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="createApiUrl"
+                     [(ngModel)]="formData.api_url" name="api_url"
+                     [class.is-invalid]="formErrors.api_url"
+                     placeholder="http://storage-element:8010">
+              @if (formErrors.api_url) {
+                <div class="invalid-feedback d-block">{{ formErrors.api_url }}</div>
+              }
+            </div>
+
+            <!-- API Key -->
+            <div class="mb-3">
+              <label for="createApiKey" class="form-label">API Key</label>
+              <input type="password" class="form-control" id="createApiKey"
+                     [(ngModel)]="formData.api_key" name="api_key"
+                     placeholder="Optional API key for authentication">
+            </div>
+
+            <!-- Capacity and Retention -->
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label for="createCapacity" class="form-label">Capacity (GB)</label>
+                <input type="number" class="form-control" id="createCapacity"
+                       [(ngModel)]="formData.capacity_gb" name="capacity_gb"
+                       [class.is-invalid]="formErrors.capacity_gb"
+                       placeholder="Optional capacity limit" min="0" step="0.01">
+                @if (formErrors.capacity_gb) {
+                  <div class="invalid-feedback d-block">{{ formErrors.capacity_gb }}</div>
+                }
+              </div>
+              <div class="col-md-6">
+                <label for="createRetention" class="form-label">Retention (days)</label>
+                <input type="number" class="form-control" id="createRetention"
+                       [(ngModel)]="formData.retention_days" name="retention_days"
+                       [class.is-invalid]="formErrors.retention_days"
+                       placeholder="Optional retention period" min="1">
+                @if (formErrors.retention_days) {
+                  <div class="invalid-feedback d-block">{{ formErrors.retention_days }}</div>
+                }
+              </div>
+            </div>
+
+            <!-- Replication -->
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="createIsReplicated"
+                         [(ngModel)]="formData.is_replicated" name="is_replicated">
+                  <label class="form-check-label" for="createIsReplicated">
+                    Enable Replication
+                  </label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <label for="createReplicaCount" class="form-label">Replica Count</label>
+                <input type="number" class="form-control" id="createReplicaCount"
+                       [(ngModel)]="formData.replica_count" name="replica_count"
+                       [class.is-invalid]="formErrors.replica_count"
+                       min="0">
+                @if (formErrors.replica_count) {
+                  <div class="invalid-feedback d-block">{{ formErrors.replica_count }}</div>
+                }
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" (click)="closeCreateModal()"
+                  [disabled]="isSubmitting">
+            Cancel
+          </button>
+          <button type="button" class="btn btn-primary" (click)="createStorageElement()"
+                  [disabled]="isSubmitting">
+            @if (isSubmitting) {
+              <span class="spinner-border spinner-border-sm me-2"></span>Creating...
+            } @else {
+              <i class="bi bi-check-circle me-2"></i>Create
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- Edit Storage Element Modal -->
+@if (showEditModal && selectedStorageElement) {
+  <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0, 0, 0, 0.5);">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <i class="bi bi-pencil-square me-2"></i>Edit Storage Element
+          </h5>
+          <button type="button" class="btn-close" (click)="closeEditModal()"></button>
+        </div>
+        <div class="modal-body">
+          @if (error) {
+            <div class="alert alert-danger" role="alert">
+              <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
+            </div>
+          }
+
+          <form>
+            <!-- Name -->
+            <div class="mb-3">
+              <label for="editName" class="form-label">Name <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="editName"
+                     [(ngModel)]="formData.name" name="name"
+                     [class.is-invalid]="formErrors.name"
+                     placeholder="Enter storage element name">
+              @if (formErrors.name) {
+                <div class="invalid-feedback d-block">{{ formErrors.name }}</div>
+              }
+            </div>
+
+            <!-- Description -->
+            <div class="mb-3">
+              <label for="editDescription" class="form-label">Description</label>
+              <textarea class="form-control" id="editDescription" rows="2"
+                        [(ngModel)]="formData.description" name="description"
+                        placeholder="Optional description"></textarea>
+            </div>
+
+            <!-- Mode and Status -->
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label for="editMode" class="form-label">Mode</label>
+                <select class="form-select" id="editMode"
+                        [(ngModel)]="formData.mode" name="mode">
+                  @for (mode of modes; track mode) {
+                    <option [value]="mode">{{ storageElementsService.getModeDescription(mode) }}</option>
+                  }
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="editStatus" class="form-label">Status</label>
+                <select class="form-select" id="editStatus"
+                        [(ngModel)]="formData.status" name="status">
+                  @for (status of statuses; track status) {
+                    <option [value]="status">{{ storageElementsService.getStatusDescription(status) }}</option>
+                  }
+                </select>
+              </div>
+            </div>
+
+            <!-- Storage Type and Base Path (Read-only) -->
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label class="form-label">Storage Type</label>
+                <input type="text" class="form-control" readonly
+                       [value]="selectedStorageElement.storage_type.toUpperCase()">
+                <small class="text-muted">Cannot be changed</small>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Base Path</label>
+                <input type="text" class="form-control" readonly
+                       [value]="selectedStorageElement.base_path">
+                <small class="text-muted">Cannot be changed</small>
+              </div>
+            </div>
+
+            <!-- API URL -->
+            <div class="mb-3">
+              <label for="editApiUrl" class="form-label">API URL</label>
+              <input type="text" class="form-control" id="editApiUrl"
+                     [(ngModel)]="formData.api_url" name="api_url"
+                     [class.is-invalid]="formErrors.api_url"
+                     placeholder="http://storage-element:8010">
+              @if (formErrors.api_url) {
+                <div class="invalid-feedback d-block">{{ formErrors.api_url }}</div>
+              }
+            </div>
+
+            <!-- API Key -->
+            <div class="mb-3">
+              <label for="editApiKey" class="form-label">API Key</label>
+              <input type="password" class="form-control" id="editApiKey"
+                     [(ngModel)]="formData.api_key" name="api_key"
+                     placeholder="Leave empty to keep existing key">
+              <small class="text-muted">Only enter if you want to change the API key</small>
+            </div>
+
+            <!-- Capacity and Retention -->
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label for="editCapacity" class="form-label">Capacity (GB)</label>
+                <input type="number" class="form-control" id="editCapacity"
+                       [(ngModel)]="formData.capacity_gb" name="capacity_gb"
+                       [class.is-invalid]="formErrors.capacity_gb"
+                       placeholder="Optional capacity limit" min="0" step="0.01">
+                @if (formErrors.capacity_gb) {
+                  <div class="invalid-feedback d-block">{{ formErrors.capacity_gb }}</div>
+                }
+              </div>
+              <div class="col-md-6">
+                <label for="editRetention" class="form-label">Retention (days)</label>
+                <input type="number" class="form-control" id="editRetention"
+                       [(ngModel)]="formData.retention_days" name="retention_days"
+                       [class.is-invalid]="formErrors.retention_days"
+                       placeholder="Optional retention period" min="1">
+                @if (formErrors.retention_days) {
+                  <div class="invalid-feedback d-block">{{ formErrors.retention_days }}</div>
+                }
+              </div>
+            </div>
+
+            <!-- Replica Count -->
+            <div class="mb-3">
+              <label for="editReplicaCount" class="form-label">Replica Count</label>
+              <input type="number" class="form-control" id="editReplicaCount"
+                     [(ngModel)]="formData.replica_count" name="replica_count"
+                     [class.is-invalid]="formErrors.replica_count"
+                     min="0">
+              @if (formErrors.replica_count) {
+                <div class="invalid-feedback d-block">{{ formErrors.replica_count }}</div>
+              }
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" (click)="closeEditModal()"
+                  [disabled]="isSubmitting">
+            Cancel
+          </button>
+          <button type="button" class="btn btn-primary" (click)="updateStorageElement()"
+                  [disabled]="isSubmitting">
+            @if (isSubmitting) {
+              <span class="spinner-border spinner-border-sm me-2"></span>Updating...
+            } @else {
+              <i class="bi bi-check-circle me-2"></i>Update
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- Delete Storage Element Modal -->
+@if (showDeleteModal && selectedStorageElement) {
+  <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0, 0, 0, 0.5);">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title">
+            <i class="bi bi-exclamation-triangle me-2"></i>Delete Storage Element
+          </h5>
+          <button type="button" class="btn-close btn-close-white" (click)="closeDeleteModal()"></button>
+        </div>
+        <div class="modal-body">
+          @if (error) {
+            <div class="alert alert-danger" role="alert">
+              <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
+            </div>
+          }
+
+          <div class="alert alert-warning" role="alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            <strong>Warning:</strong> This action cannot be undone!
+          </div>
+
+          <p>Are you sure you want to delete the following Storage Element?</p>
+
+          <div class="card bg-light">
+            <div class="card-body">
+              <h6 class="card-title">{{ selectedStorageElement.name }}</h6>
+              <div class="row g-2">
+                <div class="col-6">
+                  <small class="text-muted">Mode:</small>
+                  <span [class]="storageElementsService.getModeBadgeClass(selectedStorageElement.mode)">
+                    {{ storageElementsService.getModeDescription(selectedStorageElement.mode) }}
+                  </span>
+                </div>
+                <div class="col-6">
+                  <small class="text-muted">Status:</small>
+                  <span [class]="storageElementsService.getStatusBadgeClass(selectedStorageElement.status)">
+                    {{ storageElementsService.getStatusDescription(selectedStorageElement.status) }}
+                  </span>
+                </div>
+                <div class="col-6">
+                  <small class="text-muted">Files:</small>
+                  <strong>{{ selectedStorageElement.file_count }}</strong>
+                </div>
+                <div class="col-6">
+                  <small class="text-muted">Used:</small>
+                  <strong>{{ storageElementsService.formatSize(selectedStorageElement.used_gb) }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          @if (selectedStorageElement.file_count > 0) {
+            <div class="alert alert-danger mt-3" role="alert">
+              <i class="bi bi-x-circle me-2"></i>
+              <strong>Cannot delete:</strong> This storage element contains {{ selectedStorageElement.file_count }} file(s).
+              You must delete all files before removing the storage element.
+            </div>
+          }
+
+          @if (selectedStorageElement.mode === StorageMode.EDIT) {
+            <div class="alert alert-danger mt-3" role="alert">
+              <i class="bi bi-x-circle me-2"></i>
+              <strong>Cannot delete:</strong> This storage element is in EDIT mode.
+              Change the mode before deletion.
+            </div>
+          }
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" (click)="closeDeleteModal()"
+                  [disabled]="isSubmitting">
+            Cancel
+          </button>
+          <button type="button" class="btn btn-danger" (click)="deleteStorageElement()"
+                  [disabled]="isSubmitting || selectedStorageElement.file_count > 0 || selectedStorageElement.mode === StorageMode.EDIT">
+            @if (isSubmitting) {
+              <span class="spinner-border spinner-border-sm me-2"></span>Deleting...
+            } @else {
+              <i class="bi bi-trash me-2"></i>Delete
+            }
           </button>
         </div>
       </div>
