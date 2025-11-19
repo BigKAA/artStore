@@ -161,21 +161,18 @@ async def get_service_accounts_list(
 
     try:
         # Получаем список Service Accounts
-        service_accounts = await service.get_service_accounts(
+        service_accounts = await service.list_service_accounts(
             db=db,
             skip=skip,
             limit=limit,
-            role_filter=role,
-            status_filter=status_filter,
-            search_query=search
+            role=role,
+            status=status_filter
         )
 
         # Подсчитываем общее количество
         total = await service.count_service_accounts(
             db=db,
-            role_filter=role,
-            status_filter=status_filter,
-            search_query=search
+            status=status_filter
         )
 
         return ServiceAccountListResponse(
@@ -223,7 +220,7 @@ async def get_service_account_by_id(
     service = ServiceAccountService()
 
     try:
-        service_account = await service.get_service_account_by_id(db, service_account_id)
+        service_account = await service.get_by_id(db, service_account_id)
 
         if not service_account:
             raise HTTPException(
@@ -281,7 +278,7 @@ async def update_service_account(
 
     try:
         # Получаем Service Account
-        service_account = await service.get_service_account_by_id(db, service_account_id)
+        service_account = await service.get_by_id(db, service_account_id)
 
         if not service_account:
             raise HTTPException(
@@ -364,7 +361,7 @@ async def delete_service_account(
 
     try:
         # Получаем Service Account
-        service_account = await service.get_service_account_by_id(db, service_account_id)
+        service_account = await service.get_by_id(db, service_account_id)
 
         if not service_account:
             raise HTTPException(
@@ -444,7 +441,7 @@ async def rotate_service_account_secret(
 
     try:
         # Получаем Service Account
-        service_account = await service.get_service_account_by_id(db, service_account_id)
+        service_account = await service.get_by_id(db, service_account_id)
 
         if not service_account:
             raise HTTPException(
