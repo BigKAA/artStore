@@ -203,3 +203,24 @@ class RoleChecker:
 require_super_admin = RoleChecker([AdminRole.SUPER_ADMIN])
 require_admin = RoleChecker([AdminRole.SUPER_ADMIN, AdminRole.ADMIN])
 require_any_admin = RoleChecker([AdminRole.SUPER_ADMIN, AdminRole.ADMIN, AdminRole.READONLY])
+
+
+def require_role(role: AdminRole):
+    """
+    Фабричная функция для создания dependency для проверки конкретной роли.
+
+    Args:
+        role: Требуемая роль администратора
+
+    Returns:
+        RoleChecker: Dependency для FastAPI
+
+    Example:
+        @router.post("/admin-users")
+        async def create_admin(
+            admin: AdminUser = Depends(require_role(AdminRole.SUPER_ADMIN))
+        ):
+            # Только SUPER_ADMIN может создавать администраторов
+            ...
+    """
+    return RoleChecker([role])
