@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple, List
 from pathlib import Path
 import logging
+import secrets
 
 from jose import jwt, JWTError
 from jose.exceptions import ExpiredSignatureError
@@ -517,14 +518,16 @@ class TokenService:
         now = datetime.now(timezone.utc)
         expire = now + timedelta(minutes=settings.jwt.access_token_expire_minutes)
 
-        # Базовые claims для Service Account
+        # UNIFIED JWT PAYLOAD - Sprint 20
+        # Изменения: type "access" → "service_account", добавлен jti
         claims = {
             "sub": str(service_account.id),  # Subject - UUID Service Account
-            "client_id": service_account.client_id,
-            "name": service_account.name,
+            "type": "service_account",  # ✅ ИЗМЕНЕНО: унифицированный тип токена
             "role": service_account.role.value,
+            "name": service_account.name,
+            "jti": secrets.token_urlsafe(16),  # ✅ НОВОЕ: JWT ID для token revocation
+            "client_id": service_account.client_id,
             "rate_limit": service_account.rate_limit,
-            "type": "access",
             "iat": now,  # Issued At
             "exp": expire,  # Expiration Time
             "nbf": now,  # Not Before
@@ -596,10 +599,14 @@ class TokenService:
         now = datetime.now(timezone.utc)
         expire = now + timedelta(days=settings.jwt.refresh_token_expire_days)
 
+        # UNIFIED JWT PAYLOAD - Sprint 20 (refresh token)
         claims = {
             "sub": str(service_account.id),
+            "type": "service_account",  # ✅ ИЗМЕНЕНО: унифицированный тип
+            "role": service_account.role.value,  # ✅ ДОБАВЛЕНО: для консистентности
+            "name": service_account.name,  # ✅ ДОБАВЛЕНО: display name
+            "jti": secrets.token_urlsafe(16),  # ✅ ДОБАВЛЕНО: JWT ID
             "client_id": service_account.client_id,
-            "type": "refresh",
             "iat": now,
             "exp": expire,
             "nbf": now,

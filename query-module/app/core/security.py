@@ -11,10 +11,10 @@ import logging
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 import jwt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.core.config import settings
 from app.core.exceptions import (
@@ -38,11 +38,58 @@ class UserRole(str, Enum):
 
 
 class TokenType(str, Enum):
-    """"8?K JWT B>:5=>2"""
+    """"8?K JWT B>:5=>2 (DEPRECATED - use UnifiedJWTPayload.type)"""
     ACCESS = "access"
     REFRESH = "refresh"
-    # Admin User token type (for Admin UI)
     ADMIN_USER = "admin_user"
+
+
+class UnifiedJWTPayload(BaseModel):
+    """
+    Унифицированная схема JWT payload для всех типов токенов (Sprint 20).
+
+    Поддерживает:
+    - Admin User tokens (type="admin_user")
+    - Service Account tokens (type="service_account")
+
+    Обязательные поля:
+    - sub: identifier (username для admin, UUID для service account)
+    - type: admin_user | service_account
+    - role: роль для authorization
+    - name: display name для логов
+    - jti: JWT ID для revocation
+    - iat, exp, nbf: timestamps
+
+    Опциональные поля:
+    - client_id: OAuth 2.0 Client ID
+    - rate_limit: API requests per minute (только для service accounts)
+    - username: DEPRECATED backward compatibility
+    - email: DEPRECATED backward compatibility
+    """
+    model_config = ConfigDict(
+        extra="ignore",  # Игнорировать дополнительные поля для backward compatibility
+        str_strip_whitespace=True
+    )
+
+    # Обязательные поля (unified)
+    sub: str = Field(..., description="Subject identifier")
+    type: Literal["admin_user", "service_account", "access", "refresh"] = Field(
+        ..., description="Token type"
+    )
+    role: str = Field(..., description="User role")
+    name: str = Field(..., description="Display name")
+    jti: str = Field(..., description="JWT ID for revocation")
+    iat: int = Field(..., description="Issued at timestamp")
+    exp: int = Field(..., description="Expiration timestamp")
+    nbf: int = Field(..., description="Not before timestamp")
+
+    # Опциональные поля
+    client_id: Optional[str] = Field(None, description="OAuth 2.0 Client ID")
+    rate_limit: Optional[int] = Field(None, description="API requests per minute")
+
+    # Backward compatibility (deprecated)
+    username: Optional[str] = Field(None, description="DEPRECATED: use 'name' instead")
+    email: Optional[str] = Field(None, description="DEPRECATED: optional field")
 
 
 class UserContext(BaseModel):
@@ -51,19 +98,70 @@ class UserContext(BaseModel):
 
     !>45@68B 2AN 8=D>@<0F8N > ?>;L7>20B5;5 87 B>:5=0.
     """
-    sub: str = Field(..., description="User ID (subject)")
-    username: Optional[str] = Field(None, description="Username")
-    email: Optional[str] = Field(None, description="Email address")
+    identifier: str = Field(..., description="Unique identifier (sub)")
+    display_name: str = Field(..., description="Display name for logs")
     role: UserRole = Field(..., description="User role")
-    type: TokenType = Field(..., description="Token type")
+    token_type: Literal["admin_user", "service_account"] = Field(
+        ..., description="Type of authenticated entity"
+    )
+    client_id: Optional[str] = Field(None, description="OAuth 2.0 Client ID")
+    rate_limit: Optional[int] = Field(None, description="API rate limit")
     iat: datetime = Field(..., description="Issued at")
     exp: datetime = Field(..., description="Expires at")
-    nbf: Optional[datetime] = Field(None, description="Not before")
+    nbf: datetime = Field(..., description="Not before")
+
+    @classmethod
+    def from_unified_jwt(cls, payload: UnifiedJWTPayload) -> "UserContext":
+        """
+        Создание UserContext из унифицированного JWT payload (Sprint 20).
+
+        Автоматически определяет тип токена и извлекает соответствующие поля.
+
+        Args:
+            payload: UnifiedJWTPayload из декодированного JWT
+
+        Returns:
+            UserContext: Контекст для использования в приложении
+        """
+        # Определение token_type
+        token_type = payload.type
+        if token_type in ("access", "refresh"):
+            # Backward compatibility: старые токены без unified type
+            # Определяем тип по наличию client_id с префиксом "sa_"
+            if payload.client_id and payload.client_id.startswith("sa_"):
+                token_type = "service_account"
+            else:
+                token_type = "admin_user"
+
+        # Преобразование роли в enum
+        try:
+            role = UserRole(payload.role.lower())
+        except ValueError:
+            # Fallback на ADMIN для неизвестных ролей
+            logger.warning(f"Unknown role '{payload.role}', defaulting to ADMIN")
+            role = UserRole.ADMIN
+
+        return cls(
+            identifier=payload.sub,
+            display_name=payload.name,
+            role=role,
+            token_type=token_type,
+            client_id=payload.client_id,
+            rate_limit=payload.rate_limit,
+            iat=datetime.fromtimestamp(payload.iat, tz=timezone.utc),
+            exp=datetime.fromtimestamp(payload.exp, tz=timezone.utc),
+            nbf=datetime.fromtimestamp(payload.nbf, tz=timezone.utc)
+        )
 
     @property
     def user_id(self) -> str:
-        """User ID 4;O C4>1AB20"""
-        return self.sub
+        """User ID для удобства (alias for identifier)"""
+        return self.identifier
+
+    @property
+    def username(self) -> str:
+        """Username для backward compatibility (alias for display_name)"""
+        return self.display_name
 
     @property
     def is_admin(self) -> bool:
@@ -74,6 +172,11 @@ class UserContext(BaseModel):
     def is_operator(self) -> bool:
         """@>25@:0 ?@02 >?5@0B>@0"""
         return self.role in (UserRole.ADMIN, UserRole.OPERATOR, UserRole.SUPER_ADMIN)
+
+    @property
+    def is_service_account(self) -> bool:
+        """Проверка что это Service Account"""
+        return self.token_type == "service_account"
 
     def has_role(self, required_role: UserRole) -> bool:
         """
@@ -164,22 +267,20 @@ class JWTValidator:
             )
 
             # >=25@B0F8O timestamp ?>;59 2 datetime (timezone-aware)
-            if 'iat' in payload:
-                payload['iat'] = datetime.fromtimestamp(payload['iat'], tz=timezone.utc)
-            if 'exp' in payload:
-                payload['exp'] = datetime.fromtimestamp(payload['exp'], tz=timezone.utc)
-            if 'nbf' in payload:
-                payload['nbf'] = datetime.fromtimestamp(payload['nbf'], tz=timezone.utc)
+            # Валидация через UnifiedJWTPayload (строгая схема)
+            unified_payload = UnifiedJWTPayload(**payload)
 
-            # !>740=85 UserContext
-            user_context = UserContext(**payload)
+            # Создание UserContext через фабричный метод
+            user_context = UserContext.from_unified_jwt(unified_payload)
 
             logger.debug(
                 "Token validated successfully",
                 extra={
-                    "user_id": user_context.user_id,
-                    "username": user_context.username,
-                    "role": user_context.role.value
+                    "identifier": user_context.identifier,
+                    "display_name": user_context.display_name,
+                    "role": user_context.role.value,
+                    "token_type": user_context.token_type,
+                    "is_service_account": user_context.is_service_account
                 }
             )
 

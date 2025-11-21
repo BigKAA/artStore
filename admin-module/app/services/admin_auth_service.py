@@ -393,12 +393,15 @@ class AdminAuthService:
         Returns:
             Tuple[access_token, refresh_token]
         """
-        # Payload для JWT токенов
+        # UNIFIED JWT PAYLOAD - Sprint 20
+        # Добавлены поля name и client_id для унификации с Service Account токенами
         token_data = {
             "sub": admin_user.username,
             "type": "admin_user",  # Отличается от "service_account"
             "role": admin_user.role.value,
-            "jti": secrets.token_urlsafe(16)  # JWT ID для token revocation (будущее)
+            "name": admin_user.username,  # ✅ НОВОЕ: display name для логов и UI
+            "jti": secrets.token_urlsafe(16),  # JWT ID для token revocation (будущее)
+            "client_id": f"user_{admin_user.username}"  # ✅ НОВОЕ: унифицированный client_id
         }
 
         # Создание access token (30 минут)
