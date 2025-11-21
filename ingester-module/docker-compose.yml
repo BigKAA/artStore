@@ -21,14 +21,20 @@ services:
       - AUTH_PUBLIC_KEY_PATH=/app/keys/public_key.pem
       - AUTH_ALGORITHM=RS256
 
+      # Service Account Settings (OAuth 2.0 Client Credentials)
+      - SERVICE_ACCOUNT_CLIENT_ID=sa_prod_ingester_module_11cafd4f
+      - SERVICE_ACCOUNT_CLIENT_SECRET=:hC%=#>a9q,GwunR
+      - SERVICE_ACCOUNT_ADMIN_MODULE_URL=http://artstore_admin_module:8000
+      - SERVICE_ACCOUNT_TIMEOUT=10
+
       # Storage Element Settings
-      - STORAGE_ELEMENT_BASE_URL=http://storage-element:8010
+      - STORAGE_ELEMENT_BASE_URL=http://artstore_storage_element:8010
       - STORAGE_ELEMENT_TIMEOUT=30
       - STORAGE_ELEMENT_MAX_RETRIES=3
       - STORAGE_ELEMENT_CONNECTION_POOL_SIZE=100
 
       # Redis Settings (использует redis из корневого docker-compose.yml)
-      - REDIS_HOST=redis
+      - REDIS_HOST=artstore_redis
       - REDIS_PORT=6379
       - REDIS_DB=0
       - REDIS_MAX_CONNECTIONS=50
@@ -60,7 +66,6 @@ services:
 networks:
   artstore_network:
     external: true
-    name: artstore_artstore_network
 
 # Примечания:
 # - Redis, PostgreSQL, MinIO и другие инфраструктурные сервисы запускаются

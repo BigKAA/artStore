@@ -155,6 +155,11 @@ class UserContext(BaseModel):
         )
 
     @property
+    def sub(self) -> str:
+        """Subject для backward compatibility (alias for identifier)"""
+        return self.identifier
+
+    @property
     def user_id(self) -> str:
         """User ID для удобства (alias for identifier)"""
         return self.identifier
