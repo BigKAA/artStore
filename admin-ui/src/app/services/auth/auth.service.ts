@@ -4,8 +4,8 @@
  */
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, throwError, of, BehaviorSubject, timer } from 'rxjs';
-import { map, catchError, tap, switchMap, take } from 'rxjs/operators';
+import { Observable, throwError, of, BehaviorSubject, timer, Subscription } from 'rxjs';
+import { map, catchError, tap, switchMap, take, filter } from 'rxjs/operators';
 
 import {
   AuthConfig,
@@ -25,8 +25,14 @@ import {
  * - OAuth 2.0 Client Credentials authentication
  * - JWT token management (access + refresh)
  * - Token persistence в localStorage
- * - Automatic token refresh
+ * - **Proactive Silent Token Refresh** - автоматический refresh за 5 минут до истечения
  * - User info management
+ *
+ * Silent Refresh Implementation:
+ * - При login/refresh планируется автоматический refresh
+ * - Timer запускается за `refreshBeforeExpiry` секунд до истечения токена
+ * - При startup проверяется существующий токен и планируется refresh
+ * - Автоматическая подписка на refreshTokenNeeded$ выполняет refresh
  */
 @Injectable({
   providedIn: 'root',
@@ -39,6 +45,17 @@ export class AuthService {
 
   /** Subject для уведомления о необходимости refresh токена */
   private refreshTokenSubject$ = new BehaviorSubject<boolean>(false);
+
+  /** Subscription для автоматического refresh токена */
+  private refreshSubscription?: Subscription;
+
+  /** Флаг для предотвращения одновременных refresh запросов */
+  private isRefreshing = false;
+
+  constructor() {
+    // Инициализация silent refresh при запуске приложения
+    this.initializeSilentRefresh();
+  }
 
   /**
    * Выполнить login admin пользователя
@@ -352,5 +369,119 @@ export class AuthService {
    */
   get refreshTokenNeeded$(): Observable<boolean> {
     return this.refreshTokenSubject$.asObservable();
+  }
+
+  /**
+   * Инициализация проактивного silent refresh
+   *
+   * Вызывается при запуске приложения в конструкторе.
+   * - Проверяет существование токена в localStorage
+   * - Если токен валиден - планирует refresh
+   * - Подписывается на refreshTokenNeeded$ для автоматического refresh
+   */
+  private initializeSilentRefresh(): void {
+    console.log('[AuthService] Initializing silent refresh mechanism');
+
+    // Подписаться на события необходимости refresh
+    this.refreshSubscription = this.refreshTokenNeeded$
+      .pipe(
+        filter((needsRefresh) => needsRefresh === true),
+        switchMap(() => {
+          console.log('[AuthService] Proactive refresh triggered');
+          return this.performSilentRefresh();
+        })
+      )
+      .subscribe({
+        next: () => {
+          console.log('[AuthService] Proactive refresh completed successfully');
+          // Сбросить флаг
+          this.refreshTokenSubject$.next(false);
+        },
+        error: (error) => {
+          console.error('[AuthService] Proactive refresh failed:', error);
+          // Сбросить флаг
+          this.refreshTokenSubject$.next(false);
+        },
+      });
+
+    // Проверить существующий токен при startup
+    this.checkAndScheduleRefreshOnStartup();
+  }
+
+  /**
+   * Проверить токен при startup и запланировать refresh если нужно
+   *
+   * Вызывается при инициализации для поддержки refresh после перезагрузки страницы
+   */
+  private checkAndScheduleRefreshOnStartup(): void {
+    const token = this.getAccessToken();
+
+    if (!token) {
+      console.log('[AuthService] No token found on startup');
+      return;
+    }
+
+    try {
+      const payload = this.decodeToken(token);
+      const now = Math.floor(Date.now() / 1000);
+      const expiresIn = payload.exp - now;
+
+      console.log(
+        `[AuthService] Token found on startup, expires in ${expiresIn} seconds`
+      );
+
+      if (expiresIn > 0) {
+        // Токен еще валиден - запланировать refresh
+        this.scheduleTokenRefresh(expiresIn);
+      } else {
+        // Токен уже истек - попытаться refresh сразу
+        console.log('[AuthService] Token expired on startup, attempting refresh');
+        this.performSilentRefresh().subscribe({
+          error: () => {
+            // Если refresh не удался - очистить токены
+            this.clearTokens();
+          },
+        });
+      }
+    } catch (error) {
+      console.error('[AuthService] Failed to check token on startup:', error);
+      this.clearTokens();
+    }
+  }
+
+  /**
+   * Выполнить silent refresh токена
+   *
+   * Проверяет флаг isRefreshing для предотвращения одновременных запросов
+   *
+   * @returns Observable с результатом refresh
+   */
+  private performSilentRefresh(): Observable<TokenResponse> {
+    // Проверить, не выполняется ли уже refresh
+    if (this.isRefreshing) {
+      console.log('[AuthService] Refresh already in progress, skipping');
+      return of({} as TokenResponse);
+    }
+
+    this.isRefreshing = true;
+
+    return this.refreshToken().pipe(
+      tap(() => {
+        this.isRefreshing = false;
+      }),
+      catchError((error) => {
+        this.isRefreshing = false;
+        return throwError(() => error);
+      })
+    );
+  }
+
+  /**
+   * Cleanup при уничтожении сервиса
+   */
+  ngOnDestroy(): void {
+    if (this.refreshSubscription) {
+      this.refreshSubscription.unsubscribe();
+    }
   }
 }

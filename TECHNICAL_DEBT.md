@@ -701,3 +701,74 @@ All implementation follows Angular 20 best practices, standalone components, rea
 **Focus**:
 Sprint 15 focused on building NEW security capabilities rather than resolving existing technical debt.
 Sprint 16 Phase 1 addressed deferred security quick wins (CORS, passwords).
+
+## ✅ Resolved Issues
+
+### [RESOLVED] JWT Token Silent Refresh Implementation
+**Модуль**: admin-ui
+**Дата добавления**: 2025-11-21 (Sprint 20 testing)
+**Дата решения**: 2025-11-21
+**Оценка сложности**: средняя
+**Приоритет**: P1 (UX critical)
+
+**Описание проблемы**:
+JWT access токены истекают каждые 30 минут, что приводило к частым принудительным logout пользователей при работе с системой. Пользователи теряли контекст работы и должны были заново логиниться.
+
+**Реализованное решение**:
+Двухуровневый механизм Silent Token Refresh:
+
+1. **Проактивный подход (Primary)**:
+   - `AuthService.initializeSilentRefresh()` инициализируется при запуске приложения
+   - Проверяет существующий токен в localStorage при startup
+   - Планирует автоматический refresh за 5 минут до истечения токена
+   - Подписывается на `refreshTokenNeeded$` observable для выполнения refresh
+   - Использует RxJS timer для точного планирования
+
+2. **Реактивный подход (Fallback)**:
+   - `authInterceptor` проверяет истечение токена перед каждым HTTP запросом
+   - Если токен истекает в течение 5 минут - выполняет refresh перед отправкой запроса
+   - При получении 401 Unauthorized - пытается refresh и retry оригинального запроса
+   - Logout только при неудачном refresh (истек refresh token)
+
+**Технические детали**:
+- **Timer-based refresh**: RxJS `timer()` запускает refresh автоматически
+- **Concurrency protection**: Флаг `isRefreshing` предотвращает одновременные refresh запросы
+- **Startup recovery**: При перезагрузке страницы проверяет токен и планирует refresh
+- **Graceful degradation**: При ошибке refresh - показывает уведомление и выполняет logout
+
+**Измененные файлы**:
+- `admin-ui/src/app/services/auth/auth.service.ts` (lines 7, 47-58, 374-486)
+  - Добавлен constructor с вызовом `initializeSilentRefresh()`
+  - Метод `initializeSilentRefresh()` - подписка на `refreshTokenNeeded$`
+  - Метод `checkAndScheduleRefreshOnStartup()` - проверка токена при startup
+  - Метод `performSilentRefresh()` - выполнение refresh с защитой от concurrency
+  - Subscription management с cleanup в `ngOnDestroy()`
+
+- `admin-ui/src/app/services/auth/auth.interceptor.ts` (lines 22-285)
+  - Переработана структура: helper функции перед interceptor (hoisting)
+  - Проактивная проверка `isTokenExpiringSoon()` перед отправкой запроса
+  - Автоматический refresh и retry при близком истечении токена
+  - Централизованная обработка ошибок в `handleRequestError()`
+  - Реактивный fallback через `handle401Error()` при неожиданных 401
+
+- `admin-ui/src/app/services/auth/auth.config.ts` (line 64)
+  - `refreshBeforeExpiry: 300` (5 минут) - конфигурация времени проактивного refresh
+
+**Результаты**:
+- ✅ Токены автоматически обновляются за 5 минут до истечения
+- ✅ Пользователи работают без принудительных logout
+- ✅ Seamless user experience - refresh происходит прозрачно
+- ✅ При перезагрузке страницы механизм восстанавливается автоматически
+- ✅ Console логи показывают успешную инициализацию и планирование:
+  ```
+  [AuthService] Initializing silent refresh mechanism
+  [AuthService] Token found on startup, expires in 1757 seconds
+  ```
+
+**Тестирование**:
+- Проверено на реальном Admin UI с JWT токенами (30-минутное истечение)
+- Механизм startup recovery работает корректно при reload страницы
+- Токены сохраняются в localStorage между сессиями
+- Refresh планируется автоматически за 5 минут до истечения (1500 секунд)
+
+**Статус**: ✅ **RESOLVED** (2025-11-21)
