@@ -42,19 +42,16 @@ class SearchRequest(BaseModel):
     # A=>2=K5 ?>;O ?>8A:0
     query: Optional[str] = Field(
         None,
-        min_length=1,
         max_length=500,
         description=">8A:>2K9 70?@>A (filename, tags, description)",
     )
     filename: Optional[str] = Field(
         None,
-        min_length=1,
+        description="Имя файла для поиска",
         max_length=255,
-        description="<O D09;0 4;O ?>8A:0",
     )
     file_extension: Optional[str] = Field(
         None,
-        min_length=1,
         max_length=10,
         description=" 0AH8@5=85 D09;0 (.pdf, .jpg, 8 B.4.)",
     )

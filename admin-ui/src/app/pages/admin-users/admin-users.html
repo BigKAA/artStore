@@ -254,12 +254,45 @@
                 type="password"
                 class="form-control"
                 [(ngModel)]="createForm.password"
+                (ngModelChange)="onCreatePasswordChange()"
                 name="password"
                 required
-                [disabled]="loading">
-              <div class="form-text">
-                Min 8 characters, uppercase, lowercase, digit
-              </div>
+                [disabled]="loading"
+                [class.is-invalid]="createForm.password && !passwordValidation.isValid"
+                [class.is-valid]="createForm.password && passwordValidation.isValid">
+
+              <!-- Password Requirements Indicators -->
+              @if (createForm.password) {
+                <div class="mt-2 small">
+                  <div [class.text-success]="passwordValidation.hasMinLength" [class.text-danger]="!passwordValidation.hasMinLength">
+                    <i [class.bi-check-circle-fill]="passwordValidation.hasMinLength" [class.bi-x-circle-fill]="!passwordValidation.hasMinLength"></i>
+                    Минимум 8 символов
+                  </div>
+                  <div [class.text-success]="passwordValidation.hasUppercase" [class.text-danger]="!passwordValidation.hasUppercase">
+                    <i [class.bi-check-circle-fill]="passwordValidation.hasUppercase" [class.bi-x-circle-fill]="!passwordValidation.hasUppercase"></i>
+                    Минимум одна заглавная буква (A-Z)
+                  </div>
+                  <div [class.text-success]="passwordValidation.hasLowercase" [class.text-danger]="!passwordValidation.hasLowercase">
+                    <i [class.bi-check-circle-fill]="passwordValidation.hasLowercase" [class.bi-x-circle-fill]="!passwordValidation.hasLowercase"></i>
+                    Минимум одна строчная буква (a-z)
+                  </div>
+                  <div [class.text-success]="passwordValidation.hasDigit" [class.text-danger]="!passwordValidation.hasDigit">
+                    <i [class.bi-check-circle-fill]="passwordValidation.hasDigit" [class.bi-x-circle-fill]="!passwordValidation.hasDigit"></i>
+                    Минимум одна цифра (0-9)
+                  </div>
+                </div>
+              } @else {
+                <div class="form-text">
+                  <small class="text-muted">Требования к паролю: минимум 8 символов, заглавная буква, строчная буква, цифра</small>
+                </div>
+              }
+
+              <!-- Error message if password is invalid -->
+              @if (createForm.password && !passwordValidation.isValid) {
+                <div class="invalid-feedback d-block">
+                  Пароль не соответствует требованиям безопасности
+                </div>
+              }
             </div>
             <div class="mb-3">
               <label class="form-label">Role <span class="text-danger">*</span></label>
@@ -439,12 +472,45 @@
                 type="password"
                 class="form-control"
                 [(ngModel)]="passwordForm.newPassword"
+                (ngModelChange)="onResetPasswordChange()"
                 name="newPassword"
                 required
-                [disabled]="loading">
-              <div class="form-text">
-                Min 8 characters, uppercase, lowercase, digit
-              </div>
+                [disabled]="loading"
+                [class.is-invalid]="passwordForm.newPassword && !passwordValidation.isValid"
+                [class.is-valid]="passwordForm.newPassword && passwordValidation.isValid">
+
+              <!-- Password Requirements Indicators -->
+              @if (passwordForm.newPassword) {
+                <div class="mt-2 small">
+                  <div [class.text-success]="passwordValidation.hasMinLength" [class.text-danger]="!passwordValidation.hasMinLength">
+                    <i [class.bi-check-circle-fill]="passwordValidation.hasMinLength" [class.bi-x-circle-fill]="!passwordValidation.hasMinLength"></i>
+                    Минимум 8 символов
+                  </div>
+                  <div [class.text-success]="passwordValidation.hasUppercase" [class.text-danger]="!passwordValidation.hasUppercase">
+                    <i [class.bi-check-circle-fill]="passwordValidation.hasUppercase" [class.bi-x-circle-fill]="!passwordValidation.hasUppercase"></i>
+                    Минимум одна заглавная буква (A-Z)
+                  </div>
+                  <div [class.text-success]="passwordValidation.hasLowercase" [class.text-danger]="!passwordValidation.hasLowercase">
+                    <i [class.bi-check-circle-fill]="passwordValidation.hasLowercase" [class.bi-x-circle-fill]="!passwordValidation.hasLowercase"></i>
+                    Минимум одна строчная буква (a-z)
+                  </div>
+                  <div [class.text-success]="passwordValidation.hasDigit" [class.text-danger]="!passwordValidation.hasDigit">
+                    <i [class.bi-check-circle-fill]="passwordValidation.hasDigit" [class.bi-x-circle-fill]="!passwordValidation.hasDigit"></i>
+                    Минимум одна цифра (0-9)
+                  </div>
+                </div>
+              } @else {
+                <div class="form-text">
+                  <small class="text-muted">Требования к паролю: минимум 8 символов, заглавная буква, строчная буква, цифра</small>
+                </div>
+              }
+
+              <!-- Error message if password is invalid -->
+              @if (passwordForm.newPassword && !passwordValidation.isValid) {
+                <div class="invalid-feedback d-block">
+                  Пароль не соответствует требованиям безопасности
+                </div>
+              }
             </div>
           </div>
           <div class="modal-footer">

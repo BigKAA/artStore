@@ -28,15 +28,21 @@ logger = logging.getLogger(__name__)
 
 class UserRole(str, Enum):
     """ >;8 ?>;L7>20B5;59 2 A8AB5<5"""
-    ADMIN = "ADMIN"
-    OPERATOR = "OPERATOR"
-    USER = "USER"
+    # Service Account roles
+    ADMIN = "admin"
+    OPERATOR = "operator"
+    USER = "user"
+    # Admin User roles (for Admin UI)
+    SUPER_ADMIN = "super_admin"
+    READONLY = "readonly"
 
 
 class TokenType(str, Enum):
     """"8?K JWT B>:5=>2"""
     ACCESS = "access"
     REFRESH = "refresh"
+    # Admin User token type (for Admin UI)
+    ADMIN_USER = "admin_user"
 
 
 class UserContext(BaseModel):
@@ -46,7 +52,7 @@ class UserContext(BaseModel):
     !>45@68B 2AN 8=D>@<0F8N > ?>;L7>20B5;5 87 B>:5=0.
     """
     sub: str = Field(..., description="User ID (subject)")
-    username: str = Field(..., description="Username")
+    username: Optional[str] = Field(None, description="Username")
     email: Optional[str] = Field(None, description="Email address")
     role: UserRole = Field(..., description="User role")
     type: TokenType = Field(..., description="Token type")
@@ -62,12 +68,12 @@ class UserContext(BaseModel):
     @property
     def is_admin(self) -> bool:
         """@>25@:0 04<8=8AB@0B82=KE ?@02"""
-        return self.role == UserRole.ADMIN
+        return self.role in (UserRole.ADMIN, UserRole.SUPER_ADMIN)
 
     @property
     def is_operator(self) -> bool:
         """@>25@:0 ?@02 >?5@0B>@0"""
-        return self.role in (UserRole.ADMIN, UserRole.OPERATOR)
+        return self.role in (UserRole.ADMIN, UserRole.OPERATOR, UserRole.SUPER_ADMIN)
 
     def has_role(self, required_role: UserRole) -> bool:
         """
@@ -80,11 +86,13 @@ class UserContext(BaseModel):
             bool: True 5A;8 @>;L A>>B25BAB2C5B 8;8 2KH5
         """
         role_hierarchy = {
-            UserRole.ADMIN: 3,
-            UserRole.OPERATOR: 2,
-            UserRole.USER: 1
+            UserRole.SUPER_ADMIN: 5,  # Highest level (Admin UI super admin)
+            UserRole.ADMIN: 4,         # Full access (both Admin UI and Service Accounts)
+            UserRole.OPERATOR: 3,      # Service Account operator
+            UserRole.READONLY: 2,      # Admin UI read-only
+            UserRole.USER: 1          # Service Account basic user
         }
-        return role_hierarchy[self.role] >= role_hierarchy[required_role]
+        return role_hierarchy.get(self.role, 0) >= role_hierarchy.get(required_role, 0)
 
 
 class JWTValidator:

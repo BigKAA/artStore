@@ -88,7 +88,7 @@ async def upload_file(
     logger.info(
         "Upload request received",
         extra={
-            "filename": file.filename,
+            "file_name": file.filename,
             "user_id": user.user_id,
             "username": user.username,
             "storage_mode": storage_mode

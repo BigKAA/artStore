@@ -160,19 +160,24 @@ class AdminUserService:
             )
 
             # Audit log
-            with get_sync_session() as sync_session:
-                audit = AuditService(sync_session)
-                audit.log_sensitive_operation(
-                    admin_user_id=created_by.id,
-                    action="admin_user_created",
+            sync_session = next(get_sync_session())
+            try:
+                AuditService.log_security_event(
+                    session=sync_session,
+                    event_type="admin_user_created",
+                    severity="info",
+                    success=True,
                     resource_type="admin_user",
                     resource_id=str(new_admin.id),
-                    details={
+                    data={
                         "username": new_admin.username,
                         "role": new_admin.role.value,
-                        "created_by": created_by.username
+                        "created_by": created_by.username,
+                        "created_by_id": str(created_by.id)
                     }
                 )
+            finally:
+                sync_session.close()
 
             return AdminUserResponse.model_validate(new_admin)
 
@@ -368,19 +373,24 @@ class AdminUserService:
             )
 
             # Audit log
-            with get_sync_session() as sync_session:
-                audit = AuditService(sync_session)
-                audit.log_sensitive_operation(
-                    admin_user_id=updated_by.id,
-                    action="admin_user_updated",
+            sync_session = next(get_sync_session())
+            try:
+                AuditService.log_security_event(
+                    session=sync_session,
+                    event_type="admin_user_updated",
+                    severity="info",
+                    success=True,
                     resource_type="admin_user",
                     resource_id=str(admin_user.id),
-                    details={
+                    data={
                         "username": admin_user.username,
                         "updated_by": updated_by.username,
+                        "updated_by_id": str(updated_by.id),
                         "changes": update_details
                     }
                 )
+            finally:
+                sync_session.close()
 
             return AdminUserResponse.model_validate(admin_user)
 
@@ -455,18 +465,23 @@ class AdminUserService:
         )
 
         # Audit log
-        with get_sync_session() as sync_session:
-            audit = AuditService(sync_session)
-            audit.log_sensitive_operation(
-                admin_user_id=deleted_by.id,
-                action="admin_user_deleted",
+        sync_session = next(get_sync_session())
+        try:
+            AuditService.log_security_event(
+                session=sync_session,
+                event_type="admin_user_deleted",
+                severity="warning",
+                success=True,
                 resource_type="admin_user",
                 resource_id=str(admin_id),
-                details={
+                data={
                     "username": username,
-                    "deleted_by": deleted_by.username
+                    "deleted_by": deleted_by.username,
+                    "deleted_by_id": str(deleted_by.id)
                 }
             )
+        finally:
+            sync_session.close()
 
         return AdminUserDeleteResponse(
             success=True,
@@ -555,18 +570,23 @@ class AdminUserService:
         )
 
         # Audit log
-        with get_sync_session() as sync_session:
-            audit = AuditService(sync_session)
-            audit.log_sensitive_operation(
-                admin_user_id=reset_by.id,
-                action="admin_password_reset",
+        sync_session = next(get_sync_session())
+        try:
+            AuditService.log_security_event(
+                session=sync_session,
+                event_type="admin_password_reset",
+                severity="warning",
+                success=True,
                 resource_type="admin_user",
                 resource_id=str(admin_user.id),
-                details={
+                data={
                     "username": admin_user.username,
-                    "reset_by": reset_by.username
+                    "reset_by": reset_by.username,
+                    "reset_by_id": str(reset_by.id)
                 }
             )
+        finally:
+            sync_session.close()
 
         return AdminUserPasswordResetResponse(
             success=True,

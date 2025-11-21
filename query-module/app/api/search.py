@@ -59,12 +59,12 @@ async def search_files(
         HTTPException 500: Ошибка сервера
     """
     try:
-        # Проверка наличия хотя бы одного критерия поиска
-        if not search_request.has_search_criteria():
-            raise InvalidSearchQueryException(
-                "At least one search criteria required",
-                details={"request": search_request.dict()}
-            )
+        # NOTE: Removed criteria check to allow listing all files in File Manager
+        # if not search_request.has_search_criteria():
+        #     raise InvalidSearchQueryException(
+        #         "At least one search criteria required",
+        #         details={"request": search_request.dict()}
+        #     )
 
         # Инициализация SearchService
         search_service = SearchService(db)

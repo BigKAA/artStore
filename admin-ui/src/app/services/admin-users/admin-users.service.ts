@@ -125,7 +125,7 @@ export class AdminUsersService {
       params = params.set('search', search);
     }
 
-    return this.http.get<AdminUserListResponse>(this.apiUrl, { params });
+    return this.http.get<AdminUserListResponse>(`${this.apiUrl}/`, { params });
   }
 
   /**
@@ -139,7 +139,7 @@ export class AdminUsersService {
    * Создать нового администратора
    */
   createAdminUser(request: AdminUserCreateRequest): Observable<AdminUser> {
-    return this.http.post<AdminUser>(this.apiUrl, request);
+    return this.http.post<AdminUser>(`${this.apiUrl}/`, request);
   }
 
   /**

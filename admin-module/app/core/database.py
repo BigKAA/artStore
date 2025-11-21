@@ -87,22 +87,25 @@ def get_sync_session() -> Generator[Session, None, None]:
         Session: SQLAlchemy sync session
 
     Example:
-        session = next(get_sync_session())
+        sync_session = next(get_sync_session())
         try:
             # Работа с сессией
-            user = session.query(User).first()
-            session.commit()
+            user = sync_session.query(User).first()
+            sync_session.commit()
+        except Exception:
+            sync_session.rollback()
+            raise
         finally:
-            session.close()
+            sync_session.close()
     """
     session = SyncSessionLocal()
     try:
         yield session
-        session.commit()
     except Exception:
         session.rollback()
         raise
     finally:
+        session.commit()
         session.close()
 
 

@@ -59,6 +59,15 @@ export class AdminUsersComponent implements OnInit {
     newPassword: ''
   };
 
+  // Password validation state
+  passwordValidation = {
+    hasMinLength: false,
+    hasUppercase: false,
+    hasLowercase: false,
+    hasDigit: false,
+    isValid: false
+  };
+
   // Enums for template
   readonly AdminRole = AdminRole;
   readonly Math = Math;
@@ -139,6 +148,14 @@ export class AdminUsersComponent implements OnInit {
       role: AdminRole.ADMIN,
       enabled: true
     };
+    // Reset password validation
+    this.passwordValidation = {
+      hasMinLength: false,
+      hasUppercase: false,
+      hasLowercase: false,
+      hasDigit: false,
+      isValid: false
+    };
     this.showCreateModal = true;
   }
 
@@ -155,7 +172,15 @@ export class AdminUsersComponent implements OnInit {
         this.loadAdminUsers();
       },
       error: (err) => {
-        this.error = 'Ошибка создания администратора: ' + (err.error?.detail || err.message);
+        // Handle Pydantic validation errors (422)
+        if (err.status === 422 && Array.isArray(err.error?.detail)) {
+          const validationErrors = err.error.detail.map((e: any) => e.msg).join('; ');
+          this.error = 'Ошибка валидации: ' + validationErrors;
+        } else if (typeof err.error?.detail === 'string') {
+          this.error = 'Ошибка создания администратора: ' + err.error.detail;
+        } else {
+          this.error = 'Ошибка создания администратора: ' + (err.message || 'Неизвестная ошибка');
+        }
         this.loading = false;
       }
     });
@@ -234,6 +259,14 @@ export class AdminUsersComponent implements OnInit {
     this.passwordForm = {
       newPassword: ''
     };
+    // Reset password validation
+    this.passwordValidation = {
+      hasMinLength: false,
+      hasUppercase: false,
+      hasLowercase: false,
+      hasDigit: false,
+      isValid: false
+    };
     this.showPasswordModal = true;
   }
 
@@ -269,6 +302,35 @@ export class AdminUsersComponent implements OnInit {
     this.showDeleteModal = false;
     this.showPasswordModal = false;
     this.selectedUser = null;
+  }
+
+  /**
+   * Валидация пароля в реальном времени
+   */
+  validatePassword(password: string): void {
+    this.passwordValidation.hasMinLength = password.length >= 8;
+    this.passwordValidation.hasUppercase = /[A-Z]/.test(password);
+    this.passwordValidation.hasLowercase = /[a-z]/.test(password);
+    this.passwordValidation.hasDigit = /\d/.test(password);
+    this.passwordValidation.isValid =
+      this.passwordValidation.hasMinLength &&
+      this.passwordValidation.hasUppercase &&
+      this.passwordValidation.hasLowercase &&
+      this.passwordValidation.hasDigit;
+  }
+
+  /**
+   * Обработчик изменения пароля в форме создания
+   */
+  onCreatePasswordChange(): void {
+    this.validatePassword(this.createForm.password);
+  }
+
+  /**
+   * Обработчик изменения пароля в форме сброса
+   */
+  onResetPasswordChange(): void {
+    this.validatePassword(this.passwordForm.newPassword);
   }
 
   /**

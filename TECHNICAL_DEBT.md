@@ -520,9 +520,85 @@ datetime.now(timezone.utc)
 
 ---
 
-**Последнее обновление**: 2025-11-16 (Sprint 16 Phase 5 Complete)
+**Последнее обновление**: 2025-11-19 (Sprint 19 Phase 2 Complete)
 **Общее количество долгов**: 12 (4 CRITICAL, 4 HIGH, 1 MEDIUM, 2 LOW, 1 CANCELLED)
-**Следующий ревью**: Sprint 17 planning
+**Следующий ревью**: Sprint 20 planning
+
+## Sprint 17-19 Update Summary (2025-11-17 to 2025-11-19)
+
+**Achievements - Admin UI Development Complete (Phase 1-3)**:
+
+### Sprint 17: Admin UI Phase 1 ✅
+- ✅ **Admin User Management CRUD UI**
+  - List view с фильтрацией, сортировкой, pagination
+  - Create, Edit, Delete modals с comprehensive validation
+  - Role badges, status indicators, responsive design
+  - Files: admin-ui/src/app/pages/admin-users/* (800+ lines)
+
+- ✅ **JWT Refresh Functionality**
+  - HTTP interceptor для автоматического refresh
+  - Token expiry detection с 5-minute buffer
+  - Queue management для concurrent requests
+  - File: admin-ui/src/app/interceptors/jwt-refresh.interceptor.ts (180 lines)
+
+- ✅ **Logout Functionality**
+  - Header component integration
+  - Token cleanup, state reset, navigation
+  - Auth guard protection
+
+**Lines Added**: ~1,100 lines (components + services + interceptors)
+
+### Sprint 18: Admin UI Phase 2 ✅
+- ✅ **Service Accounts Management UI**
+  - List view, Create/Edit/Delete modals
+  - Client credentials copy-to-clipboard
+  - Secret rotation functionality
+  - Files: admin-ui/src/app/pages/service-accounts/* (870 lines)
+
+- ✅ **Storage Elements List View**
+  - Comprehensive таблица с статистикой
+  - Capacity indicators, mode badges
+  - Filtering/Sorting client-side logic
+  - Files: admin-ui/src/app/pages/storage-elements/* (590 lines)
+
+**Lines Added**: ~1,460 lines (2 новых feature modules)
+
+### Sprint 19: Admin UI Phase 3 (Partial) ✅
+- ✅ **Storage Elements CRUD Backend API**
+  - POST /api/v1/admin/storage-elements (Create)
+  - PUT /api/v1/admin/storage-elements/{id} (Update)
+  - DELETE /api/v1/admin/storage-elements/{id} (Delete)
+  - Safety checks: file_count > 0, mode=EDIT
+  - Files: admin-module/app/api/v1/routers/storage_elements.py (450 lines)
+
+- ✅ **Storage Elements CRUD Frontend UI**
+  - Create modal (11 полей с validation)
+  - Edit modal (immutable fields read-only)
+  - Delete modal (safety checks с warnings)
+  - Playwright automated testing
+  - Files: admin-ui/src/app/pages/storage-elements/* (650 lines)
+
+**Lines Added**: ~1,100 lines (backend + frontend + tests)
+
+**Total Sprint 17-19**: ~3,660 lines added across 3 sprints
+
+**Impact on Technical Debt**:
+- No existing debt items resolved in Sprint 17-19 (focus was on NEW Admin UI features)
+- CRITICAL and HIGH priority items remain from Sprint 6-7 (Storage Element integration test blockers)
+- Admin UI technical debt: None identified (new codebase, clean implementation)
+- Testing coverage: Playwright E2E tests added for CRUD workflows
+
+**Focus**:
+Sprint 17-19 focused on building NEW Admin UI capabilities rather than resolving existing technical debt.
+All implementation follows Angular 20 best practices, standalone components, reactive patterns.
+
+**Next Steps (Sprint 20+)**:
+- File Manager UI (upload/download/search)
+- Real-time Metrics Dashboard
+- Performance optimizations
+- Address Storage Element integration test blockers (Sprint 6-7 legacy)
+
+---
 
 ## Sprint 16 Phase 1-5 Update Summary (2025-11-16)
 
