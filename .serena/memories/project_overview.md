@@ -1,78 +1,84 @@
-# ArtStore - Обзор проекта
+# ArtStore - Project Overview
 
 ## Назначение
 
-ArtStore - это распределенная система файлового хранилища с микросервисной архитектурой, предназначенная для долгосрочного хранения документов с различными сроками хранения. Система реализует принципы отказоустойчивости, горизонтального масштабирования и обеспечивает разделение оперативного и архивного хранения.
+ArtStore - распределенная система файлового хранилища с микросервисной архитектурой для долгосрочного хранения документов с различными сроками хранения.
 
 ## Статус проекта
 
-Проект находится на начальной стадии разработки:
-- ✅ Базовая инфраструктура развернута через docker-compose.yml
-- 🔄 Модули приложений в процессе разработки
+Проект находится в активной разработке с полной инфраструктурой и базовыми модулями.
 
-## Основные компоненты
+## Документация
 
-### Управляющий контур
-- **Load Balancer Cluster**: HAProxy/Nginx с keepalived
-- **Admin Module Cluster**: Raft consensus с 3+ узлами (порты 8000-8009)
-- **Admin UI**: Angular-интерфейс (порт 4200)
-- **Ingester Cluster**: Загрузка и управление файлами (порты 8020-8029)
-- **Query Cluster**: Поиск и получение файлов (порты 8030-8039)
+**Главная документация**:
+- `README-PROJECT.md` - Полное описание проекта для новой команды
+- `DEVELOPMENT-GUIDE.md` - Руководство по разработке и тестированию
+- `README.md` - Детальная техническая документация
+- `CLAUDE.md` - Инструкции для AI-ассистента
 
-### Элемент хранения
-- **Storage Element Clusters**: Физическое хранение файлов (порты 8010-8019)
-- **PostgreSQL**: Кеш метаданных
-- **Local FS / S3**: Физическое хранилище файлов
-
-## Базовая инфраструктура (Docker Compose)
-
-- PostgreSQL 15 (localhost:5432, artstore/password)
-- PgAdmin (localhost:5050, admin@admin.com/password)
-- Redis 7 (localhost:6379)
-- MinIO (localhost:9000/9001, minioadmin/minioadmin)
-- LDAP 389ds (localhost:1389, cn=Directory Manager/password, dc=artstore,dc=local)
-- Dex OIDC (localhost:5556/5557/5558)
+**Модульная документация**:
+- `admin-module/README-PROJECT.md` - OAuth 2.0, Saga orchestration
+- `storage-element/README-PROJECT.md` - Attribute-first storage, WAL
+- `ingester-module/README-PROJECT.md` - Streaming uploads, Circuit Breaker
+- `query-module/README-PROJECT.md` - Full-text search, Caching
+- `admin-ui/README-PROJECT.md` - Angular UI
 
 ## Ключевые архитектурные концепции
 
-### Attribute-First Storage Model
-Файлы атрибутов (`*.attr.json`) - единственный источник истины для метаданных файлов. Критично для backup элементов хранения как набора простых файлов.
+**Attribute-First Storage**: `*.attr.json` как единственный источник истины для метаданных
 
-### JWT-based Authentication (RS256)
-Центральная аутентификация через Admin Module с распределенной валидацией токенов через публичный ключ.
+**JWT Authentication (RS256)**: Центральная аутентификация через Admin Module
 
-### Service Discovery
-Координация через Redis Cluster - Admin Module публикует конфигурацию storage-element, а Ingester/Query подписываются на обновления.
+**Service Discovery**: Redis Pub/Sub для координации Storage Elements
 
-### High Availability
-- Load Balancer Cluster с keepalived
-- Admin Module Cluster с Raft consensus (RTO < 15 сек)
-- Redis Cluster 6+ узлов (RTO < 30 сек)
-- Storage Element Clusters с master election
-- Circuit Breaker Patterns
+**High Availability**: Полное устранение SPOF через кластеризацию всех компонентов
 
-### Data Consistency
-- Saga Pattern для долгосрочных операций
-- Two-Phase Commit для критических операций
-- Write-Ahead Log для атомарности
-- Automatic Reconciliation при расхождениях
+**Data Consistency**: Saga Pattern + Two-Phase Commit + WAL
 
-### Performance Optimization
-- Multi-Level Caching (CDN → Redis → Local → DB)
-- PostgreSQL Full-Text Search с GIN индексами
-- Streaming & Compression (Brotli/GZIP)
-- Connection Pooling (HTTP/2)
-- Async Processing через Kafka
+**Performance**: Multi-level caching, PostgreSQL Full-Text Search, Streaming
 
-### Security
-- TLS 1.3 transit encryption
-- Automated JWT Key Rotation (каждые 24 часа)
-- LDAP/AD Integration с mapping групп на роли
-- Fine-grained RBAC
-- Comprehensive Audit Logging
+**Security**: TLS 1.3, Automated key rotation, Fine-grained RBAC
 
-### Monitoring & Observability
-- OpenTelemetry Distributed Tracing
-- Custom Business Metrics
-- Third-party Analytics Integration
-- Prometheus metrics endpoint
+**Monitoring**: OpenTelemetry tracing, Prometheus metrics, Grafana dashboards
+
+## Docker Infrastructure
+
+**КРИТИЧЕСКИ ВАЖНО**: Использовать ТОЛЬКО `docker-compose.yml` из корня проекта!
+
+**Запуск**:
+```bash
+cd /home/artur/Projects/artStore
+docker-compose up -d  # Вся система
+docker-compose -f docker-compose.monitoring.yml up -d  # Мониторинг
+```
+
+**Services**:
+- Infrastructure: PostgreSQL, Redis, MinIO, PgAdmin
+- Backend: admin-module (8000), storage-element (8010), ingester-module (8020), query-module (8030)
+- Monitoring: Prometheus (9090), Grafana (3000), AlertManager (9093)
+
+## Python Virtual Environment
+
+**ЕДИНЫЙ venv для всех модулей**: `/home/artur/Projects/artStore/.venv`
+
+```bash
+source /home/artur/Projects/artStore/.venv/bin/activate
+pip install -r admin-module/requirements.txt
+pip install -r storage-element/requirements.txt
+pip install -r ingester-module/requirements.txt
+pip install -r query-module/requirements.txt
+```
+
+## Testing
+
+**Unit tests**: `pytest <module>/tests/unit/ -v`
+**Integration tests**: `pytest <module>/tests/integration/ -v`
+**Docker-based**: `docker-compose run --rm <module> pytest tests/ -v`
+
+## Credentials
+
+**PostgreSQL**: artstore / password
+**Redis**: localhost:6379 (no auth)
+**MinIO**: minioadmin / minioadmin
+**PgAdmin**: admin@admin.com / password
+**Grafana**: admin / admin123

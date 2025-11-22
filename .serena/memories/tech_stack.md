@@ -1,76 +1,44 @@
-# ArtStore - Технологический стек
+# ArtStore - Technology Stack
 
-## Языки программирования
+## Backend
+- **Python 3.12+** с async/await, uvloop
+- **FastAPI** для REST API
+- **Uvicorn** ASGI server
+- **Pydantic** для валидации
+- **aiohttp** для HTTP клиента
 
-### Backend
-- **Python >=3.12** с uvloop для максимальной производительности
-- FastAPI с async/await для конкурентной обработки
-- SQLAlchemy (async mode) с connection pooling
+## Database & Caching
+- **PostgreSQL 15+** (asyncpg) - метаданные, full-text search
+- **Redis 7** (sync redis-py) - Service Discovery, caching
+- **Alembic** - database migrations
 
-### Frontend
-- **Angular** для Admin UI
+## Storage
+- **Local Filesystem** или **S3/MinIO**
+- **Write-Ahead Log** для атомарности
 
-## База данных
+## Security
+- **JWT RS256** токены
+- **OAuth 2.0 Client Credentials**
+- **TLS 1.3** transit encryption
+- **Bcrypt** password hashing
 
-- **PostgreSQL >=15** с query optimization
-- Asyncpg для асинхронных операций
-- Alembic для миграций
-- GIN индексы для full-text search
+## Monitoring
+- **OpenTelemetry** distributed tracing
+- **Prometheus** metrics collection
+- **Grafana** visualization
+- **JSON logging** для ELK/Splunk
 
-## Кеширование и очереди
+## Frontend
+- **Angular 17+** для Admin UI
+- **TypeScript**
+- **Angular Material**
 
-- **Redis 7** (через aioredis)
-  - Service Discovery
-  - Distributed Caching
-  - Master Election через Redis Sentinel
-- **Apache Kafka** для асинхронной обработки
+## Infrastructure
+- **Docker** multi-stage builds
+- **Docker Compose** orchestration
+- **Nginx** для Admin UI serving
 
-## Хранилище файлов
-
-- **Local Filesystem** или **S3** (MinIO)
-- Структура директорий: `/year/month/day/hour/`
-
-## Аутентификация и безопасность
-
-- **JWT tokens (RS256)** для аутентификации
-- **LDAP 389ds** (через ldap3) для корпоративной аутентификации
-- **Dex OIDC** как провайдер OAuth2
-- **TLS 1.3** для межсервисных соединений
-
-## Поиск и индексирование
-
-- **PostgreSQL Full-Text Search** с GIN индексами
-- **ElasticSearch 8.x** (опционально) для продвинутого поиска
-- **Apache Kafka** для асинхронной индексации
-- **Apache Tika** для full-text поиска внутри документов
-
-## Инфраструктура
-
-- **Docker** с multi-stage builds
-- **HAProxy/Nginx** load balancer cluster
-- **Keepalived** для HA балансировщиков
-- **Redis Sentinel** для HA Redis
-
-## Мониторинг и наблюдаемость
-
-- **OpenTelemetry** для distributed tracing
-- **Prometheus** для метрик
-- **Grafana** для визуализации
-- Structured logging (JSON format)
-- ELK Stack / Splunk интеграция
-
-## Оптимизация производительности
-
-- **uvloop** для event loop
-- **Brotli/GZIP** compression
-- **HTTP/2** persistent connections
-- **CDN Integration** (CloudFlare/AWS CloudFront)
-- Connection pooling для всех сервисов
-- Async I/O для файловых операций
-
-## Разработка и тестирование
-
-- **pytest** для unit и integration тестов
-- **Docker Compose** для локальной разработки
-- **Alembic** для миграций БД
-- **uvicorn** для запуска FastAPI приложений
+## Development
+- **pytest** для тестирования
+- **black, isort, mypy, flake8** для quality
+- **Git** с conventional commits
