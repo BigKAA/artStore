@@ -20,6 +20,7 @@ from app.core.exceptions import (
     StorageElementUnavailableException,
     FileSizeLimitExceededException
 )
+from app.core.tls_utils import create_ssl_context
 from app.schemas.upload import (
     UploadRequest,
     UploadResponse,
@@ -73,55 +74,11 @@ class UploadService:
                 "http2": True,  # HTTP/2 для лучшей производительности
             }
 
-            # Добавление mTLS configuration если TLS enabled
-            if settings.tls.enabled:
-                import ssl
-
-                # Создание SSL context для mTLS
-                ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-
-                # CA certificate для валидации server certificate
-                if settings.tls.ca_cert_file:
-                    ssl_context.load_verify_locations(cafile=settings.tls.ca_cert_file)
-                    logger.info(
-                        "Loaded CA certificate for server validation",
-                        extra={"ca_cert": settings.tls.ca_cert_file}
-                    )
-
-                # Client certificate для mTLS authentication
-                if settings.tls.cert_file and settings.tls.key_file:
-                    ssl_context.load_cert_chain(
-                        certfile=settings.tls.cert_file,
-                        keyfile=settings.tls.key_file
-                    )
-                    logger.info(
-                        "Loaded client certificate for mTLS",
-                        extra={
-                            "cert_file": settings.tls.cert_file,
-                            "key_file": settings.tls.key_file
-                        }
-                    )
-
-                # TLS 1.3 minimum protocol version
-                if settings.tls.protocol_version == "TLSv1.3":
-                    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_3
-                elif settings.tls.protocol_version == "TLSv1.2":
-                    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-
-                # TLS 1.3 AEAD cipher suites
-                if settings.tls.ciphers:
-                    ssl_context.set_ciphers(settings.tls.ciphers)
-
-                # Добавление SSL context к клиенту
+            # Apply mTLS configuration если TLS enabled (Sprint 21: refactored to tls_utils)
+            ssl_context = create_ssl_context()
+            if ssl_context:
                 client_config["verify"] = ssl_context
-
-                logger.info(
-                    "mTLS enabled for Storage Element communication",
-                    extra={
-                        "protocol": settings.tls.protocol_version,
-                        "ciphers": settings.tls.ciphers
-                    }
-                )
+                logger.info("mTLS enabled for Storage Element communication")
 
             self._client = httpx.AsyncClient(**client_config)
 
