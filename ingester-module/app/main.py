@@ -15,11 +15,23 @@ from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
 from app.core.observability import setup_observability
 from app.api.v1.router import api_router
-from app.services.upload_service import upload_service
+from app.services.auth_service import AuthService
+from app.services.upload_service import UploadService
 
 # Инициализация логирования
 setup_logging()
 logger = get_logger(__name__)
+
+# Инициализация OAuth 2.0 Client Credentials authentication
+auth_service = AuthService(
+    admin_module_url=settings.service_account.admin_module_url,
+    client_id=settings.service_account.client_id,
+    client_secret=settings.service_account.client_secret,
+    timeout=settings.service_account.timeout
+)
+
+# Инициализация Upload Service с аутентификацией
+upload_service = UploadService(auth_service=auth_service)
 
 
 @asynccontextmanager
@@ -55,6 +67,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Ingester Module")
     await upload_service.close()
+    await auth_service.close()
     logger.info("HTTP connections closed")
 
 

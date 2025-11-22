@@ -238,6 +238,45 @@ class CORSSettings(BaseSettings):
         return v
 
 
+class ServiceAccountSettings(BaseSettings):
+    """
+    OAuth 2.0 Service Account configuration для machine-to-machine аутентификации.
+
+    Service Account используется для получения JWT токенов от Admin Module,
+    которые затем используются для аутентификации запросов в Storage Element.
+
+    Configuration (ОБЯЗАТЕЛЬНЫЕ параметры):
+        SERVICE_ACCOUNT_CLIENT_ID=sa_prod_ingester_module_11cafd4f
+        SERVICE_ACCOUNT_CLIENT_SECRET=:hC%=#>a9q,GwunR
+        SERVICE_ACCOUNT_ADMIN_MODULE_URL=http://artstore_admin_module:8000
+
+    Security:
+    - client_secret должен храниться в защищенной конфигурации (secrets management)
+    - НЕ коммитить client_secret в git
+    - Использовать environment variables или Docker secrets
+    - В production использовать secret rotation каждые 90 дней
+    """
+    model_config = SettingsConfigDict(
+        env_prefix="SERVICE_ACCOUNT_",
+        case_sensitive=False
+    )
+
+    client_id: str = Field(
+        description="Service Account Client ID от Admin Module"
+    )
+    client_secret: str = Field(
+        description="Service Account Client Secret от Admin Module"
+    )
+    admin_module_url: str = Field(
+        default="http://artstore_admin_module:8000",
+        description="URL Admin Module для OAuth 2.0 token requests"
+    )
+    timeout: int = Field(
+        default=10,
+        description="HTTP request timeout в секундах"
+    )
+
+
 class TLSSettings(BaseSettings):
     """
     TLS 1.3 + mTLS configuration (Sprint 16 Phase 4).
@@ -275,6 +314,7 @@ class Settings(BaseSettings):
 
     app: AppSettings = Field(default_factory=AppSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    service_account: ServiceAccountSettings = Field(default_factory=ServiceAccountSettings)
     storage_element: StorageElementSettings = Field(default_factory=StorageElementSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     compression: CompressionSettings = Field(default_factory=CompressionSettings)
