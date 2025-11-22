@@ -1,0 +1,87 @@
+<!-- ArtStore Admin UI - Header Template -->
+<header class="header">
+  <div class="header-container">
+    <!-- Left Section: Sidebar Toggle -->
+    <div class="header-left">
+      <button
+        type="button"
+        class="btn btn-link sidebar-toggle"
+        (click)="onToggleSidebar()"
+        title="Toggle Sidebar"
+      >
+        <i class="bi bi-list"></i>
+      </button>
+    </div>
+
+    <!-- Right Section: User Info -->
+    <div class="header-right">
+      <!-- User Dropdown -->
+      <div class="user-dropdown" [class.show]="userDropdownOpen">
+        <button
+          type="button"
+          class="btn btn-link user-button"
+          (click)="toggleUserDropdown()"
+          title="User Menu"
+        >
+          <!-- User Avatar -->
+          <div class="user-avatar">
+            {{ getUserInitials() }}
+          </div>
+
+          <!-- User Info (скрыто на мобильных) -->
+          <div class="user-info d-none d-md-block">
+            <div class="user-name">{{ getUserDisplayName() }}</div>
+            <div class="user-role">{{ getUserRoleLabel() }}</div>
+          </div>
+
+          <i class="bi bi-chevron-down ms-2"></i>
+        </button>
+
+        <!-- Dropdown Menu -->
+        @if (userDropdownOpen) {
+          <div class="dropdown-menu show">
+            <!-- User Info Header -->
+            <div class="dropdown-header">
+              <div class="dropdown-user-info">
+                <div class="fw-bold">{{ getUserDisplayName() }}</div>
+                @if (user && user.email) {
+                  <div class="text-muted small">{{ user.email }}</div>
+                }
+                <div class="text-muted small">{{ getUserRoleLabel() }}</div>
+              </div>
+            </div>
+
+            <div class="dropdown-divider"></div>
+
+            <!-- Menu Items -->
+            <a class="dropdown-item" href="#" (click)="$event.preventDefault()">
+              <i class="bi bi-person me-2"></i>
+              Profile
+            </a>
+            <a class="dropdown-item" href="#" (click)="$event.preventDefault()">
+              <i class="bi bi-gear me-2"></i>
+              Settings
+            </a>
+
+            <div class="dropdown-divider"></div>
+
+            <!-- Logout -->
+            <button
+              type="button"
+              class="dropdown-item text-danger"
+              (click)="onLogout(); $event.stopPropagation()"
+            >
+              <i class="bi bi-box-arrow-right me-2"></i>
+              Logout
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Overlay для закрытия dropdown при клике вне его -->
+@if (userDropdownOpen) {
+  <div class="dropdown-overlay" (click)="closeUserDropdown()"></div>
+}

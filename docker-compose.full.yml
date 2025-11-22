@@ -1,0 +1,572 @@
+# ==============================================================================
+# ArtStore Full Stack - All-in-One Configuration
+# ==============================================================================
+# Полный production-ready стек включающий:
+# - Infrastructure (PostgreSQL, Redis, MinIO, PgAdmin)
+# - Backend Services (Admin, Storage Element, Ingester, Query)
+# - Monitoring (Prometheus, Grafana, AlertManager, Node Exporter)
+#
+# Использование:
+#   docker-compose -f docker-compose.full.yml up -d
+#
+# Остановка:
+#   docker-compose -f docker-compose.full.yml down
+#
+# Удаление всех данных:
+#   docker-compose -f docker-compose.full.yml down -v
+#
+# ВАЖНО: Для production настройте credentials в .env файле!
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # INFRASTRUCTURE LAYER
+  # ============================================================================
+
+  # PostgreSQL 15 - Primary Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: artstore_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-artstore}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: artstore
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=ru_RU.UTF-8"
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_AUTH_METHOD:-md5}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    networks:
+      - artstore_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-artstore} -d artstore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis 7 - Service Discovery & Caching (SYNC режим!)
+  redis:
+    image: redis:7-alpine
+    container_name: artstore_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - artstore_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # MinIO - S3-Compatible Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: artstore_minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - artstore_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # PgAdmin 4 - PostgreSQL Management (Optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: artstore_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-password}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - artstore_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ============================================================================
+  # BACKEND SERVICES LAYER
+  # ============================================================================
+
+  # Admin Module - Authentication & Management
+  admin-module:
+    build:
+      context: ./admin-module
+      dockerfile: Dockerfile
+    container_name: artstore_admin_module
+    restart: unless-stopped
+    environment:
+      APP_NAME: "ArtStore Admin Module"
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "false"
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8000"
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore_admin
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 0
+
+      JWT_ALGORITHM: RS256
+      JWT_PRIVATE_KEY_PATH: /app/.keys/private_key.pem
+      JWT_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: 7
+
+      INITIAL_ACCOUNT_ENABLED: ${INITIAL_ACCOUNT_ENABLED:-true}
+      INITIAL_ACCOUNT_NAME: ${INITIAL_ACCOUNT_NAME:-admin-service}
+      INITIAL_CLIENT_ID: ${INITIAL_CLIENT_ID:-}
+      INITIAL_CLIENT_SECRET: ${INITIAL_CLIENT_SECRET:-}
+
+      CORS_ENABLED: ${CORS_ENABLED:-true}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:4200"]}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+      METRICS_ENABLED: "true"
+      METRICS_PATH: "/metrics"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./admin-module/config.yaml:/app/config.yaml:ro
+    networks:
+      - artstore_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # Storage Element 01
+  storage-element-01:
+    build:
+      context: ./storage-element
+      dockerfile: Dockerfile
+    container_name: artstore_storage_element_01
+    restart: unless-stopped
+    environment:
+      APP_NAME: "Storage Element 01"
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "false"
+      APP_MODE: ${STORAGE_01_MODE:-edit}
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8010"
+      SERVER_WORKERS: ${STORAGE_01_WORKERS:-4}
+
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore_storage_01
+      DB_TABLE_PREFIX: storage_elem_01
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 1
+
+      JWT_ALGORITHM: RS256
+      JWT_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+
+      STORAGE_TYPE: ${STORAGE_01_TYPE:-local}
+      STORAGE_LOCAL_BASE_PATH: /app/.data/storage
+      STORAGE_MAX_FILE_SIZE: ${STORAGE_MAX_FILE_SIZE:-1073741824}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+      METRICS_ENABLED: "true"
+    ports:
+      - "8010:8010"
+    volumes:
+      - storage_01_data:/app/.data/storage
+      - admin_keys:/app/.keys:ro
+    networks:
+      - artstore_network
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  # Ingester Module
+  ingester-module:
+    build:
+      context: ./ingester-module
+      dockerfile: Dockerfile
+    container_name: artstore_ingester_module
+    restart: unless-stopped
+    environment:
+      APP_NAME: artstore-ingester
+      APP_VERSION: "0.1.0"
+      APP_DEBUG: "false"
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8020"
+
+      AUTH_ENABLED: "true"
+      AUTH_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+      AUTH_ALGORITHM: RS256
+
+      STORAGE_ELEMENT_DISCOVERY_ENABLED: "true"
+      STORAGE_ELEMENT_BASE_URL: http://storage-element-01:8010
+      STORAGE_ELEMENT_TIMEOUT: 30
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 2
+
+      COMPRESSION_ENABLED: "true"
+      COMPRESSION_ALGORITHM: gzip
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+      METRICS_ENABLED: "true"
+    ports:
+      - "8020:8020"
+    volumes:
+      - admin_keys:/app/.keys:ro
+    networks:
+      - artstore_network
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      storage-element-01:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8020/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  # Query Module
+  query-module:
+    build:
+      context: ./query-module
+      dockerfile: Dockerfile
+    container_name: artstore_query_module
+    restart: unless-stopped
+    environment:
+      APP_NAME: query-module
+      APP_VERSION: "0.1.0"
+      DEBUG: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: ${DB_USERNAME:-artstore}
+      DATABASE_PASSWORD: ${DB_PASSWORD:-password}
+      DATABASE_DATABASE: artstore_query
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 3
+
+      CACHE_LOCAL_ENABLED: "true"
+      CACHE_REDIS_ENABLED: "true"
+      SEARCH_DEFAULT_LANGUAGE: russian
+
+      AUTH_PUBLIC_KEY_PATH: /app/.keys/public_key.pem
+      AUTH_ALGORITHM: RS256
+
+      METRICS_ENABLED: "true"
+    ports:
+      - "8030:8030"
+    volumes:
+      - admin_keys:/app/.keys:ro
+    networks:
+      - artstore_network
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8030/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  # ============================================================================
+  # MONITORING LAYER
+  # ============================================================================
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    container_name: artstore_prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - artstore_network
+      - artstore_monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: artstore_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin123}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - artstore_monitoring
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # AlertManager - Alert Management
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: artstore_alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - artstore_monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Node Exporter - Host Metrics
+  node_exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: artstore_node_exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - artstore_monitoring
+
+# ==============================================================================
+# NETWORKS
+# ==============================================================================
+networks:
+  artstore_network:
+    name: artstore_network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+  artstore_monitoring:
+    name: artstore_monitoring
+    driver: bridge
+
+# ==============================================================================
+# VOLUMES
+# ==============================================================================
+volumes:
+  # Infrastructure
+  postgres_data:
+    name: artstore_postgres_data
+  redis_data:
+    name: artstore_redis_data
+  minio_data:
+    name: artstore_minio_data
+  pgadmin_data:
+    name: artstore_pgadmin_data
+
+  # Backend
+  storage_01_data:
+    name: artstore_storage_01_data
+  admin_keys:
+    name: artstore_admin_keys
+
+  # Monitoring
+  prometheus_data:
+    name: artstore_prometheus_data
+  grafana_data:
+    name: artstore_grafana_data
+  alertmanager_data:
+    name: artstore_alertmanager_data
+
+# ==============================================================================
+# USAGE NOTES
+# ==============================================================================
+# Запуск полного стека:
+#   docker-compose -f docker-compose.full.yml up -d
+#
+# Просмотр логов:
+#   docker-compose -f docker-compose.full.yml logs -f [service-name]
+#
+# Остановка:
+#   docker-compose -f docker-compose.full.yml down
+#
+# Полная очистка (включая volumes):
+#   docker-compose -f docker-compose.full.yml down -v
+#
+# Перезапуск отдельного сервиса:
+#   docker-compose -f docker-compose.full.yml restart [service-name]
+#
+# Масштабирование (например, несколько storage-element):
+#   docker-compose -f docker-compose.full.yml up -d --scale storage-element-01=3
+#
+# ACCESS URLS:
+# - Admin API: http://localhost:8000
+# - Storage Element: http://localhost:8010
+# - Ingester API: http://localhost:8020
+# - Query API: http://localhost:8030
+# - PgAdmin: http://localhost:5050
+# - MinIO Console: http://localhost:9001
+# - Prometheus: http://localhost:9090
+# - Grafana: http://localhost:3000
+# - AlertManager: http://localhost:9093
+# ==============================================================================

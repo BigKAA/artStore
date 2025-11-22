@@ -1,40 +1,83 @@
-# Storage Element Dockerfile
-FROM python:3.12-slim
+# Multi-stage Dockerfile для Storage Element
+# Stage 1: Builder - установка зависимостей
+# Stage 2: Runtime - минимальный production образ
 
-# Set working directory
-WORKDIR /app
+# ============================================
+# Stage 1: Builder
+# ============================================
+FROM python:3.12-slim as builder
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Метаданные
+LABEL maintainer="artstore-team"
+LABEL description="ArtStore Storage Element - Builder Stage"
+
+# Установка системных зависимостей для сборки
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    postgresql-client \
+    g++ \
+    make \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Создание виртуального окружения
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Копирование requirements.txt
+COPY requirements.txt /tmp/requirements.txt
 
-# Copy application code
-COPY app/ ./app/
-COPY config.yaml.example ./config.yaml
+# Установка Python зависимостей
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Create necessary directories
-RUN mkdir -p ./.data/storage ./.data/wal ./keys
+# ============================================
+# Stage 2: Runtime
+# ============================================
+FROM python:3.12-slim
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && \
+# Метаданные
+LABEL maintainer="artstore-team"
+LABEL description="ArtStore Storage Element - Production Runtime"
+LABEL version="0.1.0"
+
+# Создание непривилегированного пользователя
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Установка runtime зависимостей
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Копирование виртуального окружения из builder stage
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Установка рабочей директории
+WORKDIR /app
+
+# Копирование приложения
+COPY ./app /app/app
+COPY ./alembic /app/alembic
+COPY ./alembic.ini /app/alembic.ini
+
+# Создание директории для хранилища
+RUN mkdir -p /app/.data/storage && \
     chown -R appuser:appuser /app
 
+# Переключение на непривилегированного пользователя
 USER appuser
 
-# Expose port
-EXPOSE 8010
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LOG_FORMAT=json
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8010/health/live')"
+# Expose port (actual port определяется через SERVER_PORT environment variable)
+EXPOSE 8010 8011
 
-# Run application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]
+# Health check определен в docker-compose.yml для каждого instance
+# (порт зависит от SERVER_PORT environment variable)
+
+# Запуск приложения (использует настройки из config.py + environment variables)
+CMD ["python", "-m", "app.main"]

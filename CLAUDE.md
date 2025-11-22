@@ -6,440 +6,289 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ArtStore - это распределенная система файлового хранилища с микросервисной архитектурой, предназначенная для долгосрочного хранения документов с различными сроками хранения. Система реализует принципы отказоустойчивости, горизонтального масштабирования и обеспечивает разделение оперативного и архивного хранения.
 
-## Общие вопросы
+## 📚 Документация проекта
 
-Если не знаешь ответ, так и скажи - Не знаю ответ. Не ври.
+**Для новой команды разработки**:
+- **`README-PROJECT.md`** - Полное описание проекта, архитектура, технологии, roadmap
+- **`DEVELOPMENT-GUIDE.md`** - Руководство по разработке, тестированию, Git workflow
+- **Модульные README-PROJECT.md** - Детальное описание каждого модуля в их директориях
 
-Если видишь, что выполнение задач зациклилось - остановись, спроси что делать дальше.
+**Техническая документация**:
+- **`README.md`** - Детальная техническая спецификация системы
+- **`monitoring/README.md`** - Руководство по мониторингу и метрикам
+- **`CLAUDE.md`** (этот файл) - Инструкции для AI-ассистента
 
-Пиши подробные комментарии в коде на русском языке.
+## Общие правила работы
 
-Отвечай на русском языке.
+- **Честность**: Если не знаешь ответ - так и скажи. Не придумывай информацию.
+- **Остановка при зацикливании**: Если выполнение задач зациклилось - остановись, спроси что делать дальше.
+- **Комментарии**: Пиши подробные комментарии в коде на русском языке.
+- **Язык общения**: Отвечай на русском языке.
+- **Документация**: При вопросах по архитектуре/технологиям - читай `README-PROJECT.md` и `DEVELOPMENT-GUIDE.md` в первую очередь.
 
-## Набор утилит
+## 🔴 КРИТИЧЕСКИ ВАЖНО: Docker Compose
 
-Базовые утилиты запускай в docker или podman при помощи docker-compose.yml:
+**ОБЯЗАТЕЛЬНОЕ ТРЕБОВАНИЕ №1**: Для запуска, тестирования и работы с проектом использовать ТОЛЬКО файлы `docker-compose*.yml` из **КОРНЯ ПРОЕКТА** (`/home/artur/Projects/artStore/`).
 
-- postgres
-- redis
-- minio
-- dex
-- ldap
+**ВСЕГДА**:
+- ✅ `cd /home/artur/Projects/artStore` перед любыми docker-compose командами
+- ✅ Использовать корневой `docker-compose.yml` для всех операций
+- ✅ Запускать `docker-compose build [module-name]` из корня
+- ✅ Запускать `docker-compose up -d [module-name]` из корня
 
-Логины и пароли администраторов приложений доступны в `docker-compose.yml`.
+**НИКОГДА**:
+- ❌ НЕ использовать docker-compose из поддиректорий (admin-module/, ingester-module/, etc.)
+- ❌ НЕ создавать собственные docker-compose файлы
+- ❌ НЕ запускать модули напрямую без Docker
 
-Логин административного пользователя в LDAP: `cn=Directory Manager`. Пароль: `password`. Tree: `dc=artstore,dc=local`.
+## Инфраструктура
 
-Для работы с postgres используй инструменты, находящиеся в контейнере postgres. Если необходимой базы данных нет - создавай ее сам.
+**Базовые компоненты** (запускаются через `docker-compose.yml`):
+- **PostgreSQL** (port 5432) - основная БД
+- **Redis** (port 6379) - Service Discovery и кеширование
+- **MinIO** (ports 9000/9001) - S3-совместимое хранилище
+- **PgAdmin** (port 5050) - веб-интерфейс для PostgreSQL
 
-### Core Architecture Concepts
+**Credentials**: См. `docker-compose.yml` для логинов/паролей всех сервисов.
 
-**Attribute-First Storage Model**: Система использует файлы атрибутов (`*.attr.json`) как единственный источник истины для метаданных файлов. Это критически важно для обеспечения backup'а элементов хранения как набора простых файлов без необходимости работы с отдельными таблицами БД.
+**Database operations**: Используй инструменты внутри контейнера postgres. Создавай базы данных по необходимости.
 
-**Distributed Storage Elements**: Элементы хранения могут располагаться в разных ЦОД и иметь свои собственные кеш-БД для повышения производительности.
+**Authentication**: Только OAuth 2.0 Client Credentials (LDAP и Dex OIDC удалены в Sprint 13).
 
-**JWT-based Authentication (RS256)**: Центральная аутентификация через Admin Module с распределенной валидацией токенов через публичный ключ.
+## Ключевые архитектурные принципы
 
-**Service Discovery**: Координация через Redis Cluster - Admin Module Cluster публикует конфигурацию storage-element, а Ingester/Query кластеры подписываются на эти обновления с fallback на локальную конфигурацию.
+**Для детального понимания архитектуры см. `README-PROJECT.md`**
 
-**High Availability Architecture**: Полное устранение Single Points of Failure:
-- **Load Balancer Cluster**: HAProxy/Nginx с keepalived для распределения трафика
-- **Admin Module Cluster**: Raft consensus с 3+ узлами и automatic leader election (RTO < 15 сек)
-- **Redis Cluster**: 6+ узлов (минимум 3 master + 3 replica) с automatic failover и горизонтальным масштабированием (RTO < 30 сек)
-- **Storage Element Clusters**: Кластеризация с shared storage и master election
-- **Circuit Breaker Patterns**: Graceful degradation при недоступности dependencies
+### Критически важные концепции
 
-**Data Consistency Framework**: Система обеспечивает строгую консистентность данных через:
-- **Saga Pattern**: Для долгосрочных операций с файлами (загрузка → валидация → индексация)
-- **Two-Phase Commit**: Для критических операций изменения метаданных и смены режимов
-- **Vector Clocks**: Глобальное упорядочивание событий между распределенными компонентами
-- **Write-Ahead Log**: Атомарность операций записи файлов и атрибутов
-- **CRDT**: Conflict-free Replicated Data Types для метаданных, изменяемых независимо
-- **Automatic Reconciliation**: Автоматическое восстановление консистентности при расхождениях
+1. **Attribute-First Storage Model**: Файлы `*.attr.json` - единственный источник истины для метаданных
+2. **JWT RS256 Authentication**: Центральная аутентификация через Admin Module с публичным ключом
+3. **Redis SYNC Mode**: Все модули используют синхронный redis-py (не asyncio) для Service Discovery
+4. **PostgreSQL ASYNC**: Database операции через asyncpg
+5. **WAL Protocol**: Write-Ahead Log для атомарности операций с файлами
+6. **Saga Pattern**: Координация распределенных транзакций через Admin Module
+7. **Circuit Breaker**: Graceful degradation при недоступности dependencies
 
-**Performance Optimization Framework**: Комплексная стратегия повышения производительности:
-- **Multi-Level Caching**: CDN → Redis Cluster → Local Cache → Database Cache
-- **PostgreSQL Full-Text Search**: Встроенные возможности поиска с GIN индексами для метаданных
-- **Streaming & Compression**: Chunked uploads/downloads с Brotli/GZIP compression
-- **Connection Pooling**: HTTP/2 persistent connections между всеми сервисами
-- **Async Processing**: Background tasks через Kafka для heavy operations
+### Service Discovery Pattern
 
-**Comprehensive Security Framework**: Многоуровневая система защиты данных:
-- **TLS 1.3 Transit Encryption**: Все межсервисные соединения защищены современным протоколом TLS 1.3
-- **Secure Key Management**: Защищенное управление JWT ключами через Admin Module Cluster
-- **Automated JWT Key Rotation**: Ротация RS256 ключей каждые 24 часа с плавным переходом
+- Admin Module публикует конфигурацию storage-elements в Redis
+- Ingester/Query подписываются на обновления через Redis Pub/Sub
+- Fallback на локальную конфигурацию при недоступности Redis
 
-**Advanced Monitoring и Observability Framework**: Комплексная система наблюдаемости:
-- **OpenTelemetry Distributed Tracing**: Полное отслеживание запросов через все микросервисы
-- **Custom Business Metrics**: File upload latency, search performance, storage utilization, authentication metrics
-- **Third-party Analytics Integration**: Экспорт метрик для внешних систем аналитики
+## Быстрый старт
 
-## Development Environment Setup
+**Подробнее см. `DEVELOPMENT-GUIDE.md`**
 
-### Prerequisites
+### Запуск окружения
 
 ```bash
-# Ensure base infrastructure is running
+cd /home/artur/Projects/artStore
+
+# Запуск инфраструктуры + все модули
 docker-compose up -d
+
+# Мониторинг (опционально)
+docker-compose -f docker-compose.monitoring.yml up -d
 ```
 
-### Database Access
+### Python Virtual Environment
+
+**ЕДИНЫЙ .venv для всех Python модулей**: `/home/artur/Projects/artStore/.venv`
 
 ```bash
-# Access PostgreSQL container for database operations
-docker exec -it artstore_postgres psql -U artstore -d artstore
+# Создание (один раз)
+python3 -m venv .venv
 
-# Create additional databases as needed within the container
+# Активация
+source .venv/bin/activate
+
+# Установка зависимостей всех модулей
+pip install -r admin-module/requirements.txt
+pip install -r storage-element/requirements.txt
+pip install -r ingester-module/requirements.txt
+pip install -r query-module/requirements.txt
 ```
 
 ### Service Ports
-- **PostgreSQL**: 5432
-- **PgAdmin**: 5050 (admin@admin.com / password)
-- **Redis**: 6379
-- **MinIO**: 9000 (console: 9001, minioadmin / minioadmin)
-- **LDAP**: 1398 
-- **Admin Module**: 8000-8009
-- **Storage Elements**: 8010-8019
-- **Ingester Module**: 8020-8029
-- **Query Module**: 8030-8039
-- **Admin UI**: 4200
 
-## Module Architecture
+- PostgreSQL: 5432, PgAdmin: 5050, Redis: 6379, MinIO: 9000/9001
+- Admin Module: 8000-8009, Storage: 8010-8019, Ingester: 8020-8029, Query: 8030-8039, UI: 4200
 
-### 1. Admin Module Cluster (admin-module/)
-**Role**: Отказоустойчивый центр аутентификации и управления системой
-- **Raft Consensus Cluster**: Автоматическое лидерство с выборами в кластере 3+ узлов
-- **Multi-Master Active-Active**: Consistent hashing для распределения нагрузки
-- **Zero-Downtime Operations**: Rolling updates и graceful failover (RTO < 15 сек)
-- **JWT token generation (RS256)** с распределенной валидацией через публичный ключ
-- **LDAP/AD Integration**: Аутентификация через корпоративный LDAP с mapping групп на роли
-- **Saga Orchestrator**: Координация распределенных транзакций (Upload, Delete, Transfer файлов)
-- **Conflict Resolution**: Автоматическое обнаружение и устранение несоответствий между attr.json и DB cache
-- User and storage element management
-- Service Discovery publishing to Redis Sentinel Cluster
-- Webhook management для уведомлений о событиях (file_restored, restore_failed, file_expiring)
-- Prometheus metrics endpoint
+## Архитектура модулей
 
-**Key APIs**:
-- `/api/auth/*` - Authentication endpoints (login, JWT refresh, LDAP integration)
-- `/api/users/*` - User management и LDAP mapping
-- `/api/users/{id}/webhooks` - Webhook configuration для пользователей
-- `/api/storage-elements/*` - Storage element management
-- `/api/transactions/*` - Saga orchestration status и compensating actions
-- `/api/batch/*` - Batch operations (upload, delete до 100 файлов / 1GB)
-- `/health/*` - Health checks (liveness, readiness)
-- `/metrics` - Prometheus metrics
+**Подробное описание каждого модуля см. в их README-PROJECT.md**
 
-### 2. Storage Element Clusters (storage-element/)
-**Role**: Отказоустойчивое физическое хранение файлов с кешированием метаданных
+### Модули системы
 
-**Deployment Options**:
-- **Standalone Mode**: Одиночный узел без репликации (упрощенная конфигурация для некритичных данных)
-- **Replicated Mode** (опционально): Кластер из 3+ узлов с синхронной или асинхронной репликацией для критичных данных
+1. **Admin Module** (порты 8000-8009) - Аутентификация и управление
+   - OAuth 2.0 JWT (RS256), Service Accounts, Saga координация
+   - См. `admin-module/README-PROJECT.md`
 
-**Core Features**:
-- File storage (local filesystem or S3)
-- **Write-Ahead Log**: Журнал транзакций для атомарности операций
-- **Saga Participant**: Участие в распределенных транзакциях координируемых Admin Module
-- Metadata caching in PostgreSQL Cluster
-- Four operational modes: edit, rw, ro, ar
+2. **Storage Element** (порты 8010-8019) - Физическое хранение файлов
+   - Режимы: edit, rw, ro, ar
+   - WAL protocol, attr.json файлы
+   - См. `storage-element/README-PROJECT.md`
 
-**Critical Implementation Details**:
-- **Attribute files** (`*.attr.json`): Единственный источник истины для метаданных
-  - Максимальный размер: 4KB (гарантия атомарности записи)
-  - Атомарная запись: WAL → Temporary file → fsync → Atomic Rename
-- **File Naming Convention**: `{name_without_ext}_{username}_{timestamp}_{uuid}.{ext}`
-  - Original filename первым для human-readability при сортировке
-  - Гарантирует уникальность при одновременной загрузке файлов с одинаковыми именами
-  - **Автоматическое обрезание** длинных имен до 200 символов (полное имя в attr.json)
-  - Пример: `report_ivanov_20250102T153045_a1b2c3d4.pdf`
-  - Implementation:
-    ```python
-    from pathlib import Path
+3. **Ingester Module** (порты 8020-8029) - Загрузка файлов
+   - Streaming upload, validation, compression
+   - См. `ingester-module/README-PROJECT.md`
 
-    def generate_storage_filename(original_name, username, timestamp, uuid, max_len=200):
-        name_stem = Path(original_name).stem
-        name_ext = Path(original_name).suffix
-        fixed_len = 1 + len(username) + 1 + len(timestamp) + 1 + len(uuid) + len(name_ext)
-        available = max_len - fixed_len
-        if len(name_stem) > available:
-            name_stem = name_stem[:available]
-        return f"{name_stem}_{username}_{timestamp}_{uuid}{name_ext}"
-    ```
-- **Consistency Protocol**: WAL → Attr File → DB Cache → Service Discovery → Commit
-- **Automatic Reconciliation**: Обнаружение и устранение несоответствий между attr.json и DB cache
-- **Directory structure**: `/year/month/day/hour/` для удобства резервного копирования
-- **Mode transitions**: edit (fixed) → rw → ro → ar
+4. **Query Module** (порты 8030-8039) - Поиск и скачивание
+   - PostgreSQL Full-Text Search, multi-level caching
+   - См. `query-module/README-PROJECT.md`
 
-**Replicated Mode Configuration** (опционально):
-```yaml
-replication:
-  enabled: true
-  mode: sync | async
-  replicas: 2
-  quorum: majority
+5. **Admin UI** (порт 4200) - Angular веб-интерфейс
+   - Dashboard, управление аккаунтами, file manager
+   - См. `admin-ui/README-PROJECT.md`
 
-sync_replication:
-  min_replicas: 2
-  write_timeout: 5s
-  consistency: strong
-  rto: < 30s
-  rpo: 0  # Zero data loss
+## Основные команды
 
-async_replication:
-  batch_size: 100
-  interval: 60s
-  retry_failed: true
-  rto: < 30s
-  rpo: ~60s  # Last batch
-```
+**Полное руководство см. `DEVELOPMENT-GUIDE.md`**
 
-**Master Election** (только replicated mode):
-- Redis Sentinel координация для режимов edit/rw
-- Automatic failover за < 30 секунд
-- Split-brain protection через quorum
+### Запуск и управление
 
-### 3. Ingester Cluster (ingester-module/)
-**Role**: Высокопроизводительное отказоустойчивое добавление и управление файлами
-- **Streaming Upload**: Chunked загрузка с progress tracking и resumable uploads
-- **Parallel Processing**: Одновременная обработка множественных файлов
-- **Compression On-the-fly**: Автоматическое сжатие (Brotli/GZIP) при загрузке
-- **CDN Pre-upload**: Автоматическая репликация на CDN для популярных файлов
-- **Kafka Integration**: Асинхронная обработка через message queue
-- **Circuit Breaker Integration**: Graceful degradation при недоступности storage-element
-- **Redis Cluster Client**: Подключение к HA Redis Cluster для Service Discovery
-- **Local Config Fallback**: Кеширование конфигурации при недоступности Service Discovery
-- **Saga Transactions**: Координируемые операции загрузки файлов
-- **Compensating Actions**: Автоматический откат при сбоях
-- File upload to storage elements with optimization
-- File deletion (edit mode only) with async cleanup
-- File transfer between storage elements with Two-Phase Commit
-
-### 4. Query Cluster (query-module/)
-**Role**: Высокопроизводительный отказоустойчивый поиск и получение файлов
-- **PostgreSQL Full-Text Search**: Мгновенный поиск через встроенные GIN индексы PostgreSQL
-- **Multi-Level Caching**: Local → Redis → PostgreSQL Query Cache
-- **Real-time Search**: Auto-complete и suggestions на основе популярных запросов
-- **CDN Integration**: Автоматическое направление на ближайший CDN endpoint
-- **Connection Pooling**: HTTP/2 persistent connections к storage-element
-- **Load Balanced Cluster**: Множественные узлы за Load Balancer для высокой доступности
-- **Circuit Breaker Pattern**: Автоматическое отключение недоступных storage-element
-- **Redis Cluster Integration**: HA подключение к Service Discovery
-- **Consistent Queries**: Поиск с учетом Vector Clock для консистентности
-- **Conflict Detection**: Обнаружение конфликтов между storage-element
-- **Read Consistency**: Гарантии согласованности при чтении
-- File search by metadata with full-text capabilities
-- Optimized file download with resumable transfers
-- Digital signature verification
-
-### 5. Admin UI (admin-ui/)
-**Role**: Angular-based administrative interface
-- User management interface
-- Storage element monitoring
-- File manager
-- System statistics dashboard
-
-## Development Commands
-
-### Running Applications
 ```bash
-# Start base infrastructure
+cd /home/artur/Projects/artStore
+
+# Запуск всей системы
 docker-compose up -d
 
-# Run specific module in development (example for admin-module)
-cd admin-module
-py -m pip install -r requirements.txt
-py -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# Просмотр логов
+docker-compose logs -f [module-name]
 
-# Build and run with Docker (preferred method)
-docker-compose -f docker-compose-app.yml up --build -d
+# Пересборка модуля
+docker-compose build [module-name]
+docker-compose up -d [module-name]
+
+# Остановка
+docker-compose down
 ```
 
-### Testing
-Always create and run unit tests for modified code:
+### Тестирование
+
 ```bash
-# Run tests for specific module
+# Активировать venv
+source .venv/bin/activate
+
+# Запуск тестов модуля
 cd [module-name]
-py -m pytest tests/ -v
+pytest tests/ -v
 
-# Run with coverage
-py -m pytest tests/ --cov=app --cov-report=html
+# С coverage
+pytest tests/ --cov=app --cov-report=html
 ```
 
-### Database Operations
+### Database
+
 ```bash
-# Create new database within container
-docker exec -it artstore_postgres createdb -U artstore new_database_name
+# Подключение к PostgreSQL
+docker exec -it artstore_postgres psql -U artstore -d artstore
 
-# Access database
-docker exec -it artstore_postgres psql -U artstore -d [database_name]
+# Создание новой БД
+docker exec -it artstore_postgres createdb -U artstore [db_name]
 ```
 
-## Key Configuration Patterns
+## Важные концепции
 
-### Authentication Configuration
-```yaml
-auth:
-  jwt:
-    public_key_path: "/path/to/public_key.pem"
-    algorithm: "RS256"
+### Storage Element Modes
+
+- **edit**: Full CRUD (не меняется через API)
+- **rw**: Read-write без deletion (переход в ro через API)
+- **ro**: Read-only (переход в ar через API)
+- **ar**: Archive mode (только через конфиг + restart)
+
+### Логирование
+
+**Production**: JSON формат ОБЯЗАТЕЛЕН (`LOG_FORMAT=json`)
+**Development**: Text формат разрешен (`LOG_FORMAT=text`)
+
+### Configuration Priority
+
+Environment variables > config files
+
+Примеры конфигураций см. в модульных README-PROJECT.md
+
+## Credentials
+
+### Initial Service Account
+
+Автоматически создается при первом запуске:
+- Name: `admin-service`
+- Role: `ADMIN`
+- Client ID/Secret: Автогенерация
+- **ВАЖНО**: `is_system=True` - не удаляется через API
+- **PRODUCTION**: Обязательно изменить client_secret через `.env`
+
+### OAuth 2.0 пример
+
+```bash
+curl -X POST http://localhost:8000/api/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": "...", "client_secret": "..."}'
 ```
 
-### Storage Configuration
-```yaml
-storage:
-  type: "local"  # or "s3"
-  max_size: 1Gb
-  local:
-    base_path: "./.data/storage"
-  s3:
-    endpoint_url: "http://localhost:9000"
-    bucket_name: "artstore-files"
-```
+### Infrastructure Credentials
 
-### Database Configuration
-```yaml
-database:
-  host: "localhost"
-  port: 5432
-  username: "artstore"
-  password: "password"
-  database: "artstore"
-  table_prefix: "storage_elem_01"  # For uniqueness in shared DB
-```
-
-## Storage Element Modes and Transitions
-
-**Mode Definitions**:
-- `edit`: Full CRUD operations (default for active storage)
-- `rw`: Read-write, no deletion (transitional state)
-- `ro`: Read-only (archived but accessible)
-- `ar`: Archive mode (metadata only, files on cold storage)
-
-**Transition Rules**:
-- edit → Cannot be changed via API
-- rw → ro (via API)
-- ro → ar (via API)
-- ar → other modes (configuration change + restart only)
-
-## Development Workflow
-
-1. **Module Development Order**: admin-module → storage-element → ingester-module → query-module → admin-ui
-2. **Container Usage**: Each module gets its own Docker container; admin-ui uses nginx
-3. **Configuration Priority**: Environment variables override config file settings
-4. **Language**: All comments and documentation should be in Russian
-5. **Platform**: Development on Windows 11 using cmd.exe or PowerShell commands
-
-## Testing Credentials
-
-**Default Admin User**:
-- Username: `admin`
-- Password: `admin123`
-- Change in production!
-
-**Infrastructure Credentials**:
+См. `docker-compose.yml`:
 - PostgreSQL: artstore / password
 - PgAdmin: admin@admin.com / password
 - MinIO: minioadmin / minioadmin
 
-## Critical Implementation Notes
+## Критические требования реализации
 
-### High Availability Requirements
-1. **No Single Points of Failure**: Все компоненты развернуты в кластерной конфигурации
-2. **Load Balancer Cluster**: HAProxy/Nginx + keepalived для устранения SPOF входного трафика
-3. **Admin Module Cluster**: Raft consensus кластер 3+ узлов с automatic leader election (RTO < 15 сек)
-4. **Redis Cluster**: 6+ узлов (минимум 3 master + 3 replica) с automatic failover и горизонтальным масштабированием (RTO < 30 сек)
-5. **Circuit Breaker Pattern**: Обязательная реализация для всех inter-service communications
-6. **Local Fallback**: Кеширование конфигурации для работы при недоступности Service Discovery
+**Полный список см. `README-PROJECT.md` → "Критические требования"**
 
-### Data Consistency & Operations
-7. **Consistency Protocol**: WAL → Attr File → Vector Clock → DB Cache → Commit (строго в этом порядке)
-8. **Saga Coordination**: Admin Module Cluster координирует все долгосрочные операции через Saga Pattern
-9. **Vector Clock Sync**: Все модули синхронизируют логическое время через Admin Module Cluster
-10. **Conflict Resolution**: Автоматическое обнаружение и разрешение конфликтов данных
-11. **Attribute Files**: Always write to *.attr.json first, then update database cache
-12. **Master Election**: Required for edit/rw modes using Redis Cluster coordination
-13. **Service Discovery**: Ingester/Query clusters must subscribe to Redis Cluster for storage element updates
-14. **Stateless Design**: All modules must be stateless
-15. **Error Handling**: Insufficient storage space should return specific error message
-16. **Retention Management**: Storage elements have configurable retention periods with automatic warnings
+### Важнейшие правила
 
-### Performance Requirements
-17. **PostgreSQL Full-Text Search**: Встроенные GIN индексы для поиска по метаданным всех storage-element
-18. **Multi-Level Caching**: CDN → Redis → Local → DB cache hierarchy реализация
-19. **Connection Pooling**: HTTP/2 persistent connections между всеми сервисами
-20. **Streaming Operations**: Chunked upload/download для файлов >10MB
-21. **Background Processing**: Kafka message queue для heavy operations (compression, indexing)
-22. **CDN Integration**: Автоматическая репликация файлов на CloudFlare/AWS CloudFront
+1. **Consistency Protocol**: WAL → Attr File → DB Cache → Service Discovery → Commit (строго в порядке)
+2. **Attribute Files First**: Всегда сначала запись в `*.attr.json`, затем в DB cache
+3. **Stateless Design**: Все модули должны быть stateless
+4. **Circuit Breaker**: Обязателен для всех inter-service communications
+5. **Redis SYNC Mode**: Используй синхронный redis-py для Service Discovery
+6. **PostgreSQL ASYNC**: Используй asyncpg для database операций
 
-## Monitoring and Logging
+## Мониторинг
 
-### Advanced Monitoring Requirements
+**Полная документация см. `monitoring/README.md`**
 
-All modules must implement comprehensive observability:
+### Быстрый старт
 
-#### OpenTelemetry Integration (Mandatory)
-- **Distributed Tracing**: Полное инструментирование всех HTTP requests, database queries, Redis operations
-- **Trace Correlation**: Уникальные trace ID для корреляции across all микросервисы
-- **Span Context Propagation**: Передача trace context через headers и message queues
-- **Performance Profiling**: Детальное профилирование критических операций
+```bash
+# Запуск мониторинга
+docker-compose -f docker-compose.monitoring.yml up -d
 
-#### Custom Business Metrics (Required)
-- **File Operation Metrics**: Upload/download latency, success rates, error types
-- **Search Performance**: Query response time, result relevance, cache efficiency
-- **Storage Utilization**: Disk usage, growth rates, capacity forecasting
-- **Authentication Metrics**: JWT validation time, key rotation frequency, security events
-- **System Health**: Memory usage, CPU utilization, garbage collection metrics
+# Доступ к интерфейсам
+# Prometheus: http://localhost:9090
+# Grafana: http://localhost:3000 (admin / admin123)
+# AlertManager: http://localhost:9093
+```
 
+### Компоненты
 
-#### Third-party Analytics Integration
-- **Metrics Export**: Prometheus metrics для integration с external analytics platforms (Grafana, DataDog, New Relic)
-- **Log Aggregation**: Structured logs для ELK Stack, Splunk, и других log analysis систем
-- **Trace Data**: OpenTelemetry traces для external APM platforms (Jaeger, Zipkin)
-- **Custom Dashboards**: API для integration с external monitoring и business intelligence систем
+- **OpenTelemetry**: Distributed tracing во всех модулях
+- **Prometheus**: Метрики на `/metrics` каждого модуля
+- **Grafana**: Pre-configured dashboards
+- **AlertManager**: Critical/Warning alerts
+- **Health Checks**: `/health/live` и `/health/ready` на всех модулях
 
-#### Standard Monitoring (Baseline)
-- Prometheus metrics at `/metrics`
-- Health checks at `/health/live` and `/health/ready`
-- Structured logging (JSON format mandatory)
-- Connection pool monitoring for database connections
-- Real-time dashboard integration (Grafana/custom dashboards)
+## Безопасность
 
-## Security Considerations
+**Полные требования см. `README-PROJECT.md` → "Security Framework"**
 
-### Comprehensive Security Requirements
+### Ключевые принципы
 
-#### Encryption Standards
-- **File Storage**: Файлы хранятся в незашифрованном виде для обеспечения совместимости и простоты backup процедур
-- **TLS 1.3 transit encryption**: Все межсервисные соединения должны использовать TLS 1.3
-- **Secure Key Management**: JWT ключи защищены и управляются через Admin Module Cluster
-- **JWT Key Rotation**: Автоматическая ротация JWT ключей каждые 24 часа
-- **Perfect Forward Secrecy**: Эфемерные ключи для каждой TLS сессии
+1. **TLS 1.3**: Все межсервисные соединения
+2. **JWT RS256**: Access tokens (30 min), автоматическая ротация ключей (24ч)
+3. **Bearer Authentication**: Обязательна для всех API (кроме /health)
+4. **Audit Logging**: Все операции с tamper-proof signatures
+5. **Rate Limiting**: Adaptive limiting с автоблокировкой
+6. **RBAC**: Fine-grained resource-level permissions
 
-#### Identity & Access Management
-- **JWT tokens expire**: 30 minutes (access) / 7 days (refresh) с automatic refresh
-- **Fine-grained RBAC**: Resource-level permissions обязательны для файловых операций
-- **Temporary Access Tokens**: Поддержка time-limited tokens для external integrations
-- **Multi-factor Authentication**: Обязательна для административных аккаунтов
-- **Password Policy**: Минимум 12 символов, bcrypt hashing, rotation каждые 90 дней
+### Production Checklist
 
-#### API Security
-- **Bearer token authentication**: Обязательна для всех API endpoints кроме health checks
-- **API Rate Limiting**: Adaptive limiting с автоматической блокировкой при превышении
-- **Request Signing**: Цифровая подпись критических операций (upload, delete, transfer)
-- **IP Whitelisting**: Configurable ограничения по IP для административных операций
-- **CORS Configuration**: Строгая политика Same-Origin с explicit domain whitelisting
-
-#### Audit & Compliance
-- **Comprehensive Audit Logging**: Все операции логируются с tamper-proof signatures
-- **Real-time Monitoring**: Автоматическое обнаружение и alerting suspicious activities
-- **Data Retention**: Audit logs хранятся minimum 7 лет с encrypted backup
-- **Compliance Reporting**: Automated генерация GDPR, SOX, HIPAA compliance reports
-- **Incident Response**: Automated isolation и notification при security breaches
-
-#### Production Security Standards
-- **System admin protection**: Cannot be deleted or demoted, требует dual approval
-- **Secrets Management**: Все credentials в защищенной конфигурации с encryption at rest
-- **Certificate Management**: Automated renewal и validation SSL/TLS certificates
-- **Vulnerability Scanning**: Weekly automated scans с mandatory patching SLA
-- **Penetration Testing**: Quarterly external security assessments обязательны
+- [ ] Изменить все default credentials в `.env`
+- [ ] Настроить TLS сертификаты
+- [ ] Включить audit logging
+- [ ] Настроить rate limiting
+- [ ] Проверить CORS политики
+- [ ] Включить automated vulnerability scanning

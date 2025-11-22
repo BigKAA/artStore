@@ -1,128 +1,211 @@
-# ArtStore Query
+# Query Module - File Search and Download Service
 
-Модуль для поиска и получения файлов из хранилища.
-Информацию о текущих доступных хранилищах получает из **Service Discovery (Redis)**.
+Микросервис для поиска и скачивания файлов в распределенной системе ArtStore.
 
-## Архитектура
+## Ключевые возможности
 
-### Высокая доступность
-- **Кластерная развертка**: Множественные узлы Query модуля за Load Balancer Cluster
-- **Redis Sentinel Integration**: Подключение к кластеру Redis Sentinel для устранения SPOF Service Discovery
-- **Circuit Breaker Pattern**: Автоматическое отключение недоступных storage-element
-- **Local Cache Fallback**: Кеширование результатов поиска при недоступности Service Discovery
-- **Health Check Integration**: Мониторинг состояния всех dependencies
+### Search Features
+- **PostgreSQL Full-Text Search** с GIN индексами для мгновенного поиска
+- **Multi-Level Caching**: Local (in-memory) → Redis → PostgreSQL
+- **Search Modes**: Exact, Partial (LIKE), Full-Text (ts_query)
+- **Фильтрация**: по тегам, размеру, дате, пользователю, MIME типу
+- **Пагинация и сортировка**
 
-### Основная архитектура
-- **Аутентификация**: Все запросы к модулю должны быть аутентифицированы с помощью **JWT (RS256)**. Модуль **локально** валидирует токен, используя публичный ключ, полученный от `admin-module`.
-- **Координация**: Модуль получает актуальный список `storage-element` и их состояние из **Redis Sentinel Cluster**.
+### Download Features
+- **Streaming Downloads** для больших файлов
+- **Resumable Downloads** через HTTP Range requests
+- **SHA256 Verification** после скачивания
+- **Connection Pooling** HTTP/2 для оптимальной производительности
+- **Download Statistics** для мониторинга и analytics
 
-## Функциональность
+### Architecture
+- **Async PostgreSQL** (asyncpg + SQLAlchemy)
+- **Sync Redis** (redis-py, согласно архитектурным требованиям)
+- **JWT RS256 Authentication** через публичный ключ Admin Module
+- **JSON Structured Logging** (обязательно для production)
+- **Prometheus Metrics** для мониторинга
+- **Health Checks** для Kubernetes
 
-### Высокопроизводительный поиск
-- **PostgreSQL Full-Text Search**: Встроенные возможности поиска PostgreSQL с GIN индексами для метаданных
-- **Real-time Search**: Живой поиск с auto-complete на основе кешированных метаданных
-- **Faceted Search**: Фильтрация по дате, размеру, типу файла, метаданным через оптимизированные индексы
-- **Search Results Caching**: Redis кеширование популярных запросов (TTL: 10 минут)
-- **Simple Text Search**: Поиск по содержимому файлов через PostgreSQL text индексы
+## Quick Start
 
-### Оптимизация производительности
-- **Multi-level Caching**: Local cache → Redis → PostgreSQL Query Cache
-- **Connection Pooling**: HTTP/2 persistent connections к storage-element
-- **Parallel Queries**: Одновременные запросы к множественным storage-element
-- **Result Streaming**: Chunked transfer для больших результатов поиска
+### Prerequisites
+- Docker и Docker Compose
+- PostgreSQL 15+ (или используйте docker-compose)
+- Redis 7+ (или используйте docker-compose)
+- JWT public key от Admin Module
 
-### Основная функциональность
-- **Поиск файла**: Осуществляет поиск файла по названию и его метаданным с **консистентными результатами** благодаря Vector Clock.
-- **Выгрузка файла**: Позволяет скачать файл и, если необходимо, файл цифровой подписью из хранилища.
-- **Conflict-aware Queries**: Обнаруживает конфликты данных между storage-element и предоставляет пользователю выбор версии.
-- **Read Consistency**: Гарантирует читаемую консистентность через проверку Vector Clock метаданных.
-- **Web interface**: Показывает текущую конфигурацию модуля.
-- **Проверка цифровой подписи**: Если необходимо, проверяет цифровую подпись файла при помощи `Модуль ЭЦП`.
+### Запуск с Docker Compose
 
-## Технологии
+```bash
+# 1. Копирование .env файла
+cp .env.example .env
 
-### Основной стек
-- **Python 3.12+**
-- **FastAPI** - веб-фреймворк с async/await
-- **SQLAlchemy** (async) - ORM для работы с PostgreSQL
-- **PostgreSQL** - база данных
+# 2. Настройка environment variables в .env
+vim .env
 
-### Поиск и индексирование
-- **PostgreSQL Full-Text Search** - встроенный поиск с GIN индексами
-- **PostgreSQL pg_trgm** - триграммы для нечеткого поиска и auto-complete
-- **Background Tasks** - асинхронная индексация метаданных
+# 3. Запуск всех сервисов
+docker-compose up -d
 
-### Кеширование и координация
-- **Redis Cluster** - многоуровневое кеширование
-- **Redis Sentinel** - высокая доступность
-- **Local Cache** - in-memory кеширование
+# 4. Применение database миграций
+docker-compose exec query-module alembic upgrade head
 
-### Performance & Optimization
-- **HTTP/2** - persistent connections
-- **Brotli/GZIP** - сжатие ответов
-- **uvloop** - высокопроизводительный event loop
-- **aiodns** - асинхронное разрешение DNS
+# 5. Проверка health
+curl http://localhost:8030/health/ready
+```
 
-### UI
-- **Bootstrap 5** - UI фреймворк
+### Development Mode
 
-### Комплексная система безопасности
+```bash
+# 1. Создание virtual environment (глобальный venv в корне проекта)
+cd /path/to/artStore
+python3 -m venv .venv
+source .venv/bin/activate
 
-#### Secure Query Processing
-- **Query Injection Protection**: Автоматическая проверка и санитизация поисковых запросов для предотвращения SQL и NoSQL инъекций
-- **Access Control Filtering**: Фильтрация результатов поиска на основе прав доступа пользователя к конкретным файлам
-- **Data Leakage Prevention**: Контроль доступа к метаданным файлов в зависимости от уровня авторизации
+# 2. Установка зависимостей
+pip install -r query-module/requirements.txt
 
-#### Secure File Download
-- **Download Authorization**: Проверка прав доступа перед каждой загрузкой файла
-- **Temporary Download URLs**: Генерация временных подписанных URL для безопасного скачивания
-- **Content-Type Validation**: Проверка типов файлов для предотвращения загрузки вредоносного контента
-- **Download Audit Trail**: Полное логирование всех операций скачивания с привязкой к пользователю
+# 3. Настройка .env
+cd query-module
+cp .env.example .env
 
-#### TLS 1.3 Transit Encryption
-- **Encrypted Search Results**: Шифрование результатов поиска в transit между модулями
-- **Certificate Validation**: Строгая проверка сертификатов при соединении с storage-element
-- **Secure API Communication**: Защищенные каналы связи со всеми компонентами системы
-- **End-to-End Security**: Сквозное шифрование от клиента до storage-element
+# 4. Запуск базовых сервисов (PostgreSQL, Redis)
+docker-compose up -d postgres redis
 
-#### Real-time Security Monitoring
-- **Security Pattern Detection**: Обнаружение подозрительных паттернов в поисковых запросах
-- **Brute Force Protection**: Защита от попыток перебора файлов и метаданных
-- **Access Pattern Analysis**: Анализ паттернов доступа для выявления потенциальных угроз
-- **Automated Incident Response**: Автоматическая блокировка подозрительных источников запросов
+# 5. Применение миграций
+alembic upgrade head
 
-### Advanced Monitoring и Observability
+# 6. Запуск приложения
+python -m app.main
+```
 
-#### OpenTelemetry Search Operations Tracing
-- **Search Pipeline Tracing**: Полное отслеживание поисковых запросов от начального query до возврата результатов
-- **Multi-Storage Search Correlation**: Трейсинг параллельных запросов к множественным storage-element
-- **Cache Performance Monitoring**: Детальная аналитика эффективности multi-level кеширования
-- **PostgreSQL Query Optimization**: Профилирование и оптимизация database queries
+## API Endpoints
 
-#### Custom Business Metrics
-- **Search Performance**: Время отклика поисковых запросов сегментированное по сложности и количеству результатов
-- **Search Quality Metrics**: Статистика релевантности результатов и пользовательского взаимодействия
-- **Download Performance**: Метрики скорости скачивания файлов по размерам и storage-element
-- **Cache Efficiency**: Hit ratios для каждого уровня кеширования (Local → Redis → PostgreSQL)
+### Search API
+- `POST /api/search` - Поиск файлов с фильтрацией
+- `GET /api/search/{file_id}` - Получение метаданных файла
 
-#### Third-party Analytics Integration
-- **Search Metrics Export**: Экспорт search performance metrics в Prometheus для external analytics
-- **Query Pattern Data**: Structured data для index optimization через external systems
-- **Content Analytics**: Export popular content metrics для external cache optimization platforms
+### Download API
+- `GET /api/download/{file_id}/metadata` - Метаданные для скачивания
+- `GET /api/download/{file_id}` - Скачивание файла (с поддержкой Range)
 
+### System API
+- `GET /health/live` - Liveness check (Kubernetes)
+- `GET /health/ready` - Readiness check (Kubernetes)
+- `GET /metrics` - Prometheus metrics
+- `GET /docs` - Swagger UI documentation
 
-## Логирование
+## Configuration
 
-- Поддержка JSON и текстового формата
-- Настраиваемые уровни логирования
-- Ротация файлов логов
-- Структурированное логирование операций
+Все настройки через environment variables (см. `.env.example`).
 
-## Разработка
+### Критические настройки
 
-Для разработки рекомендуется:
+**Database**:
+- `DATABASE_URL` - PostgreSQL connection string
+- `DATABASE_POOL_SIZE` - Размер connection pool (default: 20)
 
-1. Использовать виртуальное окружение Python
-2. Запускать инфраструктуру через docker-compose
-3. Использовать режим reload для автоперезагрузки
-4. Настроить IDE для работы с async/await
+**Redis** (SYNC режим):
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`
+- `REDIS_MAX_CONNECTIONS` - Connection pool size
+
+**Cache**:
+- `CACHE_LOCAL_TTL` - Local cache TTL (default: 300s)
+- `CACHE_REDIS_TTL` - Redis cache TTL (default: 1800s)
+
+**Authentication**:
+- `AUTH_PUBLIC_KEY_PATH` - Путь к JWT public key от Admin Module
+
+**Logging**:
+- `LOG_FORMAT=json` - **ОБЯЗАТЕЛЬНО** для production
+
+## Database Migrations
+
+```bash
+# Создание новой миграции
+alembic revision --autogenerate -m "description"
+
+# Применение миграций
+alembic upgrade head
+
+# Откат миграции
+alembic downgrade -1
+```
+
+## Testing
+
+```bash
+# Unit tests
+pytest tests/unit/ -v
+
+# Integration tests (требуется docker-compose)
+pytest tests/integration/ -v
+
+# Coverage
+pytest --cov=app --cov-report=html
+```
+
+## Monitoring
+
+### Prometheus Metrics
+- `http://localhost:8030/metrics` - Endpoint для Prometheus scraping
+
+### Health Checks
+- `GET /health/live` - Проверка живости процесса
+- `GET /health/ready` - Проверка готовности (DB + Cache)
+
+### Logs
+- **Production**: JSON формат для ELK Stack, Splunk
+- **Development**: Text формат для удобства отладки
+
+## Architecture Notes
+
+### Multi-Level Caching Strategy
+1. **Local Cache** (in-memory): 300s TTL, fastest
+2. **Redis Cache**: 1800s TTL, distributed
+3. **PostgreSQL**: Source of truth, fallback
+
+### PostgreSQL Full-Text Search
+- GIN индексы на `search_vector` (ts_vector)
+- Автоматическое обновление через trigger
+- Поддержка русского языка (russian config)
+
+### SYNC Redis
+**ВАЖНО**: Redis используется в SYNC режиме (redis-py) согласно архитектурным требованиям ArtStore проекта.
+
+## Troubleshooting
+
+### Database connection failed
+```bash
+# Проверка PostgreSQL доступности
+docker-compose exec postgres pg_isready -U artstore
+```
+
+### Redis unavailable
+```bash
+# Проверка Redis
+docker-compose exec redis redis-cli ping
+```
+
+### JWT validation failed
+```bash
+# Проверка наличия public key
+ls -la ../admin-module/keys/public_key.pem
+```
+
+## Security
+
+- **JWT RS256 Authentication** для всех API endpoints (кроме health checks)
+- **Non-root Docker user** для безопасности контейнера
+- **SHA256 Verification** для целостности скачанных файлов
+- **TLS 1.3** для production deployment (настраивается на reverse proxy)
+
+## Performance
+
+- **Connection Pooling**: HTTP/2 persistent connections
+- **Streaming Downloads**: Минимизация memory usage
+- **Multi-Level Caching**: Снижение нагрузки на БД
+- **Async I/O**: Высокая concurrency для PostgreSQL
+
+## License
+
+Proprietary - ArtStore Project

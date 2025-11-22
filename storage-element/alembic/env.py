@@ -1,7 +1,7 @@
 """
-Alembic environment configuration для Storage Element.
+Alembic environment для Storage Element.
 
-Handles database migrations with SQLAlchemy models.
+Загружает конфигурацию из environment variables и настроек приложения.
 """
 
 from logging.config import fileConfig
@@ -10,39 +10,63 @@ from alembic import context
 import sys
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Добавляем родительскую директорию в sys.path для импорта app
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.db.base import Base, metadata
-from app.core.config import get_config
-from app.models import FileMetadata, WAL, Config  # Import all models
+from app.core.config import settings
+from app.db.base import Base
 
-# this is the Alembic Config object
+# Импортируем все модели чтобы они были зарегистрированы в Base.metadata
+from app.models import (
+    FileMetadata,
+    StorageConfig,
+    WALTransaction,
+    WALOperationType,
+    WALStatus,
+)
+
+# Это Alembic Config объект, который предоставляет
+# доступ к значениям из .ini файла
 config = context.config
 
-# Interpret the config file for Python logging
+# Интерпретируем конфигурацию для Python logging
+# Это устанавливает логгеры для всех 'sqlalchemy.engine'
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set SQLAlchemy URL from app config
-app_config = get_config()
-config.set_main_option("sqlalchemy.url", app_config.database.connection_url)
+# Устанавливаем sqlalchemy.url из наших настроек
+# ВАЖНО: Используем синхронный URL для Alembic (не asyncpg)
+# Преобразуем postgresql+asyncpg:// → postgresql+psycopg2://
+sync_url = settings.database.url.replace("+asyncpg", "+psycopg2")
+config.set_main_option("sqlalchemy.url", sync_url)
 
-# Add your model's MetaData object here for 'autogenerate' support
-target_metadata = metadata
+# Добавляем MetaData модели для поддержки 'autogenerate'
+target_metadata = Base.metadata
+
+
+def include_name(name, type_, parent_names):
+    """
+    Фильтрация объектов для миграций по table_prefix.
+
+    Включаем только таблицы с нашим префиксом (например test_storage.*).
+    Это позволяет нескольким storage-element использовать одну БД.
+    """
+    if type_ == "table":
+        # Проверяем что имя таблицы начинается с нашего префикса
+        prefix = settings.database.table_prefix
+        return name.startswith(f"{prefix}_")
+    return True
 
 
 def run_migrations_offline() -> None:
     """
-    Run migrations in 'offline' mode.
+    Запуск миграций в 'offline' режиме.
 
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
+    Это конфигурирует context только с URL
+    и не с Engine, хотя Engine также приемлем здесь.
+    Пропуская создание Engine, мы даже не нуждаемся в DBAPI.
 
-    Calls to context.execute() here emit the given string to the
-    script output.
+    Вызов context.execute() здесь генерирует SQL скрипт в STDOUT.
     """
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -50,6 +74,10 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,  # Сравнивать типы колонок при autogenerate
+        compare_server_default=True,  # Сравнивать server defaults
+        include_name=include_name,  # Фильтрация по table_prefix
+        version_table=f"{settings.database.table_prefix}_alembic_version",  # Уникальная version table
     )
 
     with context.begin_transaction():
@@ -58,10 +86,10 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """
-    Run migrations in 'online' mode.
+    Запуск миграций в 'online' режиме.
 
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
+    В этом сценарии мы должны создать Engine
+    и связать connection с context.
     """
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
@@ -72,7 +100,11 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
-            target_metadata=target_metadata
+            target_metadata=target_metadata,
+            compare_type=True,  # Сравнивать типы колонок при autogenerate
+            compare_server_default=True,  # Сравнивать server defaults
+            include_name=include_name,  # Фильтрация по table_prefix
+            version_table=f"{settings.database.table_prefix}_alembic_version",  # Уникальная version table
         )
 
         with context.begin_transaction():

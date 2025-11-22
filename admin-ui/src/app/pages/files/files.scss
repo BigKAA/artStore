@@ -1,0 +1,249 @@
+/**
+ * ArtStore Admin UI - Files Component Styles
+ * Стили для File Manager UI
+ */
+
+// Компонент контейнер
+.container-fluid {
+  max-width: 1400px;
+}
+
+// Table стили
+.table {
+  // Строки таблицы при hover
+  tbody tr {
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background-color: rgba(var(--bs-primary-rgb), 0.05);
+      cursor: pointer;
+    }
+  }
+
+  // Фиксированные ширины колонок для консистентности
+  th, td {
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  // Имя файла колонка - разрешаем перенос
+  td:first-child {
+    white-space: normal;
+    word-break: break-word;
+  }
+}
+
+// Badges стили
+.badge {
+  font-weight: 500;
+  padding: 0.4em 0.65em;
+
+  &.bg-secondary {
+    background-color: #6c757d !important;
+  }
+
+  &.bg-info {
+    background-color: #0dcaf0 !important;
+  }
+
+  &.bg-light {
+    border: 1px solid #dee2e6;
+  }
+}
+
+// Upload Modal стили
+.modal {
+  // Modal backdrop анимация
+  &-backdrop {
+    background-color: rgba(0, 0, 0, 0.5);
+    transition: opacity 0.15s linear;
+
+    &.show {
+      opacity: 1;
+    }
+  }
+
+  // Modal анимация появления
+  &.show {
+    display: block !important;
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  // Modal header с primary цветом
+  &-header.bg-primary {
+    background-color: var(--bs-primary) !important;
+    border-bottom: none;
+
+    .btn-close-white {
+      filter: brightness(0) invert(1);
+    }
+  }
+
+  // Modal body
+  &-body {
+    padding: 1.5rem;
+
+    .alert-info {
+      border-left: 4px solid var(--bs-info);
+    }
+  }
+}
+
+// Progress bar стили
+.progress {
+  background-color: #e9ecef;
+  border-radius: 0.25rem;
+  overflow: hidden;
+
+  .progress-bar {
+    transition: width 0.3s ease;
+    font-weight: 600;
+    font-size: 0.875rem;
+    line-height: 25px;
+  }
+}
+
+// Search bar и filters
+.input-group {
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+  border-radius: 0.375rem;
+  overflow: hidden;
+
+  .input-group-text {
+    background-color: #f8f9fa;
+    border-right: none;
+  }
+
+  .form-control {
+    border-left: none;
+    border-right: none;
+
+    &:focus {
+      box-shadow: none;
+      border-color: #ced4da;
+    }
+  }
+}
+
+// Filters row
+.form-label.small {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.4rem;
+}
+
+// Alert стили
+.alert {
+  border-left-width: 4px;
+  border-left-style: solid;
+  animation: slideDown 0.3s ease-out;
+
+  &-success {
+    border-left-color: var(--bs-success);
+  }
+
+  &-danger {
+    border-left-color: var(--bs-danger);
+  }
+}
+
+// Pagination стили
+.pagination {
+  .page-item {
+    margin: 0 0.125rem;
+
+    .page-link {
+      border-radius: 0.375rem;
+      color: var(--bs-primary);
+      border: 1px solid #dee2e6;
+      transition: all 0.2s ease;
+
+      &:hover {
+        background-color: rgba(var(--bs-primary-rgb), 0.1);
+        border-color: var(--bs-primary);
+      }
+    }
+
+    &.active .page-link {
+      background-color: var(--bs-primary);
+      border-color: var(--bs-primary);
+    }
+
+    &.disabled .page-link {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+  }
+}
+
+// Empty state стили
+.bi-inbox {
+  color: #adb5bd;
+}
+
+// Card стили
+.card {
+  box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.075);
+  border: none;
+  border-radius: 0.5rem;
+
+  .card-footer {
+    background-color: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+  }
+}
+
+// Loading spinner
+.spinner-border {
+  animation: spinner-border 0.75s linear infinite;
+}
+
+// Animations
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes spinner-border {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// Responsive стили
+@media (max-width: 768px) {
+  .table {
+    font-size: 0.875rem;
+
+    th, td {
+      padding: 0.5rem;
+    }
+  }
+
+  .modal-dialog {
+    margin: 0.5rem;
+  }
+
+  .pagination {
+    font-size: 0.875rem;
+  }
+}

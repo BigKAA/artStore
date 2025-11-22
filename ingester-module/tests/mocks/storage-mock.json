@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "httpRequest": {
+        "method": "POST",
+        "path": "/api/v1/files/upload"
+      },
+      "httpResponse": {
+        "statusCode": 200,
+        "headers": {
+          "Content-Type": ["application/json"]
+        },
+        "body": {
+          "file_id": "550e8400-e29b-41d4-a716-446655440000",
+          "original_filename": "test-file.txt",
+          "storage_filename": "test-file_testuser_20250114T120000_abc123.txt",
+          "file_size": 1024,
+          "compressed": false,
+          "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "uploaded_at": "2025-01-14T12:00:00Z",
+          "storage_element_url": "http://mock-storage:8010"
+        }
+      }
+    },
+    {
+      "httpRequest": {
+        "method": "DELETE",
+        "path": "/api/v1/files/.*"
+      },
+      "httpResponse": {
+        "statusCode": 204,
+        "headers": {
+          "Content-Type": ["application/json"]
+        }
+      }
+    },
+    {
+      "httpRequest": {
+        "method": "GET",
+        "path": "/api/v1/health/live"
+      },
+      "httpResponse": {
+        "statusCode": 200,
+        "headers": {
+          "Content-Type": ["application/json"]
+        },
+        "body": {
+          "status": "healthy"
+        }
+      }
+    }
+  ]
+}

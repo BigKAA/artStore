@@ -4,52 +4,84 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
-*.egg-info/
-dist/
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Testing
-.pytest_cache/
-htmlcov/
-.coverage
-*.cover
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
 
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Data
-.data/
-*.db
-*.sqlite
-
-# Logs
-*.log
-
-# OS
+*~
 .DS_Store
-Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Documentation
+docs/_build/
+.readthedocs.yml
+
+# Local data
+.data/
+data/
+*.log
+logs/
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+Dockerfile
 
 # Git
 .git/
 .gitignore
+.gitattributes
 
-# Docker
-Dockerfile*
-.dockerignore
-docker-compose*.yml
+# CI/CD
+.github/
+.gitlab-ci.yml
 
-# Documentation
-README.md
-DESIGN.md
-*.md
-
-# Config (use example instead)
-config.yaml
+# Environment
 .env
-keys/*.pem
+.env.local
+.env.*.local
+
+# Keys (security)
+*.pem
+*.key
+.keys/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp

@@ -1,127 +1,418 @@
+# ==============================================================================
+# ArtStore - Главный Docker Compose файл
+# ==============================================================================
+# Запускает полную систему ArtStore:
+# - Инфраструктура: PostgreSQL, Redis, MinIO, PgAdmin
+# - Backend: Admin Module, Storage Element, Ingester Module, Query Module
+#
+# Использование:
+#   # Запуск всей системы
+#   docker-compose up -d
+#
+#   # Запуск только инфраструктуры
+#   docker-compose up -d postgres redis minio
+#
+#   # Запуск конкретного модуля
+#   docker-compose up -d admin-module
+#
+#   # Просмотр логов
+#   docker-compose logs -f <service-name>
+#
+#   # Остановка
+#   docker-compose down
+#
+# ВАЖНО: Всегда запускайте из корня проекта!
+# ==============================================================================
+
+version: '3.8'
+
+# ==============================================================================
+# INFRASTRUCTURE SERVICES
+# ==============================================================================
 services:
+  # PostgreSQL 15 - Primary Database
   postgres:
     image: postgres:15
     container_name: artstore_postgres
+    restart: unless-stopped
     environment:
+      POSTGRES_USER: ${DB_USERNAME:-artstore}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
       POSTGRES_DB: artstore
-      POSTGRES_USER: artstore
-      POSTGRES_PASSWORD: password
-      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_AUTH_METHOD:-md5}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
-      - postgres:/var/lib/postgresql/data
-    restart: unless-stopped
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - artstore_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U artstore -d artstore"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-artstore} -d artstore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: artstore_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: password
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin:/var/lib/pgadmin
-    depends_on:
-      - postgres
-    restart: unless-stopped
-
+  # Redis 7 - Service Discovery & Caching (SYNC режим!)
   redis:
     image: redis:7-alpine
     container_name: artstore_redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis:/data
     restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - artstore_network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
+  # MinIO - S3-Compatible Object Storage
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: artstore_minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio:/data
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
     restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # Web Console
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - artstore_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
-  
-  ldap:
-    image: 389ds/dirsrv:3.1
-    container_name: artstore_ldap
-    ports:
-      - "1389:3389"
-      - "1636:3636"
-    environment:
-      DS_DM_PASSWORD: "password"
-      DS_SUFFIX_NAME: "dc=artstore,dc=local"
-    volumes:
-      - ldap_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "usr/lib/dirsrv/dscontainer -H"]
-      interval: 30s
-      start_period: 30s
-      timeout: 10s
-      retries: 5
-    restart: unless-stopped
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
-  dex:
-    image: dexidp/dex:v2.44.0
-    container_name: artstore_dex
-    ports:
-      - "5556:5556" # web
-      - "5557:5557" # grpc
-      - "5558:5558" # telemetry
-    volumes:
-      - ./.utils/dex/config.yml:/etc/dex/config.yml
-    command: dex serve /etc/dex/config.yml
-    restart: unless-stopped
-    depends_on:
-    - ldap
-        
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider --proxy=off http://localhost:5556/dex/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  nginx:
-    image: nginx:latest
-    container_name: artstore_nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./.utils/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./.utils/nginx/certs:/etc/nginx/certs
-    command: /bin/sh -c "mkdir -p /etc/nginx/certs && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/certs/key.pem -out /etc/nginx/certs/cert.pem -subj '/C=RU/ST=Moscow/L=Moscow/O=ArtStore/OU=IT/CN=localhost' && nginx -g 'daemon off;'"
-    depends_on:
-      - dex
-    restart: unless-stopped
-
-volumes:
-  ldap_data:
-  postgres:
+  # PgAdmin 4 - PostgreSQL Management (Optional)
   pgadmin:
-  redis:
-  minio:
+    image: dpage/pgadmin4:9.10
+    container_name: artstore_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-password}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - artstore_network
+    depends_on:
+      - postgres
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+# ==============================================================================
+# BACKEND SERVICES
+# ==============================================================================
+
+  # Admin Module - Authentication & Management Center
+  admin-module:
+    build:
+      context: ./admin-module
+      dockerfile: Dockerfile
+    container_name: artstore_admin_module
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Application
+      APP_NAME: artstore-admin-module
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+
+      # JWT
+      JWT_ALGORITHM: RS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
+
+      # Initial System Account
+      INITIAL_ACCOUNT_ENABLED: true
+      INITIAL_ACCOUNT_NAME: admin-service
+      INITIAL_ACCOUNT_ROLE: ADMIN
+    volumes:
+      # JWT keys (persist для всех узлов кластера)
+      - admin_jwt_keys:/app/secrets
+
+      # Logs
+      - admin_logs:/app/logs
+
+      # tmpfs для временных файлов
+      - type: tmpfs
+        target: /tmp
+    networks:
+      - artstore_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Storage Element - Physical File Storage
+  storage-element:
+    build:
+      context: ./storage-element
+      dockerfile: Dockerfile
+    container_name: artstore_storage_element
+    restart: unless-stopped
+    ports:
+      - "8010:8000"
+    environment:
+      # Application
+      APP_NAME: artstore-storage-element
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Storage Configuration
+      STORAGE_MODE: edit  # edit, rw, ro, ar
+      STORAGE_TYPE: local  # local или s3
+      STORAGE_MAX_SIZE_GB: 100
+
+      # Local Filesystem
+      STORAGE_LOCAL_BASE_PATH: /app/.data/storage
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+      DB_TABLE_PREFIX: storage_elem_01
+
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+
+      # WAL
+      WAL_ENABLED: true
+      WAL_RETENTION_HOURS: 24
+    volumes:
+      # Данные хранилища (именованный volume)
+      - storage_data:/app/.data/storage
+
+      # Logs
+      - storage_logs:/app/logs
+
+      # tmpfs для временных файлов
+      - type: tmpfs
+        target: /tmp
+    networks:
+      - artstore_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Ingester Module - File Upload Management
+  ingester-module:
+    build:
+      context: ./ingester-module
+      dockerfile: Dockerfile
+    container_name: artstore_ingester_module
+    restart: unless-stopped
+    ports:
+      - "8020:8000"
+    environment:
+      # Application
+      APP_NAME: artstore-ingester-module
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Upload Limits
+      MAX_FILE_SIZE_MB: 1024
+      MAX_BATCH_FILES: 100
+      CHUNK_SIZE_MB: 10
+
+      # Compression
+      COMPRESSION_ENABLED: true
+      COMPRESSION_MIN_SIZE_MB: 10
+
+      # Redis (Service Discovery)
+      REDIS_URL: redis://redis:6379/0
+      SERVICE_DISCOVERY_CHANNEL: artstore:storage-elements
+
+      # Circuit Breaker
+      CIRCUIT_BREAKER_ENABLED: true
+      CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5
+    volumes:
+      # Logs
+      - ingester_logs:/app/logs
+
+      # tmpfs для временных файлов
+      - type: tmpfs
+        target: /tmp
+    networks:
+      - artstore_network
+    depends_on:
+      redis:
+        condition: service_healthy
+      admin-module:
+        condition: service_healthy
+      storage-element:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Query Module - File Search & Download
+  query-module:
+    build:
+      context: ./query-module
+      dockerfile: Dockerfile
+    container_name: artstore_query_module
+    restart: unless-stopped
+    ports:
+      - "8030:8000"
+    environment:
+      # Application
+      APP_NAME: artstore-query-module
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+
+      # Redis
+      REDIS_URL: redis://redis:6379/1
+      SERVICE_DISCOVERY_CHANNEL: artstore:storage-elements
+
+      # Caching
+      LOCAL_CACHE_SIZE: 1000
+      LOCAL_CACHE_TTL_SECONDS: 60
+      REDIS_CACHE_TTL_SECONDS: 300
+
+      # Search
+      SEARCH_DEFAULT_PAGE_SIZE: 50
+      SEARCH_MAX_PAGE_SIZE: 1000
+
+      # Circuit Breaker
+      CIRCUIT_BREAKER_ENABLED: true
+    volumes:
+      # Logs
+      - query_logs:/app/logs
+
+      # tmpfs для временных файлов
+      - type: tmpfs
+        target: /tmp
+    networks:
+      - artstore_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      storage-element:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# ==============================================================================
+# NETWORKS
+# ==============================================================================
+networks:
+  artstore_network:
+    name: artstore_network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ==============================================================================
+# VOLUMES
+# ==============================================================================
+volumes:
+  # Infrastructure
+  postgres_data:
+    name: artstore_postgres_data
+  redis_data:
+    name: artstore_redis_data
+  minio_data:
+    name: artstore_minio_data
+  pgadmin_data:
+    name: artstore_pgadmin_data
+
+  # Admin Module
+  admin_jwt_keys:
+    name: artstore_admin_jwt_keys
+  admin_logs:
+    name: artstore_admin_logs
+
+  # Storage Element
+  storage_data:
+    name: artstore_storage_data
+  storage_logs:
+    name: artstore_storage_logs
+
+  # Ingester Module
+  ingester_logs:
+    name: artstore_ingester_logs
+
+  # Query Module
+  query_logs:
+    name: artstore_query_logs
+
+# ==============================================================================
+# NOTES
+# ==============================================================================
+# 1. Все сервисы логируют в именованные volumes, НЕ в source directories
+# 2. tmpfs используется для временных файлов (pytest cache, temp uploads)
+# 3. Health checks обеспечивают ready state перед запуском зависимых модулей
+# 4. Resource limits предотвращают OOM
+# 5. Логи в JSON формате для production (ELK/Splunk integration)
+# 6. Redis работает в SYNC режиме для Service Discovery
+# ==============================================================================

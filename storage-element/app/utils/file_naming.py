@@ -1,249 +1,280 @@
 """
-File naming utility для Storage Element.
+Утилиты для генерации уникальных имен файлов в хранилище.
 
-Генерирует уникальные storage-friendly имена файлов с автоматическим обрезанием.
-Формат: {name}_{username}_{timestamp}_{uuid}.{ext}
+Формат имени:
+{original_name_stem}_{username}_{timestamp}_{uuid}.{ext}
+
+Пример:
+report_ivanov_20250110T153045_a1b2c3d4-e5f6-7890-abcd-ef1234567890.pdf
+
+Гарантии:
+- Уникальность через UUID
+- Human-readable через original name первым
+- Автоматическое обрезание длинных имен до 200 символов
+- Поддержка unicode символов в именах
 """
 
-from datetime import datetime, timezone
+import re
+from datetime import datetime
 from pathlib import Path
-from uuid import uuid4, UUID
 from typing import Optional
+from uuid import UUID, uuid4
+
+
+def sanitize_filename(filename: str) -> str:
+    """
+    Очистка имени файла от недопустимых символов.
+
+    Заменяет все недопустимые символы на подчеркивание.
+    Сохраняет unicode символы (русские, китайские и т.д.).
+
+    Args:
+        filename: Исходное имя файла
+
+    Returns:
+        str: Очищенное имя файла
+
+    Примеры:
+        >>> sanitize_filename("report/2024.pdf")
+        "report_2024.pdf"
+        >>> sanitize_filename("отчет за 2024.docx")
+        "отчет_за_2024.docx"
+    """
+    # Недопустимые символы для файловой системы
+    invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
+
+    # Замена недопустимых символов на подчеркивание
+    sanitized = re.sub(invalid_chars, '_', filename)
+
+    # Удаление множественных подчеркиваний
+    sanitized = re.sub(r'_+', '_', sanitized)
+
+    # Удаление подчеркиваний в начале и конце
+    sanitized = sanitized.strip('_')
+
+    return sanitized
+
+
+def truncate_stem(stem: str, max_length: int) -> str:
+    """
+    Обрезание имени файла с сохранением читаемости.
+
+    Если имя длиннее max_length:
+    - Берет первые (max_length - 3) символов
+    - Добавляет "..." в конец
+
+    Args:
+        stem: Имя файла без расширения
+        max_length: Максимальная длина
+
+    Returns:
+        str: Обрезанное имя
+
+    Примеры:
+        >>> truncate_stem("very_long_filename", 10)
+        "very_lo..."
+    """
+    if len(stem) <= max_length:
+        return stem
+
+    # Обрезаем и добавляем многоточие
+    return stem[:max_length - 3] + "..."
 
 
 def generate_storage_filename(
-    original_name: str,
+    original_filename: str,
     username: str,
     timestamp: Optional[datetime] = None,
-    file_uuid: Optional[str] = None,
-    max_filename_length: int = 200
+    file_uuid: Optional[UUID] = None,
+    max_total_length: int = 200
 ) -> str:
     """
-    Генерирует уникальное storage filename с автоматическим обрезанием до max_filename_length.
+    Генерация уникального имени файла для хранилища.
 
-    Формат: {name_without_ext}_{username}_{timestamp}_{uuid}.{ext}
-
-    Где:
-    - name_without_ext: оригинальное имя без расширения (обрезается при необходимости)
-    - username: имя пользователя, загружающего файл
-    - timestamp: ISO 8601 формат (например, 20251108T103045)
-    - uuid: уникальный идентификатор файла (без дефисов)
-    - ext: оригинальное расширение файла
+    Формат: {stem}_{username}_{timestamp}_{uuid}.{ext}
 
     Args:
-        original_name: Оригинальное имя файла (например, "report.pdf")
-        username: Имя пользователя (например, "ivanov")
-        timestamp: Timestamp для имени (по умолчанию - текущее время)
-        file_uuid: UUID файла (по умолчанию - генерируется новый)
-        max_filename_length: Максимальная длина результирующего имени (по умолчанию 200)
+        original_filename: Оригинальное имя файла с расширением
+        username: Username пользователя
+        timestamp: Timestamp создания (default: now)
+        file_uuid: UUID файла (default: новый UUID)
+        max_total_length: Максимальная длина итогового имени (default: 200)
 
     Returns:
-        str: Storage filename (например, "report_ivanov_20251108T103045_a1b2c3d4e5f67890.pdf")
+        str: Уникальное имя файла для хранилища
 
     Raises:
-        ValueError: Если original_name пустое или username содержит недопустимые символы
-        ValueError: Если невозможно создать имя в пределах max_filename_length
+        ValueError: Если username пустой или содержит недопустимые символы
 
-    Examples:
-        >>> generate_storage_filename("report.pdf", "ivanov")
-        'report_ivanov_20251108T103045_a1b2c3d4e5f67890.pdf'
-
-        >>> # Обрезание длинного имени
-        >>> long_name = "a" * 300 + ".pdf"
-        >>> result = generate_storage_filename(long_name, "user")
-        >>> len(result) <= 200
-        True
-
-        >>> # С фиксированным UUID и timestamp
-        >>> dt = datetime(2025, 11, 8, 10, 30, 45)
+    Примеры:
         >>> generate_storage_filename(
-        ...     "doc.txt",
-        ...     "smith",
-        ...     timestamp=dt,
-        ...     file_uuid="12345678-90ab-cdef-1234-567890abcdef"
+        ...     "report.pdf",
+        ...     "ivanov",
+        ...     datetime(2025, 1, 10, 15, 30, 45),
+        ...     UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
         ... )
-        'doc_smith_20251108T103045_1234567890abcdef1234567890abcdef.txt'
+        "report_ivanov_20250110T153045_a1b2c3d4-e5f6-7890-abcd-ef1234567890.pdf"
     """
-    # Валидация входных данных
-    if not original_name or not original_name.strip():
-        raise ValueError("original_name не может быть пустым")
-
+    # Валидация username
     if not username or not username.strip():
-        raise ValueError("username не может быть пустым")
+        raise ValueError("Username cannot be empty")
 
-    # Очистка username от недопустимых символов (только латиница, цифры, дефис, подчеркивание)
-    username = username.strip()
-    # Проверяем что username содержит только ASCII буквы/цифры, дефис и подчеркивание
-    if not all(c.isascii() and (c.isalnum() or c in ('-', '_')) for c in username):
-        raise ValueError(
-            f"username содержит недопустимые символы: '{username}'. "
-            "Разрешены только латиница, цифры, дефис и подчеркивание"
-        )
+    # Очистка username от недопустимых символов
+    clean_username = sanitize_filename(username.strip())
+    if not clean_username:
+        raise ValueError("Username contains only invalid characters")
 
-    # Получение timestamp в ISO 8601 формате (компактная версия без разделителей)
+    # Генерация timestamp если не передан
     if timestamp is None:
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now()
+
+    # Генерация UUID если не передан
+    if file_uuid is None:
+        file_uuid = uuid4()
+
+    # Парсинг оригинального имени
+    original_path = Path(original_filename)
+    original_stem = original_path.stem  # Имя без расширения
+    original_ext = original_path.suffix  # Расширение с точкой
+
+    # Очистка stem от недопустимых символов
+    clean_stem = sanitize_filename(original_stem)
+    if not clean_stem:
+        # Если имя файла содержало только недопустимые символы
+        clean_stem = "file"
+
+    # Форматирование timestamp (ISO 8601 compact)
     timestamp_str = timestamp.strftime("%Y%m%dT%H%M%S")
 
-    # Генерация или валидация UUID
-    if file_uuid is None:
-        uuid_str = uuid4().hex  # UUID без дефисов (32 символа)
-    else:
-        # Валидация и нормализация UUID
-        try:
-            # Поддержка как UUID объектов, так и строк
-            if isinstance(file_uuid, UUID):
-                uuid_str = file_uuid.hex
-            else:
-                uuid_str = UUID(file_uuid).hex
-        except (ValueError, AttributeError) as e:
-            raise ValueError(f"Недопустимый формат UUID: {file_uuid}") from e
+    # UUID в строковом формате
+    uuid_str = str(file_uuid)
 
-    # Разбор оригинального имени на stem и extension
-    path = Path(original_name.strip())
-    name_stem = path.stem
-    name_ext = path.suffix  # Включает точку (например, ".pdf")
-
-    if not name_stem:
-        raise ValueError(f"original_name должно содержать имя файла: '{original_name}'")
-
-    # Вычисление фиксированной части длины (все кроме name_stem)
-    # Формат: {name_stem}_{username}_{timestamp}_{uuid}{ext}
-    # Фиксированные части: "_" (3 символа) + username + timestamp + uuid + ext
+    # Расчет доступной длины для stem
+    # Формат: {stem}_{username}_{timestamp}_{uuid}.{ext}
+    # Фиксированные части: _ + username + _ + timestamp + _ + uuid + ext
     fixed_length = (
-        1 +  # первый подчеркивание после name_stem
-        len(username) +
-        1 +  # второй подчеркивание
+        1 +  # первый _
+        len(clean_username) +
+        1 +  # второй _
         len(timestamp_str) +
-        1 +  # третий подчеркивание
+        1 +  # третий _
         len(uuid_str) +
-        len(name_ext)
+        len(original_ext)
     )
 
-    # Вычисление доступного места для name_stem
-    available_for_stem = max_filename_length - fixed_length
-
-    # Проверка на минимальную длину
-    if available_for_stem < 1:
+    # Проверка что фиксированная часть не превышает лимит
+    if fixed_length >= max_total_length:
         raise ValueError(
-            f"Невозможно создать filename в пределах {max_filename_length} символов. "
-            f"Фиксированная часть занимает {fixed_length} символов "
-            f"(username={len(username)}, timestamp={len(timestamp_str)}, "
-            f"uuid={len(uuid_str)}, ext={len(name_ext)}). "
-            f"Попробуйте использовать более короткий username или увеличить max_filename_length."
+            f"Fixed parts of filename ({fixed_length} chars) exceed max length ({max_total_length})"
         )
 
-    # Обрезание name_stem если необходимо
-    if len(name_stem) > available_for_stem:
-        truncated_stem = name_stem[:available_for_stem]
-        # Для удобства debugging - логирование не реализовано здесь (будет добавлено на уровне API)
-    else:
-        truncated_stem = name_stem
+    # Доступная длина для stem
+    available_for_stem = max_total_length - fixed_length
 
-    # Сборка итогового filename
-    storage_filename = f"{truncated_stem}_{username}_{timestamp_str}_{uuid_str}{name_ext}"
+    # Обрезание stem если необходимо
+    if len(clean_stem) > available_for_stem:
+        clean_stem = truncate_stem(clean_stem, available_for_stem)
 
-    # Финальная проверка длины (должно быть гарантировано математикой выше)
-    assert len(storage_filename) <= max_filename_length, (
-        f"Internal error: generated filename exceeds max length. "
-        f"Generated: {len(storage_filename)}, Max: {max_filename_length}"
+    # Сборка итогового имени
+    storage_filename = (
+        f"{clean_stem}_{clean_username}_{timestamp_str}_{uuid_str}{original_ext}"
     )
 
     return storage_filename
 
 
-def parse_storage_filename(storage_filename: str) -> dict:
+def generate_storage_path(timestamp: Optional[datetime] = None) -> str:
     """
-    Парсит storage filename и извлекает компоненты.
+    Генерация пути для хранения файла: /year/month/day/hour/
 
     Args:
-        storage_filename: Storage filename для парсинга
+        timestamp: Timestamp для генерации пути (default: now)
 
     Returns:
-        dict: Словарь с ключами:
-            - name_stem: имя без расширения (возможно обрезанное)
-            - username: имя пользователя
-            - timestamp: datetime объект
-            - uuid: UUID строка (с дефисами)
-            - extension: расширение файла с точкой
+        str: Относительный путь в формате "YYYY/MM/DD/HH/"
+
+    Примеры:
+        >>> generate_storage_path(datetime(2025, 1, 10, 15, 30, 45))
+        "2025/01/10/15/"
+    """
+    if timestamp is None:
+        timestamp = datetime.now()
+
+    # Форматирование: год/месяц/день/час/
+    path = timestamp.strftime("%Y/%m/%d/%H/")
+
+    return path
+
+
+def parse_storage_filename(storage_filename: str) -> dict:
+    """
+    Парсинг storage filename для извлечения компонентов.
+
+    Args:
+        storage_filename: Имя файла в формате хранилища
+
+    Returns:
+        dict: Словарь с компонентами {
+            "original_stem": str,
+            "username": str,
+            "timestamp": datetime,
+            "uuid": UUID,
+            "extension": str
+        }
 
     Raises:
-        ValueError: Если filename не соответствует ожидаемому формату
+        ValueError: Если имя файла не соответствует формату
 
-    Examples:
-        >>> parsed = parse_storage_filename("report_ivanov_20251108T103045_a1b2c3d4.pdf")
-        >>> parsed['username']
-        'ivanov'
-        >>> parsed['timestamp']
-        datetime.datetime(2025, 11, 8, 10, 30, 45)
+    Примеры:
+        >>> parse_storage_filename(
+        ...     "report_ivanov_20250110T153045_a1b2c3d4-e5f6-7890-abcd-ef1234567890.pdf"
+        ... )
+        {
+            "original_stem": "report",
+            "username": "ivanov",
+            "timestamp": datetime(2025, 1, 10, 15, 30, 45),
+            "uuid": UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
+            "extension": ".pdf"
+        }
     """
-    # Получение расширения
+    # Разделение имени и расширения
     path = Path(storage_filename)
+    filename_without_ext = path.stem
     extension = path.suffix
-    name_without_ext = path.stem
 
-    # Разбор на компоненты (ожидаем минимум 4 части, разделенные "_")
-    parts = name_without_ext.split("_")
+    # Разбиение по подчеркиваниям (последние 3 части фиксированы)
+    parts = filename_without_ext.split('_')
 
     if len(parts) < 4:
         raise ValueError(
-            f"Недопустимый формат storage filename: '{storage_filename}'. "
-            f"Ожидается формат: {{name}}_{{username}}_{{timestamp}}_{{uuid}}.{{ext}}"
+            f"Invalid storage filename format: {storage_filename}. "
+            "Expected format: stem_username_timestamp_uuid.ext"
         )
 
-    # Последние 3 части - это всегда username, timestamp, uuid
-    # Все что перед ними - это name_stem (может содержать подчеркивания)
+    # Последние 3 части: username, timestamp, uuid
     uuid_str = parts[-1]
     timestamp_str = parts[-2]
     username = parts[-3]
-    name_stem = "_".join(parts[:-3]) if len(parts) > 4 else parts[0]
+
+    # Все остальное - original stem (может содержать подчеркивания)
+    original_stem = '_'.join(parts[:-3])
 
     # Парсинг timestamp
     try:
         timestamp = datetime.strptime(timestamp_str, "%Y%m%dT%H%M%S")
     except ValueError as e:
-        raise ValueError(
-            f"Недопустимый формат timestamp в filename: '{timestamp_str}'"
-        ) from e
+        raise ValueError(f"Invalid timestamp format: {timestamp_str}") from e
 
-    # Валидация UUID и форматирование с дефисами
+    # Парсинг UUID
     try:
-        # UUID в filename хранится без дефисов (32 символа)
-        # Восстанавливаем стандартный формат UUID с дефисами
-        uuid_obj = UUID(uuid_str)
-        uuid_formatted = str(uuid_obj)  # С дефисами
+        file_uuid = UUID(uuid_str)
     except ValueError as e:
-        raise ValueError(
-            f"Недопустимый формат UUID в filename: '{uuid_str}'"
-        ) from e
+        raise ValueError(f"Invalid UUID format: {uuid_str}") from e
 
     return {
-        "name_stem": name_stem,
+        "original_stem": original_stem,
         "username": username,
         "timestamp": timestamp,
-        "uuid": uuid_formatted,
+        "uuid": file_uuid,
         "extension": extension
     }
-
-
-def validate_storage_filename(storage_filename: str) -> bool:
-    """
-    Проверяет валидность storage filename.
-
-    Args:
-        storage_filename: Filename для проверки
-
-    Returns:
-        bool: True если filename валиден, False иначе
-
-    Examples:
-        >>> validate_storage_filename("report_ivanov_20251108T103045_a1b2c3d4.pdf")
-        True
-        >>> validate_storage_filename("invalid_filename.pdf")
-        False
-    """
-    try:
-        parse_storage_filename(storage_filename)
-        return True
-    except ValueError:
-        return False

@@ -1,0 +1,167 @@
+<!-- ArtStore Admin UI - Login Page Template -->
+<div class="login-container">
+  <div class="container-fluid h-100">
+    <div class="row h-100 align-items-center justify-content-center">
+      <div class="col-11 col-sm-9 col-md-7 col-lg-5 col-xl-4 col-xxl-3">
+        <!-- Login Card -->
+        <div class="card shadow-lg border-0">
+          <div class="card-body p-4 p-sm-5">
+            <!-- Logo and Title -->
+            <div class="text-center mb-4">
+              <div class="mb-3">
+                <i class="bi bi-box-seam text-primary" style="font-size: 3rem;"></i>
+              </div>
+              <h1 class="h3 mb-1 fw-bold">ArtStore Admin</h1>
+              <p class="text-muted small">Admin Panel Authentication</p>
+            </div>
+
+            <!-- Error Alert -->
+            @if (error$ | async; as error) {
+              <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>Authentication Failed</strong>
+                <div class="small mt-1">{{ error }}</div>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            }
+
+            <!-- Login Form -->
+            <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" novalidate>
+              <!-- Username Field -->
+              <div class="mb-3">
+                <label for="username" class="form-label fw-semibold">
+                  Username
+                  <span class="text-danger">*</span>
+                </label>
+                <div class="input-group">
+                  <span class="input-group-text bg-light border-end-0">
+                    <i class="bi bi-person-fill"></i>
+                  </span>
+                  <input
+                    type="text"
+                    class="form-control border-start-0"
+                    [class.is-invalid]="isFieldInvalid('username')"
+                    [class.is-valid]="isFieldValid('username')"
+                    id="username"
+                    formControlName="username"
+                    placeholder="Enter your username"
+                    autocomplete="username"
+                  />
+                  @if (isFieldInvalid('username')) {
+                    <div class="invalid-feedback">
+                      {{ getErrorMessage('username') }}
+                    </div>
+                  }
+                  @if (isFieldValid('username')) {
+                    <div class="valid-feedback">
+                      Looks good!
+                    </div>
+                  }
+                </div>
+                <div class="form-text">
+                  <i class="bi bi-info-circle me-1"></i>
+                  Your admin username (minimum 3 characters)
+                </div>
+              </div>
+
+              <!-- Password Field -->
+              <div class="mb-3">
+                <label for="password" class="form-label fw-semibold">
+                  Password
+                  <span class="text-danger">*</span>
+                </label>
+                <div class="input-group">
+                  <span class="input-group-text bg-light border-end-0">
+                    <i class="bi bi-lock-fill"></i>
+                  </span>
+                  <input
+                    [type]="showPassword ? 'text' : 'password'"
+                    class="form-control border-start-0 border-end-0"
+                    [class.is-invalid]="isFieldInvalid('password')"
+                    [class.is-valid]="isFieldValid('password')"
+                    id="password"
+                    formControlName="password"
+                    placeholder="Enter your password"
+                    autocomplete="current-password"
+                  />
+                  <button
+                    class="btn btn-outline-secondary border-start-0"
+                    type="button"
+                    (click)="togglePasswordVisibility()"
+                    title="{{ showPassword ? 'Hide' : 'Show' }} password"
+                  >
+                    <i class="bi" [class.bi-eye-slash-fill]="showPassword" [class.bi-eye-fill]="!showPassword"></i>
+                  </button>
+                  @if (isFieldInvalid('password')) {
+                    <div class="invalid-feedback">
+                      {{ getErrorMessage('password') }}
+                    </div>
+                  }
+                  @if (isFieldValid('password')) {
+                    <div class="valid-feedback">
+                      Looks good!
+                    </div>
+                  }
+                </div>
+                <div class="form-text">
+                  <i class="bi bi-shield-lock me-1"></i>
+                  Your admin password (minimum 8 characters)
+                </div>
+              </div>
+
+              <!-- Remember Me Checkbox -->
+              <div class="mb-4">
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="rememberMe"
+                    formControlName="rememberMe"
+                  />
+                  <label class="form-check-label" for="rememberMe">
+                    Remember me for 7 days
+                  </label>
+                </div>
+              </div>
+
+              <!-- Submit Button -->
+              <div class="d-grid gap-2">
+                <button
+                  type="submit"
+                  class="btn btn-primary btn-lg"
+                  [disabled]="(loading$ | async) ?? false"
+                >
+                  @if (loading$ | async) {
+                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                    <span>Authenticating...</span>
+                  } @else {
+                    <i class="bi bi-box-arrow-in-right me-2"></i>
+                    <span>Sign In</span>
+                  }
+                </button>
+              </div>
+            </form>
+
+            <!-- Footer Info -->
+            <div class="mt-4 pt-4 border-top text-center">
+              <p class="text-muted small mb-2">
+                <i class="bi bi-shield-check me-1"></i>
+                Secured with JWT Authentication
+              </p>
+              <p class="text-muted small mb-0">
+                Need access? Contact your system administrator.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Version Info -->
+        <div class="text-center mt-3">
+          <p class="text-muted small mb-0">
+            ArtStore Admin UI v1.0.0 | © 2025
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

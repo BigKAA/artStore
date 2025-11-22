@@ -84,6 +84,68 @@
 
 Следующие экземпляры приложения будут доступны на портах от 8001 до 8009.
 
+### Первый запуск и инициализация
+
+При первом запуске Admin Module автоматически выполняет следующие действия:
+
+#### Автоматическое создание администратора
+
+Если база данных пуста (нет ни одного пользователя), система автоматически создает первого администратора с параметрами из конфигурации.
+
+**Настройка через Environment Variables (`.env`):**
+
+```bash
+# Initial Administrator (создается автоматически при первом запуске)
+INITIAL_ADMIN_ENABLED=true
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=ChangeMe123!  # ОБЯЗАТЕЛЬНО ИЗМЕНИТЬ В PRODUCTION
+INITIAL_ADMIN_EMAIL=admin@artstore.local
+INITIAL_ADMIN_FIRSTNAME=System
+INITIAL_ADMIN_LASTNAME=Administrator
+```
+
+**Важные замечания:**
+
+1. **Безопасность Production**: В производственной среде **ОБЯЗАТЕЛЬНО** установите безопасный пароль через environment variable `INITIAL_ADMIN_PASSWORD`
+
+2. **Системный пользователь**: Автоматически созданный администратор имеет флаг `is_system=True`, что означает:
+   - Не может быть удален через API
+   - Нельзя убрать права администратора
+   - Нельзя деактивировать
+
+3. **Отключение автосоздания**: Если нужно отключить автоматическое создание администратора, установите:
+   ```bash
+   INITIAL_ADMIN_ENABLED=false
+   ```
+
+4. **Смена пароля после первого входа**: Рекомендуется сразу изменить пароль после первого входа через API endpoint `PUT /api/auth/me/password`
+
+**Пример первого входа:**
+
+```bash
+# 1. Войти с default credentials
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "admin123"
+  }'
+
+# 2. Сохранить полученный access_token
+# Response: {"access_token": "eyJ...", "refresh_token": "eyJ..."}
+
+# 3. Сменить пароль
+curl -X PUT http://localhost:8000/api/auth/me/password \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "current_password": "admin123",
+    "new_password": "YourSecurePassword123!"
+  }'
+```
+
+**Audit Logging**: Создание initial admin логируется с меткой `SECURITY AUDIT` для отслеживания первого запуска системы.
+
 ## API Эндпоинты
 
 Все методы, кроме:

@@ -1,0 +1,42 @@
+{
+  "expectations": [
+    {
+      "httpRequest": {
+        "method": "POST",
+        "path": "/api/auth/token"
+      },
+      "httpResponse": {
+        "statusCode": 200,
+        "headers": {
+          "Content-Type": ["application/json"]
+        },
+        "body": {
+          "access_token": "mock-jwt-token-eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9",
+          "token_type": "Bearer",
+          "expires_in": 1800
+        }
+      }
+    },
+    {
+      "httpRequest": {
+        "method": "GET",
+        "path": "/api/storage-elements"
+      },
+      "httpResponse": {
+        "statusCode": 200,
+        "headers": {
+          "Content-Type": ["application/json"]
+        },
+        "body": [
+          {
+            "id": "storage-01",
+            "name": "Test Storage Element",
+            "url": "http://mock-storage:8010",
+            "mode": "edit",
+            "status": "active"
+          }
+        ]
+      }
+    }
+  ]
+}

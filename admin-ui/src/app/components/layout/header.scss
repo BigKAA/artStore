@@ -1,0 +1,200 @@
+/**
+ * ArtStore Admin UI - Header Styles
+ * Верхняя панель с фиксированным позиционированием
+ */
+
+.header {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 250px; // Sidebar width
+  height: 60px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #dee2e6;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  z-index: 1030;
+  transition: left 0.3s ease-in-out;
+}
+
+// Когда sidebar свернут
+.sidebar-collapsed .header {
+  left: 0;
+}
+
+.header-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 0 1.5rem;
+}
+
+.header-left,
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+// Sidebar Toggle Button
+.sidebar-toggle {
+  font-size: 1.5rem;
+  color: #495057;
+  padding: 0.5rem;
+  text-decoration: none;
+  border: none;
+  background: transparent;
+  transition: color 0.2s ease-in-out;
+
+  &:hover {
+    color: #3498db;
+  }
+}
+
+// User Dropdown
+.user-dropdown {
+  position: relative;
+}
+
+.user-button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  text-decoration: none;
+  border: none;
+  background: transparent;
+  color: #495057;
+  transition: all 0.2s ease-in-out;
+
+  &:hover {
+    color: #3498db;
+  }
+}
+
+.user-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.user-info {
+  text-align: left;
+}
+
+.user-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.user-role {
+  font-size: 0.75rem;
+  color: #6c757d;
+  line-height: 1.2;
+}
+
+// Dropdown Menu
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  min-width: 240px;
+  background-color: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 0.5rem 0;
+  z-index: 1040;
+  animation: dropdownFadeIn 0.2s ease-in-out;
+}
+
+.dropdown-header {
+  padding: 0.75rem 1rem;
+}
+
+.dropdown-user-info {
+  line-height: 1.4;
+}
+
+.dropdown-divider {
+  height: 1px;
+  margin: 0.5rem 0;
+  background-color: #dee2e6;
+  border: none;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.5rem 1rem;
+  color: #495057;
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+  text-align: left;
+
+  &:hover {
+    background-color: #f8f9fa;
+  }
+
+  &.text-danger:hover {
+    background-color: #fff5f5;
+  }
+
+  i {
+    font-size: 1rem;
+  }
+}
+
+// Dropdown Overlay
+.dropdown-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1035;
+  cursor: default;
+
+  // Don't block clicks on the dropdown menu
+  // The dropdown menu (z-index: 1040) will be on top
+  pointer-events: all;
+}
+
+// Responsive для мобильных
+@media (max-width: 767.98px) {
+  .header {
+    left: 0;
+  }
+
+  .header-container {
+    padding: 0 1rem;
+  }
+
+  .dropdown-menu {
+    right: -0.5rem;
+  }
+}
+
+// Animation
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

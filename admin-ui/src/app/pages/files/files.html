@@ -1,0 +1,335 @@
+<!-- ArtStore Admin UI - Files Component Template -->
+<div class="container-fluid py-4">
+  <!-- Header -->
+  <div class="row mb-4 align-items-center">
+    <div class="col">
+      <h2 class="mb-0">
+        <i class="bi bi-folder2-open me-2"></i>
+        Управление файлами
+      </h2>
+      <p class="text-muted mb-0">
+        Всего файлов: <strong>{{ totalCount }}</strong>
+      </p>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-primary" (click)="openUploadModal()">
+        <i class="bi bi-upload"></i> Загрузить файл
+      </button>
+    </div>
+  </div>
+
+  <!-- Success Alert -->
+  <div class="alert alert-success alert-dismissible fade show" *ngIf="successMessage" role="alert">
+    <i class="bi bi-check-circle-fill me-2"></i>
+    {{ successMessage }}
+    <button type="button" class="btn-close" (click)="closeSuccess()"></button>
+  </div>
+
+  <!-- Error Alert -->
+  <div class="alert alert-danger alert-dismissible fade show" *ngIf="error" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    {{ error }}
+    <button type="button" class="btn-close" (click)="closeError()"></button>
+  </div>
+
+  <!-- Search Bar -->
+  <div class="row mb-3">
+    <div class="col-md-6">
+      <div class="input-group">
+        <span class="input-group-text">
+          <i class="bi bi-search"></i>
+        </span>
+        <input
+          type="text"
+          class="form-control"
+          [(ngModel)]="searchQuery"
+          (keyup.enter)="onSearch()"
+          placeholder="Поиск по имени файла, тегам, описанию...">
+        <button class="btn btn-primary" (click)="onSearch()">
+          Поиск
+        </button>
+      </div>
+    </div>
+    <div class="col-md-6 text-end">
+      <button class="btn btn-outline-secondary" (click)="onApplyFilters()">
+        <i class="bi bi-funnel"></i> Применить фильтры
+      </button>
+      <button class="btn btn-outline-secondary ms-2" (click)="onResetFilters()">
+        <i class="bi bi-x-circle"></i> Сбросить
+      </button>
+    </div>
+  </div>
+
+  <!-- Filters Row -->
+  <div class="row mb-4">
+    <div class="col-md-3">
+      <label class="form-label small text-muted">Тип файла</label>
+      <select class="form-select" [(ngModel)]="selectedFileType">
+        <option value="">Все типы</option>
+        <option value="pdf">PDF</option>
+        <option value="jpg">JPG/JPEG</option>
+        <option value="png">PNG</option>
+        <option value="doc">DOC/DOCX</option>
+        <option value="docx">DOCX</option>
+        <option value="xls">XLS/XLSX</option>
+        <option value="xlsx">XLSX</option>
+        <option value="txt">TXT</option>
+        <option value="zip">ZIP</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small text-muted">От даты</label>
+      <input
+        type="date"
+        class="form-control"
+        [(ngModel)]="dateFrom"
+        placeholder="От даты">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small text-muted">До даты</label>
+      <input
+        type="date"
+        class="form-control"
+        [(ngModel)]="dateTo"
+        placeholder="До даты">
+    </div>
+  </div>
+
+  <!-- Loading Spinner -->
+  <div class="text-center my-5" *ngIf="loading">
+    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+      <span class="visually-hidden">Загрузка...</span>
+    </div>
+    <p class="text-muted mt-3">Загрузка файлов...</p>
+  </div>
+
+  <!-- Files Table -->
+  <div class="card" *ngIf="!loading">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th style="width: 30%;">
+              <i class="bi bi-file-earmark me-1"></i>
+              Имя файла
+            </th>
+            <th style="width: 10%;">
+              <i class="bi bi-hdd me-1"></i>
+              Размер
+            </th>
+            <th style="width: 10%;">
+              <i class="bi bi-file-earmark-code me-1"></i>
+              Тип
+            </th>
+            <th style="width: 12%;">
+              <i class="bi bi-person me-1"></i>
+              Владелец
+            </th>
+            <th style="width: 15%;">
+              <i class="bi bi-calendar3 me-1"></i>
+              Дата создания
+            </th>
+            <th style="width: 13%;">
+              <i class="bi bi-tags me-1"></i>
+              Теги
+            </th>
+            <th style="width: 10%;" class="text-end">Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let file of files">
+            <td>
+              <div class="d-flex align-items-center">
+                <i class="bi bi-file-earmark-fill text-primary me-2"></i>
+                <div>
+                  <div class="fw-medium">{{ file.filename }}</div>
+                  <small class="text-muted" *ngIf="file.description">
+                    {{ file.description }}
+                  </small>
+                </div>
+              </div>
+            </td>
+            <td>
+              <span class="badge bg-secondary">
+                {{ formatFileSize(file.file_size) }}
+              </span>
+            </td>
+            <td>
+              <span class="badge bg-info text-dark">
+                {{ file.mime_type || 'N/A' }}
+              </span>
+            </td>
+            <td>
+              <i class="bi bi-person-circle me-1"></i>
+              {{ file.username }}
+            </td>
+            <td>
+              <small>{{ formatDate(file.created_at) }}</small>
+            </td>
+            <td>
+              <div class="d-flex flex-wrap gap-1">
+                <span
+                  class="badge bg-light text-dark border"
+                  *ngFor="let tag of file.tags">
+                  {{ tag }}
+                </span>
+                <span class="text-muted small" *ngIf="file.tags.length === 0">
+                  Нет тегов
+                </span>
+              </div>
+            </td>
+            <td class="text-end">
+              <button
+                class="btn btn-sm btn-outline-primary"
+                (click)="onDownloadFile(file)"
+                title="Скачать файл">
+                <i class="bi bi-download"></i>
+              </button>
+            </td>
+          </tr>
+          <tr *ngIf="files.length === 0">
+            <td colspan="7" class="text-center text-muted py-5">
+              <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+              <p class="mt-3 mb-0">Файлы не найдены</p>
+              <small>Попробуйте изменить параметры поиска или загрузите новый файл</small>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="card-footer" *ngIf="totalPages > 1">
+      <nav aria-label="File pagination">
+        <ul class="pagination justify-content-center mb-0">
+          <li class="page-item" [class.disabled]="currentPage === 1">
+            <a class="page-link" (click)="onPageChange(currentPage - 1)" style="cursor: pointer;">
+              <i class="bi bi-chevron-left"></i>
+              Предыдущая
+            </a>
+          </li>
+
+          <li
+            class="page-item"
+            *ngFor="let page of getPageNumbers()"
+            [class.active]="currentPage === page">
+            <a class="page-link" (click)="onPageChange(page)" style="cursor: pointer;">
+              {{ page }}
+            </a>
+          </li>
+
+          <li class="page-item" [class.disabled]="currentPage === totalPages">
+            <a class="page-link" (click)="onPageChange(currentPage + 1)" style="cursor: pointer;">
+              Следующая
+              <i class="bi bi-chevron-right"></i>
+            </a>
+          </li>
+        </ul>
+      </nav>
+
+      <div class="text-center mt-2">
+        <small class="text-muted">
+          Страница {{ currentPage }} из {{ totalPages }}
+          ({{ ((currentPage - 1) * pageSize) + 1 }}-{{ Math.min(currentPage * pageSize, totalCount) }} из {{ totalCount }})
+        </small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Upload Modal -->
+<div
+  class="modal fade"
+  [class.show]="showUploadModal"
+  [style.display]="showUploadModal ? 'block' : 'none'"
+  tabindex="-1"
+  role="dialog">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title">
+          <i class="bi bi-upload me-2"></i>
+          Загрузка файла
+        </h5>
+        <button type="button" class="btn-close btn-close-white" (click)="closeUploadModal()"></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- File Input -->
+        <div class="mb-3">
+          <label class="form-label fw-bold">Выберите файл *</label>
+          <input
+            type="file"
+            class="form-control"
+            (change)="onFileSelected($event)"
+            accept="*/*">
+          <div class="form-text">
+            Максимальный размер: 1 GB
+          </div>
+          <div class="mt-2" *ngIf="selectedFile">
+            <div class="alert alert-info d-flex align-items-center">
+              <i class="bi bi-file-earmark-fill me-2"></i>
+              <div>
+                <strong>{{ selectedFile.name }}</strong>
+                <br>
+                <small>{{ formatFileSize(selectedFile.size) }}</small>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Description Textarea -->
+        <div class="mb-3">
+          <label class="form-label fw-bold">Описание (опционально)</label>
+          <textarea
+            class="form-control"
+            rows="3"
+            [(ngModel)]="uploadDescription"
+            placeholder="Введите описание файла..."
+            maxlength="500"></textarea>
+          <div class="form-text">
+            {{ uploadDescription.length }}/500 символов
+          </div>
+        </div>
+
+        <!-- Upload Progress -->
+        <div class="mb-3" *ngIf="uploadProgress > 0">
+          <label class="form-label fw-bold">Прогресс загрузки</label>
+          <div class="progress" style="height: 25px;">
+            <div
+              class="progress-bar progress-bar-striped progress-bar-animated"
+              [style.width.%]="uploadProgress"
+              role="progressbar">
+              {{ uploadProgress }}%
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="closeUploadModal()"
+          [disabled]="uploadProgress > 0 && uploadProgress < 100">
+          Отмена
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          (click)="onFileUpload()"
+          [disabled]="!selectedFile || (uploadProgress > 0 && uploadProgress < 100)">
+          <i class="bi bi-upload"></i>
+          Загрузить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Backdrop -->
+<div
+  class="modal-backdrop fade"
+  [class.show]="showUploadModal"
+  *ngIf="showUploadModal"
+  (click)="closeUploadModal()"></div>

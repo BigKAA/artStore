@@ -136,6 +136,9 @@ celerybeat.pid
 
 # Environments
 .env
+.env.secrets
+.env.production
+.env.local
 .envrc
 .venv
 env/
@@ -207,7 +210,9 @@ marimo/_lsp/
 __marimo__/
 
 .data/
-.serena/
+data/
+#.serena/
 .claude/
-.utils/nginx/certs/cert.pem
-.utils/nginx/certs/key.pem
+.utils/nginx/certs/
+.playwright-mcp/
+claudedocs/

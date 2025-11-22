@@ -1,187 +1,161 @@
 """
-Structured logging для Storage Element.
+Система логирования для Storage Element.
 
-Поддерживает JSON и text форматы с контекстными полями.
+Поддержка:
+- JSON формат для production (обязательно)
+- Text формат для development
+- Structured logging с контекстом
+- Integration с OpenTelemetry для distributed tracing
 """
 
 import logging
 import sys
-import json
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
 from pathlib import Path
+from typing import Optional
+
+from pythonjsonlogger import jsonlogger
+
+from app.core.config import settings, LogFormat
 
 
-class JSONFormatter(logging.Formatter):
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
     """
-    JSON formatter для structured logging.
+    Кастомный JSON formatter с дополнительными полями.
 
-    Каждое log сообщение форматируется как JSON объект с полями:
-    - timestamp: ISO 8601 timestamp
-    - level: log level (INFO, ERROR, etc.)
-    - logger: logger name
-    - message: log message
-    - context: additional context fields
-    """
-
-    def format(self, record: logging.LogRecord) -> str:
-        """Format log record as JSON."""
-        log_entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
-
-        # Добавляем exception info если есть
-        if record.exc_info:
-            log_entry["exception"] = self.formatException(record.exc_info)
-
-        # Добавляем дополнительные поля из extra
-        for key, value in record.__dict__.items():
-            if key not in [
-                "name",
-                "msg",
-                "args",
-                "created",
-                "filename",
-                "funcName",
-                "levelname",
-                "levelno",
-                "lineno",
-                "module",
-                "msecs",
-                "message",
-                "pathname",
-                "process",
-                "processName",
-                "relativeCreated",
-                "thread",
-                "threadName",
-                "exc_info",
-                "exc_text",
-                "stack_info",
-            ]:
-                log_entry[key] = value
-
-        return json.dumps(log_entry, ensure_ascii=False)
-
-
-class TextFormatter(logging.Formatter):
-    """
-    Text formatter для human-readable logging.
-
-    Format: [TIMESTAMP] LEVEL - LOGGER - MESSAGE
+    Добавляет:
+    - module: имя модуля
+    - function: имя функции
+    - line: номер строки
+    - trace_id: для distributed tracing (опционально)
     """
 
-    def __init__(self):
-        super().__init__(
-            fmt="[%(asctime)s] %(levelname)-8s - %(name)s - %(message)s",
+    def add_fields(self, log_record, record, message_dict):
+        """Добавление кастомных полей в JSON лог"""
+        super().add_fields(log_record, record, message_dict)
+
+        # Обязательные поля
+        log_record["timestamp"] = record.created
+        log_record["level"] = record.levelname
+        log_record["logger"] = record.name
+        log_record["module"] = record.module
+        log_record["function"] = record.funcName
+        log_record["line"] = record.lineno
+
+        # Опциональные поля для OpenTelemetry
+        if hasattr(record, "trace_id"):
+            log_record["trace_id"] = record.trace_id
+        if hasattr(record, "span_id"):
+            log_record["span_id"] = record.span_id
+        if hasattr(record, "request_id"):
+            log_record["request_id"] = record.request_id
+        if hasattr(record, "user_id"):
+            log_record["user_id"] = record.user_id
+
+
+def setup_logging(
+    log_level: Optional[str] = None,
+    log_format: Optional[LogFormat] = None,
+    log_file: Optional[Path] = None
+) -> None:
+    """
+    Настройка глобальной системы логирования.
+
+    Args:
+        log_level: Уровень логирования (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_format: Формат логов (json или text)
+        log_file: Путь к файлу для логов (опционально)
+
+    Returns:
+        None
+
+    Примеры:
+        >>> setup_logging("INFO", LogFormat.JSON)  # Production
+        >>> setup_logging("DEBUG", LogFormat.TEXT)  # Development
+    """
+    # Использование настроек из config если не переданы параметры
+    level = log_level or settings.logging.level
+    format_type = log_format or settings.logging.format
+    file_path = log_file or settings.logging.file_path
+
+    # Конфигурация root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Очистка существующих handlers
+    root_logger.handlers.clear()
+
+    # Создание handler для console (stdout)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+
+    # Выбор formatter в зависимости от формата
+    if format_type == LogFormat.JSON:
+        # JSON formatter для production
+        formatter = CustomJsonFormatter(
+            "%(timestamp)s %(level)s %(logger)s %(module)s %(function)s %(line)d %(message)s"
+        )
+    else:
+        # Text formatter для development
+        formatter = logging.Formatter(
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(funcName)s:%(lineno)d - %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         )
 
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
 
-class StructuredLogger:
-    """
-    Structured logger wrapper с удобными методами для контекстного логирования.
+    # Добавление file handler если указан путь
+    if file_path:
+        # Создание директории для логов если не существует
+        file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    Examples:
-        >>> logger = StructuredLogger("storage-element")
-        >>> logger.info("File uploaded", file_id="abc123", size=1024)
-        >>> logger.error("Upload failed", file_id="abc123", error="Disk full")
-    """
+        # Rotating file handler
+        from logging.handlers import RotatingFileHandler
 
-    def __init__(self, name: str, log_level: str = "INFO", log_format: str = "json"):
-        """
-        Initialize structured logger.
-
-        Args:
-            name: Logger name
-            log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-            log_format: Log format (json or text)
-        """
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(getattr(logging, log_level.upper()))
-
-        # Remove existing handlers
-        self.logger.handlers.clear()
-
-        # Create console handler
-        handler = logging.StreamHandler(sys.stdout)
-
-        # Set formatter
-        if log_format == "json":
-            formatter = JSONFormatter()
-        else:
-            formatter = TextFormatter()
-
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
-    def debug(self, message: str, **kwargs):
-        """Log debug message with context."""
-        self.logger.debug(message, extra=kwargs)
-
-    def info(self, message: str, **kwargs):
-        """Log info message with context."""
-        self.logger.info(message, extra=kwargs)
-
-    def warning(self, message: str, **kwargs):
-        """Log warning message with context."""
-        self.logger.warning(message, extra=kwargs)
-
-    def error(self, message: str, **kwargs):
-        """Log error message with context."""
-        self.logger.error(message, extra=kwargs)
-
-    def critical(self, message: str, **kwargs):
-        """Log critical message with context."""
-        self.logger.critical(message, extra=kwargs)
-
-    def exception(self, message: str, **kwargs):
-        """Log exception with traceback and context."""
-        self.logger.exception(message, extra=kwargs)
-
-
-# Global logger instance
-_logger: Optional[StructuredLogger] = None
-
-
-def get_logger() -> StructuredLogger:
-    """
-    Get global logger instance (singleton pattern).
-
-    Returns:
-        StructuredLogger: Application logger
-    """
-    global _logger
-    if _logger is None:
-        from app.core.config import get_config
-
-        config = get_config()
-        _logger = StructuredLogger(
-            name="storage-element",
-            log_level=config.log_level,
-            log_format=config.log_format
+        file_handler = RotatingFileHandler(
+            filename=file_path,
+            maxBytes=settings.logging.max_bytes,
+            backupCount=settings.logging.backup_count,
+            encoding="utf-8"
         )
-    return _logger
+        file_handler.setLevel(level)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+    # Настройка логирования для сторонних библиотек
+    logging.getLogger("uvicorn").setLevel(logging.INFO)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("asyncpg").setLevel(logging.WARNING)
+
+    # Логирование старта системы
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "Logging system initialized",
+        extra={
+            "log_level": level,
+            "log_format": format_type.value,
+            "log_file": str(file_path) if file_path else None
+        }
+    )
 
 
-def configure_logging(log_level: str = "INFO", log_format: str = "json") -> StructuredLogger:
+def get_logger(name: str) -> logging.Logger:
     """
-    Configure global logger.
+    Получение настроенного logger для модуля.
 
     Args:
-        log_level: Logging level
-        log_format: Log format (json or text)
+        name: Имя logger (обычно __name__)
 
     Returns:
-        StructuredLogger: Configured logger
+        logging.Logger: Настроенный logger
+
+    Примеры:
+        >>> logger = get_logger(__name__)
+        >>> logger.info("File uploaded", extra={"file_id": "123", "size": 1024})
     """
-    global _logger
-    _logger = StructuredLogger(
-        name="storage-element",
-        log_level=log_level,
-        log_format=log_format
-    )
-    return _logger
+    return logging.getLogger(name)
+
+
+# Инициализация логирования при импорте модуля
+setup_logging()

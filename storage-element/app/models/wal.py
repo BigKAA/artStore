@@ -1,151 +1,171 @@
 """
-Write-Ahead Log (WAL) model для Storage Element.
+Write-Ahead Log (WAL) model для обеспечения атомарности операций.
 
-PostgreSQL table для транзакционного журнала операций.
+WAL используется для:
+- Запись намерения перед операцией
+- Возможность отката при сбое
+- Аудит всех операций с файлами
 """
 
-from sqlalchemy import (
-    Column, BigInteger, String, TIMESTAMP, CheckConstraint, Index, JSON, Integer
-)
-from sqlalchemy.sql import func
-from datetime import datetime, timezone
-import uuid as uuid_lib
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+from uuid import UUID, uuid4
+
+from sqlalchemy import String, DateTime, Text, Index
+from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column, declared_attr
+from sqlalchemy import func
 
 from app.db.base import Base
-from app.db.types import UUID  # Cross-database UUID type
-from app.core.config import get_config
 
 
-class WAL(Base):
+class WALOperationType(str, Enum):
+    """Типы операций WAL"""
+    FILE_CREATE = "file_create"
+    FILE_UPDATE = "file_update"
+    FILE_DELETE = "file_delete"
+    CACHE_REBUILD = "cache_rebuild"
+    MODE_CHANGE = "mode_change"
+
+
+class WALStatus(str, Enum):
+    """Статусы транзакции WAL"""
+    PENDING = "pending"      # Начато, не завершено
+    COMMITTED = "committed"  # Успешно завершено
+    ROLLED_BACK = "rolled_back"  # Откачено из-за ошибки
+    FAILED = "failed"        # Ошибка выполнения
+
+
+class WALTransaction(Base):
     """
-    Write-Ahead Log table для транзакционности операций.
+    Модель транзакции Write-Ahead Log.
 
-    Обеспечивает:
-    - Атомарность операций
-    - Восстановление после сбоев
-    - Audit trail всех операций
-    - Поддержка Saga Pattern
+    Каждая операция с файлами записывается в WAL перед выполнением.
+
+    Поля:
+    - transaction_id: UUID транзакции
+    - operation_type: Тип операции (create, update, delete, etc.)
+    - status: Статус транзакции
+    - file_id: UUID файла (для файловых операций)
+    - operation_data: Данные операции (JSONB)
+    - error_message: Сообщение об ошибке (если failed)
+    - started_at: Время начала операции
+    - completed_at: Время завершения операции
+    - duration_ms: Длительность в миллисекундах
     """
 
-    # Динамическое имя таблицы из конфигурации
-    config = get_config()
-    __tablename__ = f"{config.database.table_prefix}_wal"
+    @declared_attr
+    def __tablename__(cls) -> str:
+        """Dynamic table name based on configuration."""
+        from app.core.config import settings
+        return f"{settings.database.table_prefix}_wal"
 
-    # Primary Key (Integer для SQLite compatibility, в PostgreSQL будет BigInteger)
-    wal_id = Column(
-        Integer,
+    # Primary Key
+    transaction_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
         primary_key=True,
-        autoincrement=True,
-        comment="WAL entry sequential ID"
+        default=uuid4,
+        comment="UUID транзакции"
     )
 
-    # Transaction Info
-    transaction_id = Column(
-        UUID(as_uuid=True),
-        unique=True,
-        nullable=False,
-        default=uuid_lib.uuid4,
-        comment="Unique transaction identifier"
-    )
-
-    saga_id = Column(
-        String(255),
-        comment="Saga ID для распределенных транзакций"
-    )
-
-    # Operation Details
-    operation_type = Column(
+    # Operation details
+    operation_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        comment="Operation type: upload, delete, update_metadata, mode_change"
+        index=True,
+        comment="Тип операции (file_create, file_update, etc.)"
     )
 
-    operation_status = Column(
-        String(50),
+    status: Mapped[str] = mapped_column(
+        String(20),
         nullable=False,
-        default='pending',
-        comment="Status: pending, in_progress, committed, rolled_back, failed"
+        default=WALStatus.PENDING.value,
+        index=True,
+        comment="Статус транзакции (pending, committed, rolled_back, failed)"
     )
 
-    # Target Resource
-    file_id = Column(
-        UUID(as_uuid=True),
-        comment="File ID if operation is file-specific"
+    # File reference (опционально, не для всех операций)
+    file_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        nullable=True,
+        index=True,
+        comment="UUID файла (для файловых операций)"
     )
 
-    # Operation Payload (JSON для совместимости с SQLite, в PostgreSQL будет JSONB)
-    payload = Column(
-        JSON,
+    # Operation data (JSONB для гибкости)
+    operation_data: Mapped[dict] = mapped_column(
+        JSONB,
         nullable=False,
-        comment="Operation data (JSON)"
+        comment="Данные операции (файл, путь, метаданные и т.д.)"
     )
 
-    # Compensation Data для rollback
-    compensation_data = Column(
-        JSON,
-        comment="Data for compensating transaction (rollback)"
+    # Error handling
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Сообщение об ошибке (если failed)"
     )
 
     # Timestamps
-    created_at = Column(
-        TIMESTAMP(timezone=True),
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        comment="Transaction creation time"
+        server_default=func.now(),
+        comment="Время начала операции"
     )
 
-    committed_at = Column(
-        TIMESTAMP(timezone=True),
-        comment="Transaction commit time"
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время завершения операции"
     )
 
-    # Constraints
-    __table_args__ = (
-        CheckConstraint(
-            "operation_type IN ('upload', 'delete', 'update_metadata', 'mode_change')",
-            name='ck_operation_type'
-        ),
-        CheckConstraint(
-            "operation_status IN ('pending', 'in_progress', 'committed', 'rolled_back', 'failed')",
-            name='ck_operation_status'
-        ),
-
-        # Indexes
-        Index('ix_wal_transaction_id', 'transaction_id'),
-        Index('ix_wal_status', 'operation_status'),
-        Index('ix_wal_created_at', 'created_at', postgresql_using='btree'),
-        Index('ix_wal_saga_id', 'saga_id'),
-
-        # Partial index для незавершенных транзакций
-        Index(
-            'ix_wal_pending',
-            'operation_status',
-            postgresql_where="operation_status IN ('pending', 'in_progress')"
-        ),
-
-        # GIN index для JSONB payload search (только PostgreSQL, добавится через migration)
-        # Index('ix_wal_payload', 'payload', postgresql_using='gin'),
+    duration_ms: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+        comment="Длительность операции в миллисекундах"
     )
 
-    def __repr__(self):
+    # User context
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="User ID инициатора операции"
+    )
+
+    @declared_attr
+    def __table_args__(cls) -> tuple:
+        """Dynamic table arguments with runtime table prefix."""
+        from app.core.config import settings
+        prefix = settings.database.table_prefix
         return (
-            f"<WAL(wal_id={self.wal_id}, "
-            f"transaction_id={self.transaction_id}, "
-            f"operation_type='{self.operation_type}', "
-            f"status='{self.operation_status}')>"
+            # Composite index для поиска по статусу и времени
+            Index(
+                f"idx_{prefix}_wal_status_time",
+                "status",
+                "started_at"
+            ),
+            # Index для поиска по файлу
+            Index(
+                f"idx_{prefix}_wal_file",
+                "file_id",
+                "started_at"
+            ),
+            # Index для JSONB поиска
+            Index(
+                f"idx_{prefix}_wal_data",
+                "operation_data",
+                postgresql_using="gin"
+            ),
         )
 
-    def to_dict(self):
-        """Convert model to dictionary."""
-        return {
-            "wal_id": self.wal_id,
-            "transaction_id": str(self.transaction_id),
-            "saga_id": self.saga_id,
-            "operation_type": self.operation_type,
-            "operation_status": self.operation_status,
-            "file_id": str(self.file_id) if self.file_id else None,
-            "payload": self.payload,
-            "compensation_data": self.compensation_data,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "committed_at": self.committed_at.isoformat() if self.committed_at else None,
-        }
+    def __repr__(self) -> str:
+        return (
+            f"<WALTransaction("
+            f"id={self.transaction_id}, "
+            f"type={self.operation_type}, "
+            f"status={self.status}, "
+            f"file_id={self.file_id}"
+            f")>"
+        )

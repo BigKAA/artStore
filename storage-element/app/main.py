@@ -1,216 +1,162 @@
 """
-Storage Element FastAPI Application.
+Storage Element - FastAPI Application Entry Point.
 
-Main application entry point с routing, middleware и lifecycle management.
+Отказоустойчивое физическое хранение файлов с кешированием метаданных.
 """
 
+import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
-import time
 
-from app.core.config import get_config
-from app.core.logging import get_logger, configure_logging
-from app.api.v1 import health, files, mode
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import make_asgi_app
+
+from app.core.config import settings
+from app.core.logging import setup_logging, get_logger
+from app.core.observability import setup_observability
+from app.db.session import init_db, close_db
+
+# Инициализация логирования
+setup_logging()
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Lifecycle manager для FastAPI application.
+    Lifecycle events для FastAPI application.
 
-    Handles:
-    - Startup: Configuration loading, logging setup, directory creation
-    - Shutdown: Cleanup resources
+    Startup:
+    - Инициализация базы данных
+    - Проверка конфигурации
+    - Загрузка текущего режима из БД
+
+    Shutdown:
+    - Закрытие соединений с БД
+    - Cleanup resources
     """
     # Startup
-    config = get_config()
-    logger = configure_logging(
-        log_level=config.log_level,
-        log_format=config.log_format
-    )
-
     logger.info(
-        "Storage Element starting",
-        app_name=config.app_name,
-        version=config.app_version,
-        mode=config.mode.mode,
-        storage_type=config.storage.type
+        "Starting Storage Element",
+        extra={
+            "app_name": settings.app.name,
+            "version": settings.app.version,
+            "mode": settings.app.mode.value,
+            "storage_type": settings.storage.type.value
+        }
     )
 
-    # Create necessary directories
-    from pathlib import Path
+    # Инициализация базы данных
+    await init_db()
+    logger.info("Database initialized")
 
-    storage_path = Path(config.storage.local_base_path)
-    storage_path.mkdir(parents=True, exist_ok=True)
-    logger.info("Storage directory created", path=str(storage_path))
-
-    if config.wal.enabled:
-        wal_path = Path(config.wal.wal_dir)
-        wal_path.mkdir(parents=True, exist_ok=True)
-        logger.info("WAL directory created", path=str(wal_path))
+    # TODO: Проверка storage mode из БД vs config
+    # TODO: Инициализация master election если edit/rw режим
+    # TODO: Проверка доступности хранилища
 
     yield
 
     # Shutdown
-    logger.info("Storage Element shutting down")
+    logger.info("Shutting down Storage Element")
+    await close_db()
+    logger.info("Database connections closed")
 
 
-# Create FastAPI application
-config = get_config()
-
+# Создание FastAPI application
 app = FastAPI(
-    title=config.app_name,
-    description="Distributed file storage element with metadata caching",
-    version=config.app_version,
+    title="ArtStore Storage Element",
+    description="Distributed file storage with metadata caching and high availability",
+    version=settings.app.version,
     lifespan=lifespan,
-    docs_url="/docs" if config.debug else None,  # Disable in production
-    redoc_url="/redoc" if config.debug else None,
+    docs_url="/docs" if settings.app.debug else None,
+    redoc_url="/redoc" if settings.app.debug else None
 )
 
-# Get logger
-logger = get_logger()
+# Настройка OpenTelemetry observability
+setup_observability(
+    app=app,
+    service_name="artstore-storage-element",
+    service_version=settings.app.version,
+    enable_tracing=True  # TODO: добавить в конфигурацию
+)
+logger.info("OpenTelemetry observability configured")
 
-
-# Middleware configuration
-@app.middleware("http")
-async def logging_middleware(request: Request, call_next):
-    """
-    Request/response logging middleware.
-
-    Logs:
-    - Request method, path, client IP
-    - Response status code, duration
-    """
-    start_time = time.time()
-
-    # Process request
-    response = await call_next(request)
-
-    # Calculate duration
-    duration = time.time() - start_time
-
-    # Log request/response
+# CORS middleware (Sprint 16 Phase 1: Enhanced CORS security)
+if settings.cors.enabled:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors.allow_origins,
+        allow_credentials=settings.cors.allow_credentials,
+        allow_methods=settings.cors.allow_methods,
+        allow_headers=settings.cors.allow_headers,
+        expose_headers=settings.cors.expose_headers,
+        max_age=settings.cors.max_age,
+    )
     logger.info(
-        "HTTP request",
-        method=request.method,
-        path=request.url.path,
-        status_code=response.status_code,
-        duration_ms=round(duration * 1000, 2),
-        client_ip=request.client.host if request.client else None
-    )
-
-    return response
-
-
-# CORS middleware (configure as needed)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"] if config.debug else [],  # Restrict in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# GZip compression middleware
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-
-# Exception handlers
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """
-    Global exception handler.
-
-    Catches all unhandled exceptions and returns structured error response.
-    """
-    logger.exception(
-        "Unhandled exception",
-        path=request.url.path,
-        method=request.method,
-        error=str(exc)
-    )
-
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "error": "internal_server_error",
-            "message": "An internal error occurred. Please try again later.",
-            "path": request.url.path
+        "CORS enabled",
+        extra={
+            "cors_origins": settings.cors.allow_origins,
+            "cors_credentials": settings.cors.allow_credentials,
+            "cors_max_age": settings.cors.max_age
         }
     )
 
-
-# Route registration
-app.include_router(
-    health.router,
-    prefix="/health",
-    tags=["health"]
-)
-
-app.include_router(
-    files.router,
-    prefix="/api/v1/files",
-    tags=["files"]
-)
-
-app.include_router(
-    mode.router,
-    prefix="/api/v1/mode",
-    tags=["mode"]
-)
+# Prometheus metrics endpoint
+if settings.metrics.enabled:
+    metrics_app = make_asgi_app()
+    app.mount(settings.metrics.path, metrics_app)
 
 
-# Root endpoint
-@app.get(
-    "/",
-    tags=["root"],
-    summary="Root endpoint",
-    description="Application information"
-)
+@app.get("/")
 async def root():
     """
-    Root endpoint - provides basic application information.
+    Корневой endpoint с информацией о сервисе.
 
     Returns:
-        Dict: Application info
+        dict: Информация о Storage Element
     """
     return {
-        "name": config.app_name,
-        "version": config.app_version,
-        "mode": config.mode.mode,
-        "storage_type": config.storage.type,
-        "endpoints": {
-            "health": {
-                "liveness": "/health/live",
-                "readiness": "/health/ready"
-            },
-            "docs": "/docs" if config.debug else "disabled",
-            "api": "/api/v1"
-        }
+        "service": "ArtStore Storage Element",
+        "version": settings.app.version,
+        "mode": settings.app.mode.value,
+        "storage_type": settings.storage.type.value,
+        "status": "operational"
     }
 
 
-# API v1 placeholder (to be implemented)
-@app.get(
-    "/api/v1",
-    tags=["api"],
-    summary="API v1 info"
-)
-async def api_v1_info():
-    """API v1 информация."""
-    return {
-        "version": "1.0",
-        "endpoints": {
-            "files": "/api/v1/files",
-            "search": "/api/v1/files/search",
-            "mode": "/api/v1/mode",
-            "admin": "/api/v1/admin"
-        },
-        "status": "partial (admin endpoints not yet implemented)"
-    }
+@app.get(settings.health.liveness_path)
+async def health_live():
+    """
+    Liveness probe.
+
+    Возвращает HTTP 200 OK если сервис работает.
+
+    Returns:
+        dict: Статус liveness
+    """
+    return {"status": "alive"}
+
+
+@app.get(settings.health.readiness_path)
+async def health_ready():
+    """
+    Readiness probe.
+
+    Возвращает HTTP 200 OK если сервис готов принимать запросы.
+    Проверяет подключение к базе данных.
+
+    Returns:
+        dict: Статус readiness
+    """
+    # TODO: Проверить подключение к БД
+    # TODO: Проверить доступность хранилища
+    return {"status": "ready"}
+
+
+# Подключение API v1 router
+from app.api.v1.router import router as api_v1_router
+
+app.include_router(api_v1_router, prefix="/api/v1")
 
 
 if __name__ == "__main__":
@@ -218,8 +164,9 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "app.main:app",
-        host=config.host,
-        port=config.port,
-        reload=config.debug,
-        log_level=config.log_level.lower()
+        host=settings.server.host,
+        port=settings.server.port,
+        reload=settings.server.reload,
+        workers=settings.server.workers,
+        log_config=None  # Используем нашу систему логирования
     )

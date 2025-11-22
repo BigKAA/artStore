@@ -1,30 +1,34 @@
 """
-Database dependencies для FastAPI endpoints.
+FastAPI Dependencies для работы с базой данных.
 
-Provides database session injection и utility functions.
+Управление database sessions для endpoints.
 """
 
-from typing import Generator
-from sqlalchemy.orm import Session
-from fastapi import Depends
+from typing import AsyncGenerator
 
-from app.db.base import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# Re-export get_db для удобства
-get_database = get_db
+from app.db.session import AsyncSessionLocal
 
 
-def get_db_session() -> Generator[Session, None, None]:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    Alias for get_db - provides database session dependency.
+    Получить database session для endpoint.
 
-    Usage:
-        ```python
-        from app.api.deps.database import get_db_session
+    FastAPI dependency для автоматического управления сессиями.
+    Сессия закрывается после завершения request.
 
-        @app.get("/files")
-        async def list_files(db: Session = Depends(get_db_session)):
-            ...
-        ```
+    Yields:
+        AsyncSession: Async database session
+
+    Примеры:
+        >>> @app.get("/files")
+        >>> async def list_files(db: Annotated[AsyncSession, Depends(get_db)]):
+        ...     result = await db.execute(select(FileMetadata))
+        ...     return result.scalars().all()
     """
-    yield from get_db()
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()

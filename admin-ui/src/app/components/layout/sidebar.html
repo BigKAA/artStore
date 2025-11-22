@@ -1,0 +1,41 @@
+<!-- ArtStore Admin UI - Sidebar Template -->
+<aside class="sidebar" [class.collapsed]="collapsed">
+  <!-- Sidebar Brand -->
+  <div class="sidebar-brand">
+    <i class="bi bi-box-seam brand-icon"></i>
+    <span class="brand-text">ArtStore</span>
+  </div>
+
+  <!-- Sidebar Navigation -->
+  <nav class="sidebar-nav">
+    <ul class="nav flex-column">
+      @for (item of navItems; track item.path) {
+        <li class="nav-item">
+          <a
+            [routerLink]="item.path"
+            class="nav-link"
+            [class.active]="isActive(item.path)"
+            (click)="onLinkClick()"
+            [title]="item.label"
+          >
+            <i class="bi" [class]="item.icon"></i>
+            <span class="nav-text">{{ item.label }}</span>
+            @if (item.badge) {
+              <span class="badge ms-auto" [class]="item.badgeClass || 'bg-primary'">
+                {{ item.badge }}
+              </span>
+            }
+          </a>
+        </li>
+      }
+    </ul>
+  </nav>
+
+  <!-- Sidebar Footer -->
+  <div class="sidebar-footer">
+    <div class="text-muted small">
+      <i class="bi bi-info-circle me-1"></i>
+      <span class="footer-text">v1.0.0</span>
+    </div>
+  </div>
+</aside>

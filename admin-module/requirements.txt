@@ -1,0 +1,43 @@
+# FastAPI и зависимости
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+email-validator==2.1.0
+
+# База данных
+sqlalchemy==2.0.25
+alembic==1.13.1
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Redis (синхронный режим - архитектурное требование)
+# ВАЖНО: Используется redis-py (НЕ redis.asyncio) для всех модулей ArtStore
+redis==5.0.1
+hiredis==2.3.2
+
+# Аутентификация и безопасность
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.2  # Pin bcrypt version для совместимости с passlib 1.7.4 и Python 3.12
+python-multipart==0.0.6
+cryptography==42.0.0
+
+# HTTP клиент
+httpx==0.26.0
+aiohttp==3.9.1
+
+# Мониторинг и логирование
+prometheus-client==0.21.0
+python-json-logger==3.2.1
+opentelemetry-api==1.29.0
+opentelemetry-sdk==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0
+opentelemetry-exporter-prometheus==0.50b0
+
+# Background задачи и scheduling
+apscheduler==3.10.4
+
+# Utilities
+python-dotenv==1.0.0
+pyyaml==6.0.1
