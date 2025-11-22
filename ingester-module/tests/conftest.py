@@ -15,6 +15,14 @@ from pathlib import Path
 from typing import AsyncGenerator, Dict
 from uuid import uuid4
 
+# Sprint 23: Set default test environment variables BEFORE importing app modules
+os.environ.setdefault("APP_DEBUG", "true")
+os.environ.setdefault("LOG_FORMAT", "text")
+os.environ.setdefault("LOG_LEVEL", "DEBUG")
+os.environ.setdefault("SERVICE_ACCOUNT_CLIENT_ID", "test-client-id")
+os.environ.setdefault("SERVICE_ACCOUNT_CLIENT_SECRET", "test-client-secret")
+os.environ.setdefault("SERVICE_ACCOUNT_ADMIN_MODULE_URL", "http://test-admin:8000")
+
 import pytest
 import pytest_asyncio
 from cryptography.hazmat.backends import default_backend
@@ -41,11 +49,17 @@ def test_environment_setup():
     - Debug mode enabled
     - Test logging format
     - Disabled auth for some tests (optional)
+    - Service account test credentials (Sprint 23)
     """
     # Ensure debug mode for tests
     os.environ["APP_DEBUG"] = "true"
     os.environ["LOG_FORMAT"] = "text"
     os.environ["LOG_LEVEL"] = "DEBUG"
+
+    # Service Account test credentials (Sprint 23: for metrics tests)
+    os.environ.setdefault("SERVICE_ACCOUNT__CLIENT_ID", "test-client-id")
+    os.environ.setdefault("SERVICE_ACCOUNT__CLIENT_SECRET", "test-client-secret")
+    os.environ.setdefault("SERVICE_ACCOUNT__ADMIN_MODULE_URL", "http://test-admin:8000")
 
     yield
 

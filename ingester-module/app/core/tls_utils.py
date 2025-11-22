@@ -5,15 +5,124 @@ TLS/mTLS utility functions для Ingester Module.
 для всех inter-service HTTP connections (Ingester → Admin Module, Ingester → Storage Element).
 
 Sprint 21: Security Enhancement
+Sprint 23: Prometheus metrics instrumentation для certificate monitoring
 """
 
 import logging
 import ssl
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+
 from app.core.config import settings
+from app.core.tls_metrics import (
+    tls_certificate_expiry_days,
+    tls_certificate_validation_total,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _track_certificate_expiry(cert_path: str, cert_type: str) -> None:
+    """
+    Track certificate expiration metrics.
+
+    Reads X.509 certificate, extracts expiry date, and updates Prometheus gauge
+    with days until expiration.
+
+    Args:
+        cert_path: Path to certificate file (.pem format)
+        cert_type: "ca" | "client" for metric labeling
+
+    Metrics updated:
+        - tls_certificate_expiry_days: Days until expiration (negative if expired)
+
+    Example:
+        >>> _track_certificate_expiry("/app/tls/ca-cert.pem", "ca")
+        # Updates metric: tls_certificate_expiry_days{cert_type="ca", subject="..."} = 365
+    """
+    try:
+        with open(cert_path, 'rb') as f:
+            cert_data = f.read()
+
+        # Parse X.509 certificate
+        cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+
+        # Calculate days until expiration
+        now = datetime.now(timezone.utc)
+        expiry = cert.not_valid_after_utc
+        days_until_expiry = (expiry - now).days
+
+        # Extract subject for label (RFC 4514 format)
+        subject = cert.subject.rfc4514_string()
+
+        # Update Prometheus metric
+        tls_certificate_expiry_days.labels(
+            cert_type=cert_type,
+            subject=subject
+        ).set(days_until_expiry)
+
+        # Log certificate status
+        if days_until_expiry < 0:
+            logger.error(
+                f"Certificate {cert_type} has EXPIRED",
+                extra={
+                    "cert_type": cert_type,
+                    "subject": subject,
+                    "expired_days_ago": abs(days_until_expiry),
+                    "expiry": expiry.isoformat()
+                }
+            )
+            tls_certificate_validation_total.labels(result="expired").inc()
+        elif days_until_expiry < 7:
+            logger.warning(
+                f"Certificate {cert_type} expires in {days_until_expiry} days - CRITICAL",
+                extra={
+                    "cert_type": cert_type,
+                    "subject": subject,
+                    "days_until_expiry": days_until_expiry,
+                    "expiry": expiry.isoformat()
+                }
+            )
+        elif days_until_expiry < 30:
+            logger.warning(
+                f"Certificate {cert_type} expires in {days_until_expiry} days - action required",
+                extra={
+                    "cert_type": cert_type,
+                    "subject": subject,
+                    "days_until_expiry": days_until_expiry,
+                    "expiry": expiry.isoformat()
+                }
+            )
+        else:
+            logger.info(
+                f"Certificate {cert_type} expires in {days_until_expiry} days",
+                extra={
+                    "cert_type": cert_type,
+                    "subject": subject,
+                    "days_until_expiry": days_until_expiry,
+                    "expiry": expiry.isoformat()
+                }
+            )
+            tls_certificate_validation_total.labels(result="valid").inc()
+
+    except FileNotFoundError:
+        logger.error(
+            f"Certificate file not found: {cert_path}",
+            extra={"cert_type": cert_type, "cert_path": cert_path}
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to track certificate expiry for {cert_type}",
+            extra={
+                "cert_type": cert_type,
+                "cert_path": cert_path,
+                "error": str(e)
+            }
+        )
 
 
 def create_ssl_context() -> Optional[ssl.SSLContext]:
@@ -66,6 +175,9 @@ def create_ssl_context() -> Optional[ssl.SSLContext]:
             "Loaded CA certificate",
             extra={"ca_cert": settings.tls.ca_cert_file}
         )
+
+        # Track CA certificate expiry metrics
+        _track_certificate_expiry(settings.tls.ca_cert_file, "ca")
     else:
         logger.warning(
             "No CA certificate configured - server validation disabled! "
@@ -85,6 +197,9 @@ def create_ssl_context() -> Optional[ssl.SSLContext]:
                 "key_file": settings.tls.key_file
             }
         )
+
+        # Track client certificate expiry metrics
+        _track_certificate_expiry(settings.tls.cert_file, "client")
     else:
         logger.warning(
             "No client certificate configured - mTLS disabled. "

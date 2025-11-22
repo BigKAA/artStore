@@ -18,6 +18,10 @@ from app.api.v1.router import api_router
 from app.services.auth_service import AuthService
 from app.services.upload_service import UploadService
 
+# Import metrics modules to register with Prometheus (Sprint 23)
+from app.services import auth_metrics  # noqa: F401
+from app.core import tls_metrics  # noqa: F401
+
 # Инициализация логирования
 setup_logging()
 logger = get_logger(__name__)
