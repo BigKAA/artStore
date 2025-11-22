@@ -17,12 +17,23 @@ from app.core.exceptions import (
     AuthenticationException
 )
 from app.schemas.upload import UploadRequest, UploadResponse, StorageMode, CompressionAlgorithm
-from app.services.upload_service import upload_service
+from app.services.upload_service import UploadService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 security = HTTPBearer()
+
+
+def get_upload_service() -> UploadService:
+    """
+    Dependency для получения upload service.
+
+    Returns:
+        UploadService instance из main.py
+    """
+    from app.main import upload_service
+    return upload_service
 
 
 async def get_current_user(
@@ -62,6 +73,7 @@ async def get_current_user(
 async def upload_file(
     file: Annotated[UploadFile, File(description="Файл для загрузки")],
     user: Annotated[UserContext, Depends(get_current_user)],
+    upload_svc: Annotated[UploadService, Depends(get_upload_service)],
     description: Annotated[str | None, Form()] = None,
     storage_mode: Annotated[str, Form()] = "edit",
     compress: Annotated[bool, Form()] = False,
@@ -104,7 +116,7 @@ async def upload_file(
     )
 
     # Загрузка файла
-    result = await upload_service.upload_file(
+    result = await upload_svc.upload_file(
         file=file,
         request=upload_request,
         user_id=user.user_id,
@@ -115,7 +127,7 @@ async def upload_file(
         "Upload completed successfully",
         extra={
             "file_id": str(result.file_id),
-            "filename": file.filename,
+            "uploaded_filename": file.filename,
             "user_id": user.user_id
         }
     )

@@ -26,6 +26,7 @@ from app.schemas.upload import (
     StorageMode,
     CompressionAlgorithm
 )
+from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +37,19 @@ class UploadService:
 
     Отвечает за:
     - Валидацию файлов
+    - OAuth 2.0 аутентификацию через Service Account
     - Коммуникацию со Storage Element
     - Обработку ошибок загрузки
     """
 
-    def __init__(self):
-        """Инициализация сервиса с HTTP клиентом."""
+    def __init__(self, auth_service: AuthService):
+        """
+        Инициализация сервиса с AuthService для аутентификации.
+
+        Args:
+            auth_service: AuthService для получения JWT токенов
+        """
+        self.auth_service = auth_service
         self._client: Optional[httpx.AsyncClient] = None
         self._max_file_size = 1024 * 1024 * 1024  # 1GB по умолчанию
 
@@ -196,11 +204,15 @@ class UploadService:
         # TODO: Добавить retry logic
 
         try:
+            # Получить JWT access token для аутентификации
+            access_token = await self.auth_service.get_access_token()
+
             client = await self._get_client()
 
-            # Отправка запроса в Storage Element
+            # Отправка запроса в Storage Element с Authorization header
             response = await client.post(
                 "/api/v1/files/upload",
+                headers={'Authorization': f'Bearer {access_token}'},
                 files=files,
                 data=data
             )
@@ -211,7 +223,7 @@ class UploadService:
             logger.info(
                 "File uploaded successfully",
                 extra={
-                    "file_id": result.get('id'),
+                    "file_id": result.get('file_id'),
                     "uploaded_filename": file.filename,
                     "file_size": file_size,
                     "user_id": user_id
@@ -220,13 +232,13 @@ class UploadService:
 
             # Формирование ответа
             return UploadResponse(
-                file_id=UUID(result['id']),
+                file_id=UUID(result['file_id']),
                 original_filename=file.filename or "unknown",
-                storage_filename=result.get('storage_filename', ''),
+                storage_filename=result.get('original_filename', ''),
                 file_size=file_size,
                 compressed=request.compress,
                 compression_ratio=None,  # TODO: calculate if compressed
-                checksum=checksum,
+                checksum=result.get('checksum', checksum),
                 uploaded_at=datetime.now(timezone.utc),
                 storage_element_url=settings.storage_element.base_url
             )
@@ -251,7 +263,3 @@ class UploadService:
             raise StorageElementUnavailableException(
                 f"Cannot connect to Storage Element: {str(e)}"
             )
-
-
-# Singleton instance
-upload_service = UploadService()
