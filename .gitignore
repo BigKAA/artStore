@@ -210,7 +210,9 @@ marimo/_lsp/
 __marimo__/
 
 .data/
+data/
 #.serena/
 .claude/
 .utils/nginx/certs/
 .playwright-mcp/
+claudedocs/
