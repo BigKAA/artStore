@@ -10,42 +10,10 @@ from pathlib import Path
 import tempfile
 
 from app.main import app
-from app.core.config import reload_config
 
 
 @pytest.fixture
-def test_config(tmp_path):
-    """Create temporary test configuration."""
-    config_data = {
-        "app_name": "Test Storage Element",
-        "debug": True,
-        "log_level": "DEBUG",
-        "storage": {
-            "type": "local",
-            "local_base_path": str(tmp_path / "storage")
-        },
-        "wal": {
-            "enabled": True,
-            "wal_dir": str(tmp_path / "wal")
-        }
-    }
-
-    # Reload config with test values
-    import yaml
-    config_file = tmp_path / "test_config.yaml"
-    with open(config_file, 'w') as f:
-        yaml.dump(config_data, f)
-
-    reload_config(config_file)
-
-    yield config_file
-
-    # Cleanup - reload default config
-    reload_config()
-
-
-@pytest.fixture
-def client(test_config):
+def client():
     """Create FastAPI test client."""
     with TestClient(app) as client:
         yield client

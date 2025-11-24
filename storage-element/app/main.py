@@ -132,9 +132,16 @@ async def health_live():
     Возвращает HTTP 200 OK если сервис работает.
 
     Returns:
-        dict: Статус liveness
+        dict: Статус liveness с полями status, timestamp, checks
     """
-    return {"status": "alive"}
+    from datetime import datetime, timezone
+    return {
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": {
+            "process": "running"
+        }
+    }
 
 
 @app.get(settings.health.readiness_path)
