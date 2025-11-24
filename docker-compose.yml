@@ -167,7 +167,7 @@ services:
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
 
       # Initial System Account
-      INITIAL_ACCOUNT_ENABLED: true
+      INITIAL_ACCOUNT_ENABLED: "true"
       INITIAL_ACCOUNT_NAME: admin-service
       INITIAL_ACCOUNT_ROLE: ADMIN
     volumes:
@@ -225,7 +225,7 @@ services:
       REDIS_URL: redis://redis:6379/0
 
       # WAL
-      WAL_ENABLED: true
+      WAL_ENABLED: "true"
       WAL_RETENTION_HOURS: 24
     volumes:
       # Данные хранилища (именованный volume)
@@ -272,7 +272,7 @@ services:
       CHUNK_SIZE_MB: 10
 
       # Compression
-      COMPRESSION_ENABLED: true
+      COMPRESSION_ENABLED: "true"
       COMPRESSION_MIN_SIZE_MB: 10
 
       # Redis (Service Discovery)
@@ -280,7 +280,7 @@ services:
       SERVICE_DISCOVERY_CHANNEL: artstore:storage-elements
 
       # Circuit Breaker
-      CIRCUIT_BREAKER_ENABLED: true
+      CIRCUIT_BREAKER_ENABLED: "true"
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5
     volumes:
       # Logs
@@ -337,7 +337,7 @@ services:
       SEARCH_MAX_PAGE_SIZE: 1000
 
       # Circuit Breaker
-      CIRCUIT_BREAKER_ENABLED: true
+      CIRCUIT_BREAKER_ENABLED: "true"
     volumes:
       # Logs
       - query_logs:/app/logs
