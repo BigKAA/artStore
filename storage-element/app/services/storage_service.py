@@ -425,8 +425,8 @@ class S3StorageService(StorageService):
             bucket_name: S3 bucket name (по умолчанию из settings)
         """
         self.endpoint_url = endpoint_url or settings.storage.s3.endpoint_url
-        self.access_key = access_key or settings.storage.s3.access_key
-        self.secret_key = secret_key or settings.storage.s3.secret_key
+        self.access_key = access_key or settings.storage.s3.access_key_id
+        self.secret_key = secret_key or settings.storage.s3.secret_access_key
         self.bucket_name = bucket_name or settings.storage.s3.bucket_name
 
         logger.info(
@@ -579,12 +579,12 @@ class S3StorageService(StorageService):
                     Key=relative_path
                 )
 
-                async with response['Body'] as stream:
-                    while True:
-                        chunk = await stream.read(CHUNK_SIZE)
-                        if not chunk:
-                            break
-                        yield chunk
+                stream = response['Body']
+                while True:
+                    chunk = await stream.read(amt=CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    yield chunk
 
                 logger.debug(
                     "File read from S3 storage",

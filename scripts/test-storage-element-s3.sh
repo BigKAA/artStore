@@ -46,6 +46,7 @@ BASE_URL="http://localhost:8010"
 ADMIN_URL="http://localhost:8000"
 CLIENT_ID="admin-service"
 CLIENT_SECRET="change_this_in_production"
+AUTH_ENDPOINT="/api/v1/auth/token"
 
 # Временные файлы
 TEST_FILE="/tmp/test_s3_$(date +%s).txt"
@@ -55,11 +56,11 @@ LARGE_FILE="/tmp/large_s3_$(date +%s).bin"
 # Создать тестовый файл
 echo "This is a test document for S3 storage backend" > "$TEST_FILE"
 echo "Created at: $(date)" >> "$TEST_FILE"
-echo "Test ID: $(uuidgen)" >> "$TEST_FILE"
+echo "Test ID: $(date +%s)_$$" >> "$TEST_FILE"
 
 # === ЭТАП 1: Получение JWT токена ===
 echo -e "${YELLOW}[ЭТАП 1] Получение JWT токена...${NC}"
-TOKEN_RESPONSE=$(curl -s -X POST "$ADMIN_URL/api/auth/token" \
+TOKEN_RESPONSE=$(curl -s -X POST "$ADMIN_URL$AUTH_ENDPOINT" \
   -H "Content-Type: application/json" \
   -d "{
     \"client_id\": \"$CLIENT_ID\",

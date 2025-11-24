@@ -255,16 +255,28 @@ services:
     environment:
       # Application
       APP_NAME: artstore-storage-element
+      APP_MODE: edit  # edit, rw, ro, ar
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: json
 
       # Storage Configuration
-      STORAGE_MODE: edit  # edit, rw, ro, ar
-      STORAGE_TYPE: local  # local или s3
+      STORAGE_TYPE: s3  # local или s3
       STORAGE_MAX_SIZE_GB: 100
 
       # Local Filesystem
       STORAGE_LOCAL_BASE_PATH: /app/.data/storage
+
+      # S3 Configuration
+      STORAGE_S3_ENDPOINT_URL: http://minio:9000
+      STORAGE_S3_ACCESS_KEY_ID: minioadmin
+      STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
+      STORAGE_S3_BUCKET_NAME: artstore-files
+      STORAGE_S3_REGION: us-east-1
+      STORAGE_S3_APP_FOLDER: storage_element_01
+
+      # JWT Authentication
+      JWT_PUBLIC_KEY_PATH: /app/keys/public_key.pem
+      JWT_ALGORITHM: RS256
 
       # Database
       DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
@@ -282,6 +294,9 @@ services:
       WAL_ENABLED: "true"
       WAL_RETENTION_HOURS: 24
     volumes:
+      # JWT Keys
+      - ./storage-element/keys:/app/keys:ro
+
       # Данные хранилища (именованный volume)
       - storage_data:/app/.data/storage
 
@@ -297,6 +312,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
