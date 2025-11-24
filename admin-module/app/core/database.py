@@ -22,7 +22,7 @@ engine = create_async_engine(
     pool_pre_ping=True,  # Проверка соединения перед использованием
     pool_size=settings.database.pool_size,
     max_overflow=settings.database.max_overflow,
-    poolclass=QueuePool,
+    # poolclass не указываем для async engine - SQLAlchemy автоматически использует AsyncAdaptedQueuePool
     connect_args={"ssl": False},  # Отключаем SSL для локальной разработки
 )
 

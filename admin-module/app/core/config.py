@@ -72,8 +72,8 @@ class JWTSettings(BaseSettings):
     algorithm: str = Field(default="RS256", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(default=30, alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
     refresh_token_expire_days: int = Field(default=7, alias="JWT_REFRESH_TOKEN_EXPIRE_DAYS")
-    private_key_path: str = Field(default="/path/to/private_key.pem", alias="JWT_PRIVATE_KEY_PATH")
-    public_key_path: str = Field(default="/path/to/public_key.pem", alias="JWT_PUBLIC_KEY_PATH")
+    private_key_path: str = Field(default=".keys/private_key.pem", alias="JWT_PRIVATE_KEY_PATH")
+    public_key_path: str = Field(default=".keys/public_key.pem", alias="JWT_PUBLIC_KEY_PATH")
     key_rotation_hours: int = Field(default=24, alias="JWT_KEY_ROTATION_HOURS")
 
     model_config = SettingsConfigDict(env_prefix="JWT_", case_sensitive=False, extra="allow")
@@ -115,7 +115,7 @@ class JWTSettings(BaseSettings):
             return secret_from_provider
 
         # Fallback на provided value (env path или default)
-        return v if v else "/path/to/private_key.pem"
+        return v if v else ".keys/private_key.pem"
 
     @field_validator("public_key_path", mode="before")
     @classmethod
@@ -154,7 +154,7 @@ class JWTSettings(BaseSettings):
             return secret_from_provider
 
         # Fallback на provided value (env path или default)
-        return v if v else "/path/to/public_key.pem"
+        return v if v else ".keys/public_key.pem"
 
     @field_validator("algorithm")
     @classmethod
