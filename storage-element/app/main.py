@@ -7,8 +7,10 @@ Storage Element - FastAPI Application Entry Point.
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import HTTPException
 from prometheus_client import make_asgi_app
 
 from app.core.config import settings
@@ -105,6 +107,31 @@ if settings.cors.enabled:
 if settings.metrics.enabled:
     metrics_app = make_asgi_app()
     app.mount(settings.metrics.path, metrics_app)
+
+
+# Exception handler для замены 403 на 401 для authentication errors
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Глобальный exception handler для HTTPException.
+
+    Заменяет 403 Forbidden на 401 Unauthorized для ошибок аутентификации.
+    FastAPI HTTPBearer по умолчанию возвращает 403, но правильный статус - 401.
+    """
+    if exc.status_code == status.HTTP_403_FORBIDDEN and exc.detail == "Not authenticated":
+        # Заменяем 403 на 401 для authentication errors
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": exc.detail},
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    # Для остальных HTTPException возвращаем как есть
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=exc.headers
+    )
 
 
 @app.get("/")

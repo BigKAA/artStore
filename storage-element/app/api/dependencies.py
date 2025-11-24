@@ -27,11 +27,14 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 # HTTP Bearer token security scheme
-security = HTTPBearer(auto_error=False)
+# Два разных объекта для обязательной и опциональной аутентификации
+# auto_error=True генерирует 403, но глобальный exception handler в main.py заменит на 401
+security_required = HTTPBearer(auto_error=True)
+security_optional = HTTPBearer(auto_error=False)
 
 
 async def get_token_optional(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional)
 ) -> Optional[str]:
     """
     Извлечение JWT токена из Authorization header (optional).
@@ -49,7 +52,7 @@ async def get_token_optional(
 
 
 async def get_token(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security_required)
 ) -> str:
     """
     Извлечение JWT токена из Authorization header (required).
@@ -62,15 +65,10 @@ async def get_token(
 
     Raises:
         HTTPException 401: Если токен не предоставлен
+        (автоматически через HTTPBearer + exception handler в main.py)
     """
-    if credentials is None:
-        logger.warning("Missing authorization token")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authorization token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
+    # С auto_error=True, credentials никогда не будет None
+    # HTTPBearer сгенерирует 403, но exception handler заменит на 401
     return credentials.credentials
 
 
