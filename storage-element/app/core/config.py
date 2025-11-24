@@ -57,7 +57,7 @@ class ServerSettings(BaseSettings):
     )
 
     host: str = "0.0.0.0"
-    port: int = 8010
+    port: int = 8000
     workers: int = 1
     reload: bool = False  # Hot reload для development
 
@@ -449,3 +449,13 @@ class Settings(BaseSettings):
 
 # Глобальный экземпляр настроек
 settings = Settings()
+
+
+def get_config() -> Settings:
+    """
+    Получить глобальный экземпляр настроек.
+
+    Returns:
+        Settings: Глобальная конфигурация приложения
+    """
+    return settings

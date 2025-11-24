@@ -24,7 +24,7 @@ from app.core.logging import get_logger
 
 # Router configuration
 router = APIRouter()
-logger = get_logger()
+logger = get_logger(__name__)
 config = get_config()
 
 # Global state machine instance (singleton pattern)

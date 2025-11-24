@@ -22,9 +22,9 @@ from app.core.atomic_write import (
     OperationStatus
 )
 from app.utils.file_naming import generate_storage_filename
-from app.models import FileMetadata, WAL
+from app.models import FileMetadata
 
-logger = get_logger()
+logger = get_logger(__name__)
 config = get_config()
 
 
