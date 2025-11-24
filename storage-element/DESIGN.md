@@ -112,7 +112,7 @@ Content-Type: application/json
 **Response** (200 OK):
 ```json
 {
-  "status": "alive",
+  "status": "ok",
   "timestamp": "2025-11-08T10:30:00Z"
 }
 ```
