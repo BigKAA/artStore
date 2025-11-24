@@ -10,7 +10,7 @@
 #   docker-compose up -d
 #
 #   # Запуск только инфраструктуры
-#   docker-compose up -d postgres redis minio
+#   docker-compose up -d postgres redis minio pgadmin
 #
 #   # Запуск конкретного модуля
 #   docker-compose up -d admin-module
