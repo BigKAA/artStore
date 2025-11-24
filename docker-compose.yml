@@ -153,11 +153,18 @@ services:
     environment:
       # Application
       APP_NAME: artstore-admin-module
+      APP_DEBUG: "true"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: json
 
       # Database
-      DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore_admin
+      DB_POOL_SIZE: 10
+      DB_MAX_OVERFLOW: 20
 
       # Redis
       REDIS_URL: redis://redis:6379/0
@@ -165,6 +172,48 @@ services:
       # JWT
       JWT_ALGORITHM: RS256
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      JWT_PRIVATE_KEY: |
+        -----BEGIN PRIVATE KEY-----
+        MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCcQh0nApX/6IV/
+        9D+U0Yby25BwShJzatyt0LzKhe52+bqyqXH8t6UNbl6yxHivBpJRYDAaeUyvxrLb
+        o1NR0XRBs/Pj1IErZ7E78FAgnnoJUCh6TTWTf42LkRf3e6IiE9dgdRsNAVOi2Hhr
+        xRZX1c5HVURTJ00cYy42nyFO4JOJJqB75hT4pwdYNF+6oFwwz4N5FRcFNPYTMr2o
+        FpZvYBP9AsrsiJ1c7t3qhuPpfy8cxo1F6m8i69ZhnxxCAdBuHw/2x+Fw5CkwA6AM
+        mkileCnoC4OTE+XwFazNG+f8rAsPCkFeeDAQl6L/0HZdAOIGHQu8exdJLxhUXEVb
+        ruypb9FXAgMBAAECggEACQIOUGGBSGuQR3Qxg1pHsQUNJ02iqt2vub0TwFcgcq83
+        eJvbf7BBYLjxCgkMIToidQ3nAZ4Zi8HLYNPiQ0OGzYNBKmxMEANq/71J8tkMyJZ2
+        Gh4MwLz00EvXUyotvbb7TrFUxspBsI/rJuDwE05p+5aQsq+y1Dg36BucKqhrfCRs
+        9NJTchNnfWYsaxauM+FTUjrkNKVJGzmh0kLKHmOHvxbI/3opKqz2jltyHbnsM/lI
+        MYOz8+EavRHQTedUvnb9OXRqh34PacuTBKmO+SOmytW+1cJXjmP1geGN6N6bzEV9
+        dMJayk7VNcj0pfqpI3zAOi4k+Eoypfap2ZSsB77PsQKBgQDMB0LM6ah6acIlqO0m
+        fGpbjG7UHdKZdLDpavATmRSRg22wnQVMNNpcLdjTSBCrfSHds0If3e+88cx4zjdp
+        uUnMPfr9jEzEi1yJIfBDtHMnsbqEuiUzUqNpZdqlZZWRoRk8bCj9HwcvWv/xTncK
+        V1psAsTCYhk1/RyoJlNpM5QskQKBgQDED8C0YnhPETq19JIQDb822RKzR44Yvow4
+        Wmhy3GrDtIRaiPmununnk8tIz7jSyV7Jtupeu7cBHrEGab1VhCceOJq/60zboYC0
+        A2QVOV7xY3fnmxOsN2TCU574qeBIbzBmLxvVmfiCBWMKFeV99bYZ4Q4TeOsecFa9
+        Qx4p8WEzZwKBgQCTN0oEATUH3vevpMw5UNyNYi817q7e+0wLoJXKDlLBDExBe4sv
+        CZPln08sZHtiwc+F4Kp9w+4QL4iSQnnJV2Dgdnh8KpfZ2ZTTfiGXOMU+hwdGbeoZ
+        ti8jBdNWNI5PniZPatvIiHLuwIKc4zkRxSYBeZ3vhEkco53h1oWpCwaHgQKBgQCu
+        Uw9VlARC0R/xru68BW0R+HpvG11V1P7aEFC0aBUpw3S3Bvlx8OwqsrdaGw/Lo657
+        Df9fkepKvZ5LBHOK+MDLVysJH88rrXLBHA697E/lszpmnPUl9+7H9g/wKyM3ZF2V
+        TaejCY7zFJUV35g4oeNzKS8Z0zbCzsHg8C9+vZdeWwKBgCtGvQlszO170uqvYTEd
+        D5N4qv5TEnNg1F9And0zStJUZ6UuBpnJmsrXnjcVR8a1JO2O///qWZ8qE2jQdH6I
+        yuZVDG390GJCUpx9Un9XFqg6ldSppoQmFnaxKuGd2MlltYl9Hu8JsV1ZZEuPwoIK
+        r9gpIMqR72uMfys7uAKSGYX/
+        -----END PRIVATE KEY-----
+      JWT_PUBLIC_KEY: |
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnEIdJwKV/+iFf/Q/lNGG
+        8tuQcEoSc2rcrdC8yoXudvm6sqlx/LelDW5essR4rwaSUWAwGnlMr8ay26NTUdF0
+        QbPz49SBK2exO/BQIJ56CVAoek01k3+Ni5EX93uiIhPXYHUbDQFToth4a8UWV9XO
+        R1VEUydNHGMuNp8hTuCTiSage+YU+KcHWDRfuqBcMM+DeRUXBTT2EzK9qBaWb2AT
+        /QLK7IidXO7d6obj6X8vHMaNRepvIuvWYZ8cQgHQbh8P9sfhcOQpMAOgDJpIpXgp
+        6AuDkxPl8BWszRvn/KwLDwpBXngwEJei/9B2XQDiBh0LvHsXSS8YVFxFW67sqW/R
+        VwIDAQAB
+        -----END PUBLIC KEY-----
+
+      # Security
+      SECURITY_AUDIT_HMAC_SECRET: "test-hmac-secret-for-development-32chars-minimum"
 
       # Initial System Account
       INITIAL_ACCOUNT_ENABLED: "true"
