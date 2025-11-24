@@ -24,7 +24,7 @@ from app.core.auth import (
 )
 from app.core.logging import get_logger
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 # HTTP Bearer token security scheme
 security = HTTPBearer(auto_error=False)

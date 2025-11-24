@@ -19,7 +19,7 @@ from app.models import FileMetadata
 
 # Router configuration
 router = APIRouter()
-logger = get_logger()
+logger = get_logger(__name__)
 config = get_config()
 
 

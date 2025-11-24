@@ -219,6 +219,11 @@ services:
 
       # Database
       DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore
       DB_TABLE_PREFIX: storage_elem_01
 
       # Redis

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from app.core.config import get_config
 from app.core.logging import get_logger
 
-logger = get_logger()
+logger = get_logger(__name__)
 config = get_config()
 
 
