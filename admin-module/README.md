@@ -1,509 +1,577 @@
-# ArtStore Admin Module
+# Admin Module - Центр управления и аутентификации ArtStore
 
-Модуль администратора для системы распределенного файлового хранилища ArtStore.
+## Назначение модуля
 
-## Функциональность
+**Admin Module Cluster** — это отказоустойчивый центр управления всей системой ArtStore, обеспечивающий:
+- **OAuth 2.0 аутентификацию** через Client Credentials flow
+- **Управление Service Accounts** и их правами доступа
+- **Координацию распределенных транзакций** (Saga Pattern)
+- **Service Discovery** через публикацию конфигурации в Redis
+- **Высокую доступность** через Raft consensus протокол (3+ узла)
 
-### Высокая доступность и отказоустойчивость
+## Ключевые возможности
 
-Если используется один экземпляр (на стадии тестирования) необходимо иметь возможность отключать этот функционал.
+### 1. Аутентификация и авторизация
 
-- **Raft Consensus Cluster**: Распределенное лидерство с автоматическими выборами в кластере из 3+ узлов
-- **Multi-Master Active-Active**: Consistent hashing для распределения нагрузки между всеми узлами
-- **Automatic Leader Election**: Переизбрание лидера за < 15 секунд при недоступности текущего
-- **Split-Brain Protection**: Кворумные решения предотвращают разделение кластера
-- **Zero-Downtime Deployment**: Rolling updates без прерывания сервиса
+#### OAuth 2.0 Client Credentials Flow
+- **Client ID / Client Secret**: Аутентификация machine-to-machine
+- **JWT RS256 tokens**: Подписанные приватным ключом Admin Module
+- **Распределенная валидация**: Другие модули проверяют токены через публичный ключ
+- **Automatic token expiration**: 30 минут для access tokens
 
-### Основная функциональность
-- **Центр аутентификации**: Генерация JWT-токенов, подписанных по асимметричному алгоритму **RS256**.
-- **Saga Orchestrator**: Координация распределенных транзакций для обеспечения консистентности данных.
-- **Vector Clock Manager**: Управление глобальным упорядочиванием событий в системе.
-- **Conflict Resolution Engine**: Автоматическое разрешение конфликтов данных между storage-element.
-- **Источник данных по пользователям и группам пользователей**: локальные пользователи и группы, LDAP, OAuth2 провайдеры.
-- **Управление пользователями**: CRUD операции для пользователей и групп.
-- **Управление элементами хранения**: CRUD операции для `storage-element`.
-- **Service Discovery**: Публикация конфигурации и состояния `storage-element` в **Redis Cluster**.
-- **Мониторинг системы**: Health checks, метрики Prometheus, статус системы.
-- **Web интерфейс**: Angular, Bootstrap UI для администрирования.
+#### Service Accounts Management
+- **CRUD операции** для Service Accounts
+- **Роли**: ADMIN, USER, AUDITOR, READONLY
+- **Fine-grained permissions**: Resource-level access control
+- **Rate limiting**: Настраиваемые лимиты запросов (100 req/min по умолчанию)
+- **Status management**: ACTIVE, SUSPENDED, EXPIRED
 
-### Комплексная система безопасности
+#### Automated Security Features
+- **JWT Key Rotation**: Автоматическая ротация каждые 24 часа с плавным переходом
+- **Client Secret Rotation**: Каждые 90 дней с уведомлениями за 7 дней
+- **Webhook Support**: Уведомления о критических событиях безопасности
 
-#### Automated JWT Key Rotation
-- **Автоматическая ротация ключей**: Ротация RS256 ключевых пар каждые 24 часа с горячей сменой без прерывания сервиса
-- **Key Versioning**: Поддержка множественных версий ключей для плавного перехода
-- **Grace Period**: 48-часовой период перехода для старых токенов
-- **Key Distribution**: Автоматическое распространение новых публичных ключей на все модули через Redis Sentinel
+### 2. Управление Storage Elements
 
-#### Comprehensive Audit Logging
-- **Complete Access Trail**: Логирование всех операций доступа с детализацией пользователя, ресурса и действия
-- **Structured Logging**: JSON формат с стандартизированными полями для автоматического анализа
+- **Регистрация и конфигурирование** Storage Elements
+- **Monitoring статусов**: edit, rw, ro, ar режимы
+- **Публикация в Service Discovery**: Redis pub/sub для обновлений
+- **Health checking**: Периодическая проверка доступности
 
-#### Secure Key Management
-- **Key Backup**: Резервное копирование ключей между узлами кластера
-- **Cryptographic Standards**: Использование проверенных алгоритмов RS256 для JWT подписи
+### 3. Координация распределенных транзакций
 
-### Advanced Monitoring и Observability
+#### Saga Orchestrator
+- **Upload Saga**: Загрузка файла → Валидация → Индексация → Service Discovery publish
+- **Delete Saga**: Проверка прав → Удаление из storage → Cleanup cache → Audit log
+- **Transfer Saga**: Validate → Copy to destination → Verify → Delete from source
 
-#### OpenTelemetry Distributed Tracing
-- **Trace Correlation**: Каждый запрос получает уникальный trace ID для отслеживания через все микросервисы
-- **Span Instrumentation**: Автоматическое создание spans для всех HTTP запросов, database queries и Redis операций
-- **Context Propagation**: Передача trace контекста через headers во все downstream сервисы
-- **Performance Profiling**: Детальное профилирование времени выполнения критических операций
+#### Compensating Actions
+- Автоматический rollback при сбоях на любом этапе
+- Идемпотентные операции для retry
+- Audit logging всех транзакций
 
-#### Custom Business Metrics
-- **Authentication Performance**: Метрики времени валидации JWT токенов и частоты успешных/неуспешных аутентификаций
-- **User Management Metrics**: Статистика создания пользователей, изменения ролей и активности администраторов
-- **Storage Element Health**: Мониторинг состояния всех подключенных storage-element и их доступности
-- **Cluster Coordination**: Метрики Raft consensus, leader elections и split-brain защиты
+### 4. High Availability (Raft Consensus)
 
-#### Third-party Analytics Integration
-- **Metrics Export**: Экспорт authentication metrics в Prometheus для external analytics
-- **Log Aggregation**: Structured logging для integration с ELK Stack, Splunk, DataDog
-- **Trace Export**: OpenTelemetry traces для external APM системы (Jaeger, Zipkin, New Relic)
+#### Кластерная архитектура
+- **3+ узла** для обеспечения кворума
+- **Automatic leader election**: Переизбрание лидера за < 15 секунд
+- **Multi-master active-active**: Consistent hashing для распределения нагрузки
+- **Split-brain protection**: Кворумные решения предотвращают разделение
 
+#### Graceful Failover
+- **RTO < 15 секунд** при недоступности leader узла
+- **Zero-downtime operations**: Rolling updates без прерывания сервиса
+- **State replication**: Синхронизация состояния между узлами
 
-## Запуск и отладка
+## Технологический стек
 
-### Запуск через Docker Compose
+### Backend Framework
+- **Python 3.12+** с async/await для конкурентной обработки
+- **FastAPI** для REST API с автоматической документацией (OpenAPI/Swagger)
+- **Uvicorn** с uvloop для максимальной производительности
+- **Pydantic** для валидации данных и настроек
 
-Согласно принятой в проекте методологии, запуск приложения осуществляется через `docker-compose-app.yml` в корне проекта.
+### Database & Caching
+- **PostgreSQL 15+** (asyncpg) для хранения:
+  - Service Accounts и их метаданных
+  - Storage Elements конфигурации
+  - Audit logs
+  - Saga transactions state
+- **Alembic** для миграций схемы БД
+- **Redis 7** (sync redis-py) для:
+  - Service Discovery (pub/sub)
+  - Distributed locking
+  - Master election coordination
 
-1.  **Запустите базовую инфраструктуру** (если она еще не запущена):
-    ```bash
-    # В корне проекта
-    docker-compose up -d
-    ```
+### Security
+- **PyJWT** для генерации и валидации JWT токенов
+- **Cryptography** для RS256 key pair management
+- **Passlib (bcrypt)** для хеширования client secrets
+- **python-jose** для дополнительных crypto операций
 
-2.  **Соберите и запустите контейнер приложения**:
-    ```bash
-    # В корне проекта
-    docker-compose -f docker-compose-app.yml up --build -d
-    ```
+### Observability
+- **OpenTelemetry** для distributed tracing
+- **Prometheus client** для экспорта метрик
+- **Structured logging** (JSON format) для интеграции с ELK/Splunk
 
-Приложение будет доступно по адресу: <http://localhost:8000>
+## Архитектура модуля
 
-Следующие экземпляры приложения будут доступны на портах от 8001 до 8009.
+### API Endpoints
 
-### Первый запуск и инициализация
+#### Authentication (`/api/auth/*`)
+```
+POST /api/auth/token
+  - OAuth 2.0 Client Credentials authentication
+  - Input: {"client_id": "...", "client_secret": "..."}
+  - Output: {"access_token": "eyJ...", "token_type": "Bearer", "expires_in": 1800}
 
-При первом запуске Admin Module автоматически выполняет следующие действия:
+GET /api/auth/public-key
+  - Получение публичного ключа для валидации JWT
+  - Output: PEM-formatted public key
 
-#### Автоматическое создание администратора
-
-Если база данных пуста (нет ни одного пользователя), система автоматически создает первого администратора с параметрами из конфигурации.
-
-**Настройка через Environment Variables (`.env`):**
-
-```bash
-# Initial Administrator (создается автоматически при первом запуске)
-INITIAL_ADMIN_ENABLED=true
-INITIAL_ADMIN_USERNAME=admin
-INITIAL_ADMIN_PASSWORD=ChangeMe123!  # ОБЯЗАТЕЛЬНО ИЗМЕНИТЬ В PRODUCTION
-INITIAL_ADMIN_EMAIL=admin@artstore.local
-INITIAL_ADMIN_FIRSTNAME=System
-INITIAL_ADMIN_LASTNAME=Administrator
+POST /api/auth/rotate-keys
+  - Ручная ротация JWT ключей (admin only)
+  - Автоматическая ротация каждые 24 часа
 ```
 
-**Важные замечания:**
+#### Service Accounts (`/api/service-accounts/*`)
+```
+GET /api/service-accounts
+  - Список всех Service Accounts (с пагинацией)
+  - Фильтры: role, status, created_after
 
-1. **Безопасность Production**: В производственной среде **ОБЯЗАТЕЛЬНО** установите безопасный пароль через environment variable `INITIAL_ADMIN_PASSWORD`
+POST /api/service-accounts
+  - Создание нового Service Account
+  - Auto-generated client_id и client_secret
 
-2. **Системный пользователь**: Автоматически созданный администратор имеет флаг `is_system=True`, что означает:
-   - Не может быть удален через API
-   - Нельзя убрать права администратора
-   - Нельзя деактивировать
+GET /api/service-accounts/{id}
+  - Детали конкретного Service Account
 
-3. **Отключение автосоздания**: Если нужно отключить автоматическое создание администратора, установите:
-   ```bash
-   INITIAL_ADMIN_ENABLED=false
-   ```
+PATCH /api/service-accounts/{id}
+  - Обновление Service Account (role, rate_limit, description)
 
-4. **Смена пароля после первого входа**: Рекомендуется сразу изменить пароль после первого входа через API endpoint `PUT /api/auth/me/password`
+DELETE /api/service-accounts/{id}
+  - Удаление Service Account (запрещено для is_system=True)
 
-**Пример первого входа:**
+POST /api/service-accounts/{id}/rotate-secret
+  - Ручная ротация client secret
+  - Возвращает новый secret (показывается один раз)
 
-```bash
-# 1. Войти с default credentials
-curl -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "admin",
-    "password": "admin123"
-  }'
+POST /api/service-accounts/{id}/suspend
+  - Приостановка Service Account (status → SUSPENDED)
 
-# 2. Сохранить полученный access_token
-# Response: {"access_token": "eyJ...", "refresh_token": "eyJ..."}
-
-# 3. Сменить пароль
-curl -X PUT http://localhost:8000/api/auth/me/password \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "current_password": "admin123",
-    "new_password": "YourSecurePassword123!"
-  }'
+POST /api/service-accounts/{id}/activate
+  - Активация Service Account (status → ACTIVE)
 ```
 
-**Audit Logging**: Создание initial admin логируется с меткой `SECURITY AUDIT` для отслеживания первого запуска системы.
+#### Storage Elements (`/api/storage-elements/*`)
+```
+GET /api/storage-elements
+  - Список всех Storage Elements
+  - Фильтры: mode, status, location
 
-## API Эндпоинты
+POST /api/storage-elements
+  - Регистрация нового Storage Element
 
-Все методы, кроме:
+GET /api/storage-elements/{id}
+  - Детали конкретного Storage Element
 
-- `POST /api/auth/login`
-- `GET /health/live`
-- `GET /health/ready`
-- `GET /health/health`
-- `GET /metrics`
+PATCH /api/storage-elements/{id}
+  - Обновление конфигурации Storage Element
 
-Должны быть закрыты аутентификацией.
+DELETE /api/storage-elements/{id}
+  - Удаление Storage Element (проверка отсутствия файлов)
 
-### Аутентификация (`/api/auth`)
+POST /api/storage-elements/{id}/change-mode
+  - Смена режима работы (rw → ro, ro → ar)
+  - Two-Phase Commit для консистентности
+```
 
-- `POST /api/auth/login` - Вход в систему
-- `POST /api/auth/logout` - Выход из системы
-- `POST /api/auth/refresh` - Обновление access токена
-- `GET /api/auth/me` - Информация о текущем пользователе
-- `PUT /api/auth/me/password` - Смена пароля текущего пользователя
-- `GET /api/auth/validate` - Проверка действительности токена
-- `GET /api/auth/status` - Статус службы аутентификации
-- `GET /api/auth/health` - Health check для сервиса аутентификации
+#### Webhooks (`/api/webhooks/*`)
+```
+GET /api/webhooks
+  - Список зарегистрированных webhooks
 
-### Управление пользователями (`/api/users`)
+POST /api/webhooks
+  - Регистрация нового webhook
+  - Events: file_restored, restore_failed, file_expiring, security_alert
 
-- `GET /api/users/` - Список пользователей с фильтрацией и пагинацией
-- `POST /api/users/` - Создание нового пользователя
-- `GET /api/users/{user_id}` - Информация о конкретном пользователе
-- `PUT /api/users/{user_id}` - Обновление данных пользователя
-- `DELETE /api/users/{user_id}` - Удаление пользователя
-- `PUT /api/users/{user_id}/password` - Сброс пароля пользователя администратором
-- `POST /api/users/{user_id}/activate` - Активация пользователя
-- `POST /api/users/{user_id}/deactivate` - Деактивация пользователя
-- `POST /api/users/{user_id}/make-admin` - Назначение администратором
-- `POST /api/users/{user_id}/remove-admin` - Снятие прав администратора
-- `GET /api/users/search/{query}` - Быстрый поиск пользователей
-- `GET /api/users/stats/summary` - Статистика пользователей
-- `GET /api/users/stats/summary/activity` - Статистика активности пользователей
+GET /api/webhooks/{id}
+  - Детали webhook
 
-### Управление элементами хранения (`/api/storage-elements`)
+PATCH /api/webhooks/{id}
+  - Обновление webhook
 
-- `POST /api/storage-elements/` - Создание элемента хранения
-- `GET /api/storage-elements/` - Список элементов хранения
-- `GET /api/storage-elements/stats` - Общая статистика по элементам хранения
-- `GET /api/storage-elements/{storage_id}` - Информация об элементе по ID
-- `PUT /api/storage-elements/{storage_id}` - Обновление элемента хранения
-- `DELETE /api/storage-elements/{storage_id}` - Удаление элемента хранения
-- `POST /api/storage-elements/{storage_id}/health` - Проверка здоровья элемента хранения
-- `GET /api/storage-elements/{storage_id}/statistics` - Статистика элемента хранения
-- `GET /api/storage-elements/{storage_id}/files` - Список файлов из элемента хранения
-- `GET /api/storage-elements/retention-warnings` - Элементы с предупреждениями о сроке хранения
-- `GET /api/storage-elements/retention-expired` - Элементы с истекшим сроком хранения
+DELETE /api/webhooks/{id}
+  - Удаление webhook
 
-### Управление транзакциями (`/api/transactions`)
+POST /api/webhooks/{id}/test
+  - Тестовая отправка webhook
+```
 
-- `POST /api/transactions/saga/start` - Запуск новой Saga транзакции
-- `GET /api/transactions/saga/{saga_id}` - Статус выполнения Saga
-- `POST /api/transactions/saga/{saga_id}/compensate` - Принудительная компенсация Saga
-- `GET /api/transactions/vector-clock` - Получение текущего Vector Clock
-- `POST /api/transactions/vector-clock/sync` - Синхронизация Vector Clock между узлами
-- `GET /api/transactions/conflicts` - Список активных конфликтов данных
-- `POST /api/transactions/conflicts/{conflict_id}/resolve` - Разрешение конфликта данных
+#### Transactions (Saga Orchestrator) (`/api/transactions/*`)
+```
+GET /api/transactions
+  - Список всех транзакций (с фильтрацией по status)
 
-### Администрирование (`/api/admin`)
+GET /api/transactions/{id}
+  - Детали конкретной транзакции
+  - Показывает все шаги и их статусы
 
-- `GET /api/admin/system/status` - Статус системы
-- `GET /api/admin/system/info` - Информация о системе
+POST /api/transactions/{id}/compensate
+  - Запуск compensating actions для отката транзакции
 
-### Health Checks и Метрики
+GET /api/transactions/{id}/audit
+  - Полный audit trail транзакции
+```
 
-- `GET /health/live` - Liveness probe
-- `GET /health/ready` - Readiness probe
-- `GET /health/health` - Детальная проверка здоровья
-- `GET /metrics` - Метрики Prometheus
-- `GET /` - Корневая страница с информацией о сервисе
+#### Health & Monitoring
+```
+GET /health/live
+  - Liveness probe (is service running?)
+
+GET /health/ready
+  - Readiness probe (can handle traffic?)
+  - Проверяет: PostgreSQL, Redis connectivity
+
+GET /metrics
+  - Prometheus metrics endpoint
+```
+
+### Внутренняя архитектура
+
+```
+admin-module/
+├── app/
+│   ├── main.py                      # FastAPI application entry point
+│   ├── core/
+│   │   ├── config.py                # Pydantic Settings configuration
+│   │   ├── security.py              # JWT generation, validation
+│   │   ├── raft.py                  # Raft consensus implementation
+│   │   └── exceptions.py            # Custom exceptions
+│   ├── api/
+│   │   ├── deps.py                  # FastAPI dependencies (get_db, get_current_user)
+│   │   └── v1/
+│   │       ├── router.py            # Main API router
+│   │       └── endpoints/
+│   │           ├── auth.py          # Authentication endpoints
+│   │           ├── service_accounts.py
+│   │           ├── storage_elements.py
+│   │           ├── webhooks.py
+│   │           ├── transactions.py
+│   │           └── health.py
+│   ├── models/
+│   │   ├── service_account.py       # ServiceAccount ORM model
+│   │   ├── storage_element.py       # StorageElement ORM model
+│   │   ├── webhook.py               # Webhook ORM model
+│   │   ├── transaction.py           # Transaction ORM model
+│   │   └── audit_log.py             # AuditLog ORM model
+│   ├── schemas/
+│   │   ├── auth.py                  # Auth request/response schemas
+│   │   ├── service_account.py       # Service account schemas
+│   │   ├── storage_element.py       # Storage element schemas
+│   │   └── webhook.py               # Webhook schemas
+│   ├── services/
+│   │   ├── auth_service.py          # Authentication business logic
+│   │   ├── account_service.py       # Service account management
+│   │   ├── storage_service.py       # Storage element management
+│   │   ├── webhook_service.py       # Webhook management
+│   │   ├── saga_orchestrator.py     # Saga pattern coordinator
+│   │   ├── service_discovery.py     # Redis pub/sub for config
+│   │   └── key_rotation.py          # Automated JWT key rotation
+│   ├── db/
+│   │   ├── session.py               # Database session management
+│   │   └── base.py                  # SQLAlchemy declarative base
+│   └── utils/
+│       ├── crypto.py                # Cryptographic utilities
+│       ├── redis_utils.py           # Redis helpers
+│       └── metrics.py               # Prometheus metrics helpers
+├── alembic/
+│   └── versions/                    # Database migrations
+├── tests/
+│   ├── unit/                        # Unit tests
+│   │   ├── test_auth_service.py
+│   │   ├── test_account_service.py
+│   │   └── test_saga_orchestrator.py
+│   └── integration/                 # Integration tests
+│       ├── test_auth_api.py
+│       ├── test_accounts_api.py
+│       └── test_transactions_api.py
+├── Dockerfile                       # Production Docker image
+├── Dockerfile.dev                   # Development Docker image
+├── requirements.txt                 # Python dependencies
+├── pytest.ini                       # Pytest configuration
+└── .env.example                     # Example environment variables
+```
+
+## Принципы разработки
+
+### Security-First Approach
+- **Principle of Least Privilege**: Service Accounts получают минимально необходимые права
+- **Defense in Depth**: Многоуровневая защита (JWT validation, RBAC, rate limiting, audit logging)
+- **Secure by Default**: Безопасные настройки по умолчанию, explicit opt-in для расширенных прав
+- **Zero Trust**: Валидация всех запросов даже внутри доверенной сети
+
+### High Availability Design
+- **Stateless Services**: Все узлы Admin Module Cluster stateless для горизонтального масштабирования
+- **Automatic Failover**: Raft consensus обеспечивает автоматическое переизбрание лидера
+- **Graceful Degradation**: Работоспособность при недоступности Redis (fallback на локальную конфигурацию)
+- **Health Checks**: Liveness и readiness probes для Kubernetes/Docker Swarm
+
+### Data Consistency
+- **ACID Transactions**: PostgreSQL транзакции для критических операций
+- **Saga Pattern**: Координация долгосрочных распределенных операций
+- **Idempotency**: Все операции идемпотентны для безопасного retry
+- **Audit Trail**: Полное логирование всех изменений состояния
+
+## Тестирование
+
+### Unit Tests (pytest)
+- **Coverage target**: минимум 80% для production кода
+- **Mock external dependencies**: PostgreSQL, Redis через fixtures
+- **Тестируемые компоненты**:
+  - `auth_service.py`: Генерация/валидация JWT, key rotation
+  - `account_service.py`: CRUD операции, secret rotation
+  - `saga_orchestrator.py`: Координация транзакций, compensating actions
+
+### Integration Tests
+- **Real dependencies**: Использование test PostgreSQL и Redis containers
+- **End-to-end scenarios**:
+  - OAuth 2.0 authentication flow
+  - Service Account lifecycle (create → use → rotate secret → suspend → delete)
+  - Storage Element registration and mode transitions
+  - Saga transactions with compensation
+
+### Running Tests
+
+```bash
+# Активация виртуального окружения (из корня проекта)
+source /home/artur/Projects/artStore/.venv/bin/activate
+
+# Unit tests
+pytest admin-module/tests/unit/ -v
+
+# Integration tests
+pytest admin-module/tests/integration/ -v
+
+# Coverage report
+pytest admin-module/tests/ --cov=app --cov-report=html
+
+# Docker-based testing (рекомендуется)
+docker-compose build admin-module
+docker-compose run --rm admin-module pytest tests/ -v
+```
 
 ## Конфигурация
 
-Конфигурация определяется в файле `config.yaml` и может быть переопределена переменными окружения.
+### Environment Variables
 
-### Пример конфигурации (`config.yaml`)
+```bash
+# Application Settings
+APP_NAME=artstore-admin-module
+APP_VERSION=1.0.0
+LOG_LEVEL=INFO
+LOG_FORMAT=json  # json для production, text для development
+
+# Database
+DATABASE_URL=postgresql+asyncpg://artstore:password@localhost:5432/artstore
+DB_POOL_SIZE=20
+DB_MAX_OVERFLOW=10
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
+REDIS_SENTINEL_ENABLED=false
+REDIS_SENTINEL_HOSTS=sentinel1:26379,sentinel2:26379,sentinel3:26379
+REDIS_MASTER_NAME=mymaster
+
+# JWT Configuration
+JWT_ALGORITHM=RS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+JWT_PRIVATE_KEY_PATH=/secrets/jwt_private_key.pem
+JWT_PUBLIC_KEY_PATH=/secrets/jwt_public_key.pem
+JWT_KEY_ROTATION_HOURS=24
+
+# Raft Consensus (для кластера)
+RAFT_NODE_ID=node1
+RAFT_CLUSTER_NODES=node1:8000,node2:8001,node3:8002
+RAFT_ELECTION_TIMEOUT_MS=150
+RAFT_HEARTBEAT_INTERVAL_MS=50
+
+# Security
+CLIENT_SECRET_ROTATION_DAYS=90
+RATE_LIMIT_PER_MINUTE=100
+WEBHOOK_TIMEOUT_SECONDS=10
+
+# Monitoring
+PROMETHEUS_METRICS_ENABLED=true
+OPENTELEMETRY_ENABLED=true
+OPENTELEMETRY_ENDPOINT=http://localhost:4317
+
+# Initial System Account (автосоздание при первом запуске)
+INITIAL_ACCOUNT_ENABLED=true
+INITIAL_ACCOUNT_NAME=admin-service
+INITIAL_CLIENT_ID=  # Auto-generated если не указан
+INITIAL_CLIENT_SECRET=  # Auto-generated, ИЗМЕНИТЬ В PRODUCTION!
+INITIAL_ACCOUNT_ROLE=ADMIN
+```
+
+### config.yaml (опционально, переопределяется через ENV)
 
 ```yaml
-# Настройки сервера
-server:
-  host: "0.0.0.0"
-  port: 8000
-  debug: true
-  cors_origins: 
-    - "http://localhost:3000"
-    - "http://localhost:4200"
+app:
+  name: artstore-admin-module
+  version: "1.0.0"
+  debug: false
 
-# База данных
 database:
-  url: "postgresql+asyncpg://artstore:password@localhost:5432/admin_module"
-  user: "artstore"
-  user_password: "password"
-  pool_size: 10
-  max_overflow: 20
+  url: "postgresql+asyncpg://artstore:password@localhost:5432/artstore"
+  pool_size: 20
+  max_overflow: 10
+  echo: false
 
-# Redis Sentinel Cluster
 redis:
-  host: "redis-sentinel-1"
-  port: 6379
-  db: 0
+  url: "redis://localhost:6379/0"
+  sentinel_enabled: false
 
-# Аутентификация
-auth:
-  # Локальная система
-  local:
-    secret_key: "your-secret-key-here-change-in-production"
-    algorithm: "HS256"
-    access_token_expire_minutes: 30
-    refresh_token_expire_days: 7
-    # Пользователь администратора по умолчанию при первом запуске модуля.
-    default_admin:
-      username: "admin"
-      email: "admin@artstore.local"
-      password: "admin123"
-      full_name: "Системный администратор"
-      description: "Пользователь администратора системы по умолчанию"
-  # TODO: Написать пример конфигурации ldap и oauth2
-  ldap: {}
-  oauth2: {}
-  
-# Логирование
+jwt:
+  algorithm: "RS256"
+  access_token_expire_minutes: 30
+  key_rotation_hours: 24
+
+security:
+  client_secret_rotation_days: 90
+  rate_limit_per_minute: 100
+
 logging:
-  level: "INFO" # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  format: "json" # json, text
-  
-  # Назначения для логов
-  handlers:
-    console:
-      enabled: true
-    file:
-      enabled: false
-      path: "/app/logs/storage-element.log"
-      max_bytes: 104857600 # 100MB
-      backup_count: 5
-    network:
-      enabled: false
-      protocol: "syslog" # syslog, http
-      host: "log-server"
-      port: 514
-
-# Настройки метрик Prometheus
-metrics:
-  enabled: true
-  path: "/metrics"
+  level: "INFO"
+  format: "json"
 ```
 
-## Безопасность
+## Мониторинг и метрики
 
-### Аутентификация и Авторизация
+### Prometheus Metrics (`/metrics`)
 
-Система использует гибридную модель, разделяя внешнюю аутентификацию и внутреннюю авторизацию.
+#### Standard Metrics
+- `http_requests_total`: Количество HTTP запросов
+- `http_request_duration_seconds`: Latency HTTP запросов
+- `http_request_size_bytes`: Размер HTTP запросов
+- `http_response_size_bytes`: Размер HTTP ответов
 
-- **Асимметричные JWT (RS256)**: Для внутренней авторизации между сервисами используются JWT-токены, подписанные по алгоритму RS256. Это позволяет каждому сервису проверять подлинность токена локально с помощью общего публичного ключа.
+#### Custom Business Metrics
+- `artstore_auth_token_generated_total`: Количество сгенерированных JWT токенов
+- `artstore_auth_token_validation_duration_seconds`: Время валидации токенов
+- `artstore_service_accounts_total`: Количество Service Accounts по статусу
+- `artstore_jwt_key_rotations_total`: Количество ротаций JWT ключей
+- `artstore_saga_transactions_total`: Количество Saga транзакций по типу
+- `artstore_saga_compensations_total`: Количество compensating actions
+- `artstore_storage_elements_total`: Количество Storage Elements по режиму
+- `artstore_webhook_deliveries_total`: Webhook доставки (success/failure)
 
-- **Центр Аутентификации**: `Admin Module` является единым центром аутентификации и отвечает за:
-    1.  **Проверку учетных данных** пользователя через настроенного провайдера (локальная база, LDAP, OAuth2).
-    2.  **Выпуск внутреннего JWT-токена** после успешной внешней аутентификации. В токен включаются данные о пользователе (ID, роли).
-    3.  **Управление жизненным циклом токенов** (выпуск, обновление через refresh-токены).
+### OpenTelemetry Tracing
 
-- **Интеграция с LDAP/OAuth2**:
-    - Только `Admin Module` напрямую взаимодействует с внешними провайдерами (LDAP/OAuth2).
-    - Остальные сервисы системы (`ingester`, `query`, `storage-element`) ничего не знают о внешних провайдерах и работают исключительно с внутренними JWT-токенами.
+Distributed tracing для всех операций:
+- **Span name**: `artstore.admin.{operation}`
+- **Trace correlation**: Уникальный trace_id через все микросервисы
+- **Context propagation**: Через HTTP headers (`traceparent`, `tracestate`)
 
-- **Локальная авторизация**: Валидация токенов (проверка подписи, срока действия) происходит на стороне каждого сервиса. Обращение к `admin-module` для проверки каждого запроса не требуется.
+### Structured Logging (JSON)
 
-### Защита данных
+```json
+{
+  "timestamp": "2025-01-01T12:00:00.000Z",
+  "level": "INFO",
+  "logger": "artstore.admin.auth",
+  "message": "JWT token generated",
+  "module": "auth_service",
+  "function": "generate_token",
+  "line": 42,
+  "trace_id": "abc123...",
+  "span_id": "def456...",
+  "client_id": "service-account-uuid",
+  "operation": "token_generation",
+  "duration_ms": 15
+}
+```
 
-- Пароли хешируются с использованием bcrypt
-- Пароли и секреты маскируются в логах и API ответах
-- Системный администратор, определенный в `auth.local` защищен от случайного удаления.
+## Deployment
 
-### Использование Bearer токенов
-
-Все запросы к защищенным endpoints должны содержать заголовок авторизации:
+### Docker
 
 ```bash
-Authorization: Bearer <access_token>
+# Build production image
+docker build -t artstore-admin-module:latest -f Dockerfile .
+
+# Run standalone (для тестирования)
+docker run -d \
+  --name admin-module \
+  -p 8000:8000 \
+  -e DATABASE_URL=postgresql+asyncpg://... \
+  -e REDIS_URL=redis://... \
+  artstore-admin-module:latest
+
+# Docker Compose (рекомендуется для разработки)
+# ВСЕГДА запускать из корня проекта!
+cd /home/artur/Projects/artStore
+docker-compose build admin-module
+docker-compose up -d admin-module
 ```
 
-**Пример запроса с токеном:**
+### High Availability Cluster (Production)
 
 ```bash
-curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
-     http://localhost:8000/api/auth/me
+# 3-узловой кластер с Raft consensus
+docker-compose -f docker-compose.prod.yml up -d \
+  admin-module-node1 \
+  admin-module-node2 \
+  admin-module-node3
+
+# Load balancer (HAProxy/Nginx)
+docker-compose -f docker-compose.prod.yml up -d load-balancer
+
+# Проверка статуса кластера
+curl http://localhost:8000/api/cluster/status
+{
+  "leader": "node1",
+  "nodes": [
+    {"id": "node1", "state": "leader", "healthy": true},
+    {"id": "node2", "state": "follower", "healthy": true},
+    {"id": "node3", "state": "follower", "healthy": true}
+  ]
+}
 ```
 
-### Системный администратор auth.local
+## Troubleshooting
 
-- Создается автоматически при первом запуске из конфигурации
-- **Не может быть удален** через API
-- **Нельзя убрать права администратора**
-- **Нельзя деактивировать**
-- Можно изменить только пароль и описание
-- По умолчанию: `admin` / `admin123` (обязательно измените в продакшене!)
+### Проблемы с аутентификацией
 
-### Рекомендации по безопасности
+**Проблема**: "Invalid JWT signature"
+**Решение**: Проверьте, что все модули используют актуальный публичный ключ. Проверьте `GET /api/auth/public-key`.
 
-1. **Измените пароль администратора по умолчанию** в продакшене
-2. **Используйте сильный секретный ключ** для JWT токенов
-3. **Настройте HTTPS** для защиты токенов при передаче
-4. **Регулярно ротируйте секретные ключи**
-5. **Мониторьте неудачные попытки входа**
-6. **Используйте короткое время жизни токенов** (30 минут для access, 7 дней для refresh)
+**Проблема**: "Token expired"
+**Решение**: Время жизни токена 30 минут. Запросите новый токен через `POST /api/auth/token`.
 
-## Примеры использования
+### Проблемы с кластером
 
-### Базовая аутентификация
+**Проблема**: "No leader elected"
+**Решение**: Убедитесь что минимум 3 узла запущены и могут взаимодействовать друг с другом. Проверьте `RAFT_CLUSTER_NODES` конфигурацию.
 
-1. **Вход в систему:**
+**Проблема**: "Split-brain detected"
+**Решение**: Остановите все узлы, очистите Raft state, перезапустите кластер с одного узла.
 
-```bash
-curl -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "admin",
-    "password": "admin123"
-  }'
-```
+### Проблемы с производительностью
 
-2. **Получение информации о текущем пользователе:**
+**Проблема**: Высокая latency на `/api/auth/token`
+**Решение**: Проверьте connection pool к PostgreSQL. Увеличьте `DB_POOL_SIZE` если нужно.
 
-```bash
-curl -H "Authorization: Bearer <access_token>" \
-     http://localhost:8000/api/auth/me
-```
+**Проблема**: Redis connection timeout
+**Решение**: Проверьте сетевое соединение к Redis. Увеличьте Redis connection pool и timeouts.
 
-3. **Обновление токена:**
+## Security Considerations
 
-```bash
-curl -X POST http://localhost:8000/api/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{
-    "refresh_token": "<refresh_token>"
-  }'
-```
+### Production Checklist
 
-### Управление пользователями
+- [ ] Изменить `INITIAL_CLIENT_SECRET` на secure random value
+- [ ] Использовать TLS 1.3 для всех соединений
+- [ ] Настроить automated JWT key rotation (24 часа)
+- [ ] Настроить automated client secret rotation (90 дней)
+- [ ] Включить audit logging в tamper-proof storage
+- [ ] Настроить rate limiting для защиты от brute-force
+- [ ] Настроить webhook уведомления для security events
+- [ ] Регулярный мониторинг Grafana dashboards для suspicious activity
+- [ ] Настроить alerting для critical security events
 
-1. **Получение списка пользователей:**
+### Best Practices
 
-```bash
-curl -H "Authorization: Bearer <access_token>" \
-     "http://localhost:8000/api/users/?page=1&size=10&search=admin"
-```
+1. **Никогда не логировать** client secrets или JWT tokens в plain text
+2. **Ротация ключей** должна быть автоматизирована, не полагайтесь на manual rotation
+3. **Rate limiting** настроить индивидуально для каждого Service Account
+4. **Audit logs** должны быть immutable и храниться минимум 7 лет
+5. **Webhook URLs** должны быть HTTPS only в production
 
-2. **Создание нового пользователя:**
+## Ссылки на документацию
 
-```bash
-curl -X POST http://localhost:8000/api/users/ \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "newuser",
-    "email": "user@example.com", 
-    "password": "secure_password",
-    "full_name": "Новый пользователь",
-    "is_admin": false
-  }'
-```
-
-3. **Активация пользователя:**
-
-```bash
-curl -X POST http://localhost:8000/api/users/{user_id}/activate \
-  -H "Authorization: Bearer <access_token>"
-```
-
-4. **Смена пароля администратором:**
-
-```bash
-curl -X PUT http://localhost:8000/api/users/{user_id}/password \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "new_password": "new_secure_password"
-  }'
-```
-
-### Проверка статуса системы
-
-1. **Health checks:**
-
-```bash
-# Liveness probe
-curl http://localhost:8000/health/live
-
-# Readiness probe  
-curl http://localhost:8000/health/ready
-
-# Детальная проверка
-curl http://localhost:8000/health/health
-```
-
-2. **Метрики Prometheus:**
-
-```bash
-curl http://localhost:8000/metrics
-```
-
-## Режимы работы элементов хранения
-
-- **EDIT** - Чтение, запись и удаление файлов.
-- **RW (Read-Write)** - Чтение и запись файлов. Удаление запрещено.
-- **RO (Read-Only)** - Только чтение файлов.
-- **AR (Archive)** - Архивный режим, доступны только метаданные файлов.
-
-Переходы между режимами:
-
-- `edit` - режим менять нельзя.
-- `rw` -> `ro` - через API storage_element
-- `ro` -> `ar` - через API storage_element
-- `ar` → другие режимы - только через перезапуск с изменением конфигурации.
-
-## Мониторинг
-
-Приложение должно отдать метрики мониторинга в формате Prometheus.
-Метрики должны содержать следующие данные:
-
-- `live` = 1 Если приложение работает.
-- `ready` = 1 Если приложение работает и готово принимать запросы по сети и есть подключение к базе данных
-- Информацию о сетевых запросах к API приложения.
-- Состояние подключения к базе данных. Если используется connection pool, его состояние.
-- Количество и состояние storage_elements.
-
-## Логирование
-
-- Поддержка JSON и текстового формата
-- Настраиваемые уровни логирования
-- Ротация файлов логов
-- Структурированное логирование операций
-
-В конфигурации приложения можно указывать:
-
-- куда сохранять логи приложения:
-  - stdout и stderr (по умолчанию).
-  - файлы на диске.
-  - по сети (смотри какие протоколы для приема логов могут использовать приложения типа flunetbit или vector)
-  - логи можно одновременно сохранять как на stdout и stderr, так и в файл.
-- уровень важности логов.
-- формат логов: txt или json. По умолчанию json.
-
-## Технологии
-
-- Язык программирования: Python >=3.12
-- Библиотеки: SQLAlchemy (async mode), FastAPI
-- База данных: PostgreSQL >=15
-- Кеш: Redis (синхронное соединение).
-- UI: Bootstrap 5
-- Docker.
-
-## Разработка
-
-Для разработки рекомендуется:
-
-- Использовать виртуальное Python в Docker контейнере
-- Запускать инфраструктуру через docker-compose
+- [Главная документация проекта](../README.md)
+- [OAuth 2.0 Client Credentials Flow](https://oauth.net/2/grant-types/client-credentials/)
+- [JWT RS256](https://datatracker.ietf.org/doc/html/rfc7519)
+- [Raft Consensus](https://raft.github.io/)
+- [Saga Pattern](https://microservices.io/patterns/data/saga.html)

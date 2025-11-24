@@ -101,7 +101,7 @@ docker-compose up -d  # НЕ ДЕЛАТЬ ТАК!
 #### Базовая инфраструктура (PostgreSQL, Redis, MinIO)
 
 ```bash
-docker-compose up -d postgres redis minio
+docker-compose up -d postgres redis minio pgadmin
 ```
 
 #### Запуск всех модулей
@@ -497,12 +497,12 @@ docker exec -it artstore_redis redis-cli
 
 ## Дополнительные ресурсы
 
-- [Главная документация проекта](README-PROJECT.md)
-- [Admin Module](admin-module/README-PROJECT.md)
-- [Storage Element](storage-element/README-PROJECT.md)
-- [Ingester Module](ingester-module/README-PROJECT.md)
-- [Query Module](query-module/README-PROJECT.md)
-- [Admin UI](admin-ui/README-PROJECT.md)
+- [Главная документация проекта](README.md)
+- [Admin Module](admin-module/README.md)
+- [Storage Element](storage-element/README.md)
+- [Ingester Module](ingester-module/README.md)
+- [Query Module](query-module/README.md)
+- [Admin UI](admin-ui/README.md)
 - [Мониторинг](monitoring/README.md)
 
 ## FAQ
@@ -514,7 +514,7 @@ A: Нет! Используйте ЕДИНЫЙ `.venv` в корне проек�
 A: **ВСЕГДА** из корня проекта (`/home/artur/Projects/artStore`), никогда из поддиректорий модулей.
 
 **Q: Как запустить только один модуль для тестирования?**
-A: `docker-compose up -d postgres redis <module-name>`
+A: `docker-compose up -d postgres redis minio <module-name>`
 
 **Q: Можно ли использовать локальный Python для разработки без Docker?**
 A: Да, для разработки можно, но **тестирование ОБЯЗАТЕЛЬНО** в Docker окружении.
