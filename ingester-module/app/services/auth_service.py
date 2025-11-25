@@ -16,7 +16,6 @@ import httpx
 
 from app.core.config import settings
 from app.core.exceptions import AuthenticationException
-from app.core.tls_utils import create_ssl_context
 from app.services.auth_metrics import (
     auth_token_requests_total,
     auth_token_acquisition_duration,
@@ -98,18 +97,11 @@ class AuthService:
                 "http2": True,  # HTTP/2 для лучшей производительности
             }
 
-            # Apply mTLS configuration если TLS enabled
-            ssl_context = create_ssl_context()
-            if ssl_context:
-                client_config["verify"] = ssl_context
-                logger.info("mTLS enabled for Admin Module authentication")
-
             self._client = httpx.AsyncClient(**client_config)
             logger.debug(
                 "HTTP client created for Admin Module",
                 extra={
-                    "base_url": self.admin_module_url,
-                    "mtls_enabled": ssl_context is not None
+                    "base_url": self.admin_module_url
                 }
             )
 

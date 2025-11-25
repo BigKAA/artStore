@@ -20,7 +20,6 @@ from app.core.exceptions import (
     StorageElementUnavailableException,
     FileSizeLimitExceededException
 )
-from app.core.tls_utils import create_ssl_context
 from app.schemas.upload import (
     UploadRequest,
     UploadResponse,
@@ -74,19 +73,12 @@ class UploadService:
                 "http2": True,  # HTTP/2 для лучшей производительности
             }
 
-            # Apply mTLS configuration если TLS enabled (Sprint 21: refactored to tls_utils)
-            ssl_context = create_ssl_context()
-            if ssl_context:
-                client_config["verify"] = ssl_context
-                logger.info("mTLS enabled for Storage Element communication")
-
             self._client = httpx.AsyncClient(**client_config)
 
             logger.info(
                 "HTTP client initialized",
                 extra={
-                    "base_url": settings.storage_element.base_url,
-                    "mtls_enabled": settings.tls.enabled
+                    "base_url": settings.storage_element.base_url
                 }
             )
 

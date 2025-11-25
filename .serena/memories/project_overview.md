@@ -76,7 +76,6 @@
 ### Security
 - JWT RS256 для аутентификации
 - OAuth 2.0 Client Credentials
-- TLS 1.3 для межсервисных соединений
 - Automated Key Rotation
 
 ### Monitoring

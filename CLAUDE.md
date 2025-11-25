@@ -275,17 +275,15 @@ docker-compose -f docker-compose.monitoring.yml up -d
 
 ### Ключевые принципы
 
-1. **TLS 1.3**: Все межсервисные соединения
-2. **JWT RS256**: Access tokens (30 min), автоматическая ротация ключей (24ч)
-3. **Bearer Authentication**: Обязательна для всех API (кроме /health)
-4. **Audit Logging**: Все операции с tamper-proof signatures
-5. **Rate Limiting**: Adaptive limiting с автоблокировкой
-6. **RBAC**: Fine-grained resource-level permissions
+1. **JWT RS256**: Access tokens (30 min), автоматическая ротация ключей (24ч)
+2. **Bearer Authentication**: Обязательна для всех API (кроме /health)
+3. **Audit Logging**: Все операции с tamper-proof signatures
+4. **Rate Limiting**: Adaptive limiting с автоблокировкой
+5. **RBAC**: Fine-grained resource-level permissions
 
 ### Production Checklist
 
 - [ ] Изменить все default credentials в `.env`
-- [ ] Настроить TLS сертификаты
 - [ ] Включить audit logging
 - [ ] Настроить rate limiting
 - [ ] Проверить CORS политики
