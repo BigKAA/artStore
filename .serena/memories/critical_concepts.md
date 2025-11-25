@@ -349,7 +349,6 @@ async def upload_file(file: UploadFile):
 - [ ] ⚠️ Все secrets в environment variables, не в коде
 - [ ] ⚠️ LOG_FORMAT=json для structured logging
 - [ ] ⚠️ JWT RS256 с автоматической ротацией ключей
-- [ ] ⚠️ TLS 1.3 для всех межсервисных соединений
 - [ ] ⚠️ Rate limiting настроен и протестирован
 - [ ] ⚠️ Health checks работают на всех модулях
 - [ ] ⚠️ Prometheus metrics экспортируются

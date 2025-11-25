@@ -99,7 +99,6 @@
 ### Security
 - **JWT RS256** для аутентификации между сервисами
 - **OAuth 2.0 Client Credentials** для API клиентов
-- **TLS 1.3** для всех межсервисных соединений
 - **Automated Key Rotation** (JWT каждые 24 часа, secrets каждые 90 дней)
 
 ### Monitoring & Observability
@@ -167,7 +166,6 @@
 ### Безопасность
 
 1. **Multi-Layer Security**
-   - TLS 1.3 для transit encryption
    - JWT RS256 с automated key rotation
    - OAuth 2.0 для machine-to-machine auth
    - Fine-grained RBAC на уровне ресурсов
@@ -324,7 +322,6 @@ docker-compose run --rm storage-element pytest tests/ -v
 - ✅ Ingester Module с streaming uploads
 - ✅ Query Module с full-text search
 - ✅ Comprehensive monitoring stack (Prometheus, Grafana)
-- ✅ TLS 1.3 integration tests
 - ✅ JWT RS256 authentication с automated rotation
 
 ### In Progress (Sprint 24+)
