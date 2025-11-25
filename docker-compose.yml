@@ -166,6 +166,13 @@ services:
       DB_POOL_SIZE: 10
       DB_MAX_OVERFLOW: 20
 
+      # PostgreSQL SSL (optional)
+      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-false}
+      DB_SSL_MODE: ${DB_SSL_MODE:-require}
+      DB_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
+      DB_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
+      DB_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
+
       # Redis
       REDIS_URL: redis://redis:6379/0
 
@@ -287,6 +294,13 @@ services:
       DB_DATABASE: artstore
       DB_TABLE_PREFIX: storage_elem_01
 
+      # PostgreSQL SSL (optional)
+      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-false}
+      DB_SSL_MODE: ${DB_SSL_MODE:-require}
+      DB_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
+      DB_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
+      DB_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
+
       # Redis
       REDIS_URL: redis://redis:6379/0
 
@@ -393,6 +407,13 @@ services:
 
       # Database
       DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+
+      # PostgreSQL SSL (optional)
+      DATABASE_SSL_ENABLED: ${DB_SSL_ENABLED:-false}
+      DATABASE_SSL_MODE: ${DB_SSL_MODE:-require}
+      DATABASE_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
+      DATABASE_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
+      DATABASE_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
 
       # Redis
       REDIS_URL: redis://redis:6379/1

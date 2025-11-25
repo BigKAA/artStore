@@ -52,11 +52,63 @@ class DatabaseSettings(BaseSettings):
         default=30, ge=5, le=300, description="Timeout ?>;CG5=8O A>548=5=8O (A5:)"
     )
     echo: bool = Field(default=False, description=">38@>20=85 SQL 70?@>A>2")
+    
+    # SSL Configuration
+    ssl_enabled: bool = Field(
+        default=False,
+        description="Enable SSL for PostgreSQL connection"
+    )
+    ssl_mode: str = Field(
+        default="require",
+        description="SSL mode: disable, allow, prefer, require, verify-ca, verify-full"
+    )
+    ssl_ca_cert: Optional[str] = Field(
+        default=None,
+        description="Path to CA certificate file for SSL verification"
+    )
+    ssl_client_cert: Optional[str] = Field(
+        default=None,
+        description="Path to client certificate file for SSL"
+    )
+    ssl_client_key: Optional[str] = Field(
+        default=None,
+        description="Path to client private key file for SSL"
+    )
+    
+    @field_validator("ssl_mode")
+    @classmethod
+    def validate_ssl_mode(cls, v: str) -> str:
+        """Валидация SSL mode"""
+        valid_modes = ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"]
+        if v not in valid_modes:
+            raise ValueError(
+                f"Invalid DATABASE_SSL_MODE: {v}. "
+                f"Valid modes: {', '.join(valid_modes)}"
+            )
+        return v
 
     @property
     def database_url(self) -> str:
         """$>@<8@>20=85 async PostgreSQL connection string."""
-        return f"postgresql+asyncpg://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+        base_url = f"postgresql+asyncpg://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+
+        if self.ssl_enabled:
+            ssl_params = []
+            ssl_params.append(f"ssl={self.ssl_mode}")
+
+            if self.ssl_ca_cert:
+                ssl_params.append(f"sslrootcert={self.ssl_ca_cert}")
+
+            if self.ssl_client_cert:
+                ssl_params.append(f"sslcert={self.ssl_client_cert}")
+
+            if self.ssl_client_key:
+                ssl_params.append(f"sslkey={self.ssl_client_key}")
+
+            if ssl_params:
+                base_url += "?" + "&".join(ssl_params)
+
+        return base_url
 
 
 class RedisSettings(BaseSettings):

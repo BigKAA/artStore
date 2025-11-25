@@ -358,6 +358,13 @@ DATABASE_URL=postgresql+asyncpg://artstore:password@localhost:5432/artstore
 DB_POOL_SIZE=20
 DB_MAX_OVERFLOW=10
 
+# PostgreSQL SSL (опционально, для production)
+DB_SSL_ENABLED=false                    # Включить SSL для PostgreSQL
+DB_SSL_MODE=require                     # SSL режим: disable, require, verify-ca, verify-full
+# DB_SSL_CA_CERT=/app/ssl-certs/ca-cert.pem      # CA certificate (для verify-ca/verify-full)
+# DB_SSL_CLIENT_CERT=/app/ssl-certs/client-cert.pem  # Client certificate (опционально)
+# DB_SSL_CLIENT_KEY=/app/ssl-certs/client-key.pem    # Client key (опционально)
+
 # Redis
 REDIS_URL=redis://localhost:6379/0
 REDIS_SENTINEL_ENABLED=false
@@ -408,6 +415,12 @@ database:
   pool_size: 20
   max_overflow: 10
   echo: false
+  # PostgreSQL SSL (опционально)
+  ssl_enabled: false
+  ssl_mode: "require"
+  ssl_ca_cert: null  # /app/ssl-certs/ca-cert.pem
+  ssl_client_cert: null
+  ssl_client_key: null
 
 redis:
   url: "redis://localhost:6379/0"
