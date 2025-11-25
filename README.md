@@ -100,6 +100,7 @@
 - **JWT RS256** для аутентификации между сервисами
 - **OAuth 2.0 Client Credentials** для API клиентов
 - **Automated Key Rotation** (JWT каждые 24 часа, secrets каждые 90 дней)
+- **PostgreSQL SSL** для шифрования database соединений (опционально, для production)
 
 ### Monitoring & Observability
 - **OpenTelemetry** для distributed tracing
@@ -175,6 +176,45 @@
    - Real-time monitoring suspicious activities
    - Automated compliance reporting (GDPR, SOX, HIPAA)
    - 7+ лет retention для audit logs
+
+3. **Database Security (PostgreSQL SSL)**
+   - SSL-шифрование для database соединений (опционально)
+   - Поддержка режимов: `disable`, `require`, `verify-ca`, `verify-full`
+   - Certificate-based authentication для максимальной безопасности
+   - По умолчанию SSL выключен (backward compatible)
+
+#### PostgreSQL SSL Configuration
+
+**Basic Setup (Production)**:
+```bash
+# Включить SSL для всех модулей
+DB_SSL_ENABLED=true
+DB_SSL_MODE=require  # Обязательное SSL соединение
+```
+
+**Advanced Setup (Maximum Security)**:
+```bash
+# Полная проверка сертификата
+DB_SSL_ENABLED=true
+DB_SSL_MODE=verify-full
+DB_SSL_CA_CERT=/app/ssl-certs/ca-cert.pem
+DB_SSL_CLIENT_CERT=/app/ssl-certs/client-cert.pem  # опционально
+DB_SSL_CLIENT_KEY=/app/ssl-certs/client-key.pem    # опционально
+```
+
+**SSL Modes**:
+- `disable` - Без SSL (development, по умолчанию)
+- `require` - SSL обязателен, без проверки сертификата (рекомендуется для production)
+- `verify-ca` - SSL + проверка CA сертификата
+- `verify-full` - SSL + проверка CA + hostname (максимальная безопасность)
+
+**Модули с поддержкой SSL**:
+- Admin Module
+- Storage Element
+- Query Module
+- *(Ingester Module не использует database напрямую)*
+
+Детальная информация: см. модульные README.md для примеров конфигурации.
 
 ## Режимы работы Storage Elements
 

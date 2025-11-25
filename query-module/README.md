@@ -268,6 +268,13 @@ query-module/
 # Database
 DATABASE_URL=postgresql+asyncpg://artstore:password@localhost:5432/artstore
 
+# PostgreSQL SSL (опционально, для production)
+DATABASE_SSL_ENABLED=false                    # Включить SSL для PostgreSQL
+DATABASE_SSL_MODE=require                     # SSL режим: disable, require, verify-ca, verify-full
+# DATABASE_SSL_CA_CERT=/app/ssl-certs/ca-cert.pem      # CA certificate (для verify-ca/verify-full)
+# DATABASE_SSL_CLIENT_CERT=/app/ssl-certs/client-cert.pem  # Client certificate (опционально)
+# DATABASE_SSL_CLIENT_KEY=/app/ssl-certs/client-key.pem    # Client key (опционально)
+
 # Redis
 REDIS_URL=redis://localhost:6379/1
 SERVICE_DISCOVERY_CHANNEL=artstore:storage-elements

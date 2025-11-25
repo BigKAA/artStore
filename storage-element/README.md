@@ -397,6 +397,13 @@ STORAGE_S3_SECRET_ACCESS_KEY=minioadmin
 DATABASE_URL=postgresql+asyncpg://artstore:password@localhost:5432/artstore
 DB_TABLE_PREFIX=storage_elem_01  # Для уникальности в shared DB
 
+# PostgreSQL SSL (опционально, для production)
+DB_SSL_ENABLED=false                    # Включить SSL для PostgreSQL
+DB_SSL_MODE=require                     # SSL режим: disable, require, verify-ca, verify-full
+# DB_SSL_CA_CERT=/app/ssl-certs/ca-cert.pem      # CA certificate (для verify-ca/verify-full)
+# DB_SSL_CLIENT_CERT=/app/ssl-certs/client-cert.pem  # Client certificate (опционально)
+# DB_SSL_CLIENT_KEY=/app/ssl-certs/client-key.pem    # Client key (опционально)
+
 # WAL Configuration
 WAL_ENABLED=true
 WAL_RETENTION_HOURS=24
