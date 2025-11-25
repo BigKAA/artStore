@@ -467,10 +467,17 @@ async def update_file_metadata(
 
 
 @router.get(
-    "/",
+    "",
     response_model=FileListResponse,
     summary="Список файлов",
     description="Получить список файлов с пагинацией"
+)
+@router.get(
+    "/",
+    response_model=FileListResponse,
+    summary="Список файлов",
+    description="Получить список файлов с пагинацией",
+    include_in_schema=False  # Скрыть дубликат из OpenAPI схемы
 )
 async def list_files(
     skip: int = 0,
