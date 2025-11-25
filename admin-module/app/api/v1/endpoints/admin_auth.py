@@ -37,7 +37,7 @@ from app.services.admin_auth_service import (
 from app.models.admin_user import AdminUser
 from app.api.dependencies.admin_auth import get_current_admin_user
 
-router = APIRouter(prefix="/admin-auth", tags=["Admin Authentication"])
+router = APIRouter(prefix="/admin-auth")
 
 
 # Dependency для получения AdminAuthService
