@@ -771,6 +771,227 @@ class S3StorageService(StorageService):
                     details={"relative_path": relative_path, "error": str(e)}
                 )
 
+    # ========================================
+    # Методы для работы с attr.json файлами
+    # ========================================
+
+    async def write_attr_file(
+        self,
+        relative_path: str,
+        attributes: dict
+    ) -> None:
+        """
+        Записать attr.json файл в S3 хранилище.
+
+        Этот метод предназначен для сохранения метаданных файла
+        в формате JSON рядом с основным файлом данных в S3.
+        Реализует принцип "Attribute-First Storage Model".
+
+        Args:
+            relative_path: Относительный путь для attr.json (S3 key),
+                          например: "storage_element_01/2025/11/25/16/file.pdf.attr.json"
+            attributes: Словарь с метаданными файла
+
+        Raises:
+            StorageException: Ошибка записи attr.json в S3
+        """
+        try:
+            import json as json_module
+
+            session = aioboto3.Session()
+
+            async with session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key
+            ) as s3_client:
+                # Сериализация атрибутов в JSON с pretty print
+                json_data = json_module.dumps(
+                    attributes,
+                    indent=2,
+                    ensure_ascii=False,
+                    default=str  # Для UUID, datetime и других типов
+                ).encode('utf-8')
+
+                await s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=relative_path,
+                    Body=json_data,
+                    ContentType='application/json'
+                )
+
+                logger.info(
+                    "Attr file written to S3 storage",
+                    extra={
+                        "relative_path": relative_path,
+                        "bucket": self.bucket_name,
+                        "size_bytes": len(json_data)
+                    }
+                )
+
+        except ClientError as e:
+            logger.error(
+                f"S3 client error writing attr file: {e}",
+                extra={
+                    "relative_path": relative_path,
+                    "error": str(e)
+                }
+            )
+            raise StorageException(
+                message="Failed to write attr file to S3",
+                error_code="S3_ATTR_WRITE_FAILED",
+                details={"relative_path": relative_path, "error": str(e)}
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to write attr file to S3 storage: {e}",
+                extra={
+                    "relative_path": relative_path,
+                    "error": str(e)
+                }
+            )
+            raise StorageException(
+                message="Failed to write attr file to S3 storage",
+                error_code="S3_ATTR_WRITE_FAILED",
+                details={"relative_path": relative_path, "error": str(e)}
+            )
+
+    async def read_attr_file(
+        self,
+        relative_path: str
+    ) -> dict:
+        """
+        Прочитать attr.json файл из S3 хранилища.
+
+        Args:
+            relative_path: Относительный путь (S3 key) к attr.json файлу
+
+        Returns:
+            dict: Словарь с метаданными файла
+
+        Raises:
+            StorageException: Файл не найден или ошибка чтения
+        """
+        try:
+            import json as json_module
+
+            session = aioboto3.Session()
+
+            async with session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key
+            ) as s3_client:
+                response = await s3_client.get_object(
+                    Bucket=self.bucket_name,
+                    Key=relative_path
+                )
+
+                # Чтение всего содержимого JSON файла
+                body = await response['Body'].read()
+                attributes = json_module.loads(body.decode('utf-8'))
+
+                logger.debug(
+                    "Attr file read from S3 storage",
+                    extra={
+                        "relative_path": relative_path,
+                        "bucket": self.bucket_name
+                    }
+                )
+
+                return attributes
+
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                raise StorageException(
+                    message=f"Attr file not found: {relative_path}",
+                    error_code="ATTR_FILE_NOT_FOUND",
+                    details={"relative_path": relative_path}
+                )
+            else:
+                raise StorageException(
+                    message="S3 client error reading attr file",
+                    error_code="S3_ATTR_READ_FAILED",
+                    details={"relative_path": relative_path, "error": str(e)}
+                )
+        except Exception as e:
+            logger.error(
+                f"Failed to read attr file from S3 storage: {e}",
+                extra={
+                    "relative_path": relative_path,
+                    "error": str(e)
+                }
+            )
+            raise StorageException(
+                message="Failed to read attr file from S3 storage",
+                error_code="S3_ATTR_READ_FAILED",
+                details={"relative_path": relative_path, "error": str(e)}
+            )
+
+    async def delete_attr_file(
+        self,
+        relative_path: str
+    ) -> None:
+        """
+        Удалить attr.json файл из S3 хранилища.
+
+        Args:
+            relative_path: Относительный путь (S3 key) к attr.json файлу
+
+        Raises:
+            StorageException: Ошибка удаления attr.json
+        """
+        try:
+            session = aioboto3.Session()
+
+            async with session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key
+            ) as s3_client:
+                await s3_client.delete_object(
+                    Bucket=self.bucket_name,
+                    Key=relative_path
+                )
+
+                logger.info(
+                    "Attr file deleted from S3 storage",
+                    extra={
+                        "relative_path": relative_path,
+                        "bucket": self.bucket_name
+                    }
+                )
+
+        except ClientError as e:
+            logger.error(
+                f"S3 client error deleting attr file: {e}",
+                extra={
+                    "relative_path": relative_path,
+                    "error": str(e)
+                }
+            )
+            raise StorageException(
+                message="S3 client error deleting attr file",
+                error_code="S3_ATTR_DELETE_FAILED",
+                details={"relative_path": relative_path, "error": str(e)}
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to delete attr file from S3 storage: {e}",
+                extra={
+                    "relative_path": relative_path,
+                    "error": str(e)
+                }
+            )
+            raise StorageException(
+                message="Failed to delete attr file from S3 storage",
+                error_code="S3_ATTR_DELETE_FAILED",
+                details={"relative_path": relative_path, "error": str(e)}
+            )
+
 
 def get_storage_service() -> StorageService:
     """
