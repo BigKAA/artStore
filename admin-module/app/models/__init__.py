@@ -14,7 +14,7 @@ __all__ = [
     # Base
     "Base",
     "TimestampMixin",
-    # User (legacy LDAP)
+    # User
     "User",
     "UserRole",
     "UserStatus",

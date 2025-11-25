@@ -22,24 +22,6 @@ def create_local_user():
         first_name="Local",
         last_name="User",
         hashed_password=hashed_password,
-        ldap_dn=None,
-        role=UserRole.USER,
-        status=UserStatus.ACTIVE,
-        is_system=False,
-        failed_login_attempts=0,
-        lockout_until=None
-    )
-
-
-def create_ldap_user():
-    """Создание LDAP пользователя для тестирования."""
-    return User(
-        username="ldapuser",
-        email="ldap@example.com",
-        first_name="LDAP",
-        last_name="User",
-        hashed_password=None,
-        ldap_dn="cn=ldapuser,ou=users,dc=example,dc=com",
         role=UserRole.USER,
         status=UserStatus.ACTIVE,
         is_system=False,
@@ -57,7 +39,6 @@ def create_locked_user():
         first_name="Locked",
         last_name="User",
         hashed_password=hashed_password,
-        ldap_dn=None,
         role=UserRole.USER,
         status=UserStatus.LOCKED,
         is_system=False,
@@ -181,21 +162,6 @@ class TestLocalAuthentication:
         user = await auth_service.authenticate_local(
             db_session,
             "nonexistent_user",
-            "password123"
-        )
-
-        assert user is None
-
-    @pytest.mark.asyncio
-    async def test_authenticate_local_ldap_user_rejected(self, db_session):
-        """Тест что LDAP пользователь не может авторизоваться локально."""
-        ldap_user = create_ldap_user()
-        db_session.add(ldap_user)
-        await db_session.commit()
-
-        user = await auth_service.authenticate_local(
-            db_session,
-            "ldapuser",
             "password123"
         )
 
@@ -343,20 +309,6 @@ class TestPasswordReset:
         )
 
         # Не раскрываем что пользователь не найден (security)
-        assert token is None
-
-    @pytest.mark.asyncio
-    async def test_create_password_reset_token_ldap_user(self, db_session):
-        """Тест что LDAP пользователи не могут сбрасывать пароль локально."""
-        ldap_user = create_ldap_user()
-        db_session.add(ldap_user)
-        await db_session.commit()
-
-        token = await auth_service.create_password_reset_token(
-            db_session,
-            "ldap@example.com"
-        )
-
         assert token is None
 
     @pytest.mark.asyncio

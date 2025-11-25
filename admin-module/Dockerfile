@@ -9,7 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     libpq-dev \
-    libldap2-dev \
     libsasl2-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -33,7 +32,6 @@ LABEL description="ArtStore Admin Module - Authentication and Management API"
 # Установка runtime зависимостей
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
-    libldap2 \
     libsasl2-2 \
     curl \
     && rm -rf /var/lib/apt/lists/*

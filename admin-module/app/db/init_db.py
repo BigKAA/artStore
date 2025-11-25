@@ -122,7 +122,6 @@ async def create_initial_admin_user(settings: Settings, db: AsyncSession) -> Non
         db: Async database session
 
     Note:
-        Admin User отличается от legacy User (LDAP).
         Admin User используется для аутентификации в Admin UI через login/password.
 
     Examples:

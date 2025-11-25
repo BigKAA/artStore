@@ -1,8 +1,7 @@
 """
 Модель Service Account для OAuth 2.0 Client Credentials authentication.
 
-Service Accounts предназначены для machine-to-machine аутентификации,
-заменяя User model с LDAP интеграцией для API клиентов.
+Service Accounts предназначены для machine-to-machine аутентификации API клиентов.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -38,8 +37,7 @@ class ServiceAccount(Base, TimestampMixin):
     Модель Service Account для OAuth 2.0 Client Credentials.
 
     Service Accounts используются для machine-to-machine (M2M) аутентификации
-    через OAuth 2.0 Client Credentials flow. Заменяют User model с LDAP
-    для API клиентов.
+    через OAuth 2.0 Client Credentials flow для API клиентов.
 
     Sprint 16 Phase 1: Enhanced Password Security
     - Password history tracking для предотвращения reuse

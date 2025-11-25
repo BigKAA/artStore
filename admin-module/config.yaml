@@ -31,28 +31,6 @@ redis:
   socket_timeout: 5
   socket_connect_timeout: 5
 
-# LDAP Configuration
-ldap:
-  enabled: true
-  server: "ldap://localhost:1398"
-  bind_dn: "cn=Directory Manager"
-  bind_password: "password"  # Переопределить через LDAP_PASSWORD
-  base_dn: "dc=artstore,dc=local"
-  user_search_base: "ou=users,dc=artstore,dc=local"
-  group_search_base: "ou=groups,dc=artstore,dc=local"
-  user_object_class: "inetOrgPerson"
-  group_object_class: "groupOfNames"
-  username_attribute: "uid"
-  email_attribute: "mail"
-  firstname_attribute: "givenName"
-  lastname_attribute: "sn"
-  member_attribute: "member"
-  # Mapping LDAP групп на роли системы
-  group_role_mapping:
-    "cn=admins,ou=groups,dc=artstore,dc=local": "admin"
-    "cn=users,ou=groups,dc=artstore,dc=local": "user"
-    "cn=operators,ou=groups,dc=artstore,dc=local": "operator"
-
 # JWT Authentication
 jwt:
   algorithm: "RS256"

@@ -66,16 +66,6 @@ class TestUserModel:
         )
         assert user4.full_name == "user4"
 
-    def test_user_is_ldap_user(self):
-        """Тест определения LDAP пользователя."""
-        ldap_user = User(
-            username="ldapuser",
-            email="ldap@example.com",
-            ldap_dn="cn=ldapuser,ou=users,dc=example,dc=com"
-        )
-        assert ldap_user.is_ldap_user is True
-        assert ldap_user.is_local_user is False
-
     def test_user_is_local_user(self):
         """Тест определения локального пользователя."""
         local_user = User(
@@ -84,7 +74,6 @@ class TestUserModel:
             hashed_password="hashed_password_here"
         )
         assert local_user.is_local_user is True
-        assert local_user.is_ldap_user is False
 
     def test_user_can_login_active(self):
         """Тест возможности входа для активного пользователя."""

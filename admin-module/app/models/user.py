@@ -1,7 +1,6 @@
 """
 Модель пользователя для Admin Module.
 Поддерживает локальную аутентификацию через OAuth 2.0.
-Примечание: LDAP поля (ldap_dn) deprecated после Sprint 13 и не используются.
 """
 
 from datetime import datetime, timedelta
@@ -43,7 +42,6 @@ class User(Base, TimestampMixin):
         first_name: Имя
         last_name: Фамилия
         hashed_password: Хеш пароля для локальной аутентификации
-        ldap_dn: DEPRECATED - не используется после Sprint 13 (LDAP removal)
         role: Роль пользователя в системе
         status: Текущий статус пользователя
         is_system: Флаг системного пользователя (не может быть удален)
@@ -95,14 +93,6 @@ class User(Base, TimestampMixin):
         comment="Хеш пароля для локальной аутентификации"
     )
 
-    ldap_dn: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
-        unique=True,
-        index=True,
-        comment="DEPRECATED: Поле не используется после Sprint 13 (LDAP removal)"
-    )
-
     # Authorization
     role: Mapped[UserRole] = mapped_column(
         SQLEnum(UserRole, name="user_role_enum", create_type=True),
@@ -149,7 +139,6 @@ class User(Base, TimestampMixin):
     # Indexes для производительности
     __table_args__ = (
         Index("idx_user_status_role", "status", "role"),
-        Index("idx_user_ldap_lookup", "ldap_dn", postgresql_where=Column("ldap_dn").isnot(None)),
         UniqueConstraint("username", name="uq_username"),
         UniqueConstraint("email", name="uq_email"),
     )
@@ -175,11 +164,6 @@ class User(Base, TimestampMixin):
         return self.status == UserStatus.ACTIVE
 
     @property
-    def is_ldap_user(self) -> bool:
-        """Проверка является ли пользователь LDAP пользователем."""
-        return self.ldap_dn is not None
-
-    @property
     def is_local_user(self) -> bool:
         """Проверка является ли пользователь локальным пользователем."""
         return self.hashed_password is not None
@@ -200,7 +184,7 @@ class User(Base, TimestampMixin):
             return False
 
         # Проверка наличия метода аутентификации
-        if not (self.is_ldap_user or self.is_local_user):
+        if not self.is_local_user:
             return False
 
         return True
