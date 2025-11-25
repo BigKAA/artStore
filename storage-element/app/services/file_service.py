@@ -189,17 +189,17 @@ class FileService:
                 metadata=metadata or {}
             )
 
-            # Путь к attr.json файлу
+            # ШАГ 3: Создание и запись attr.json файла
             if settings.storage.type.value == "local":
-                # Local storage: attr.json рядом с файлом
+                # Local storage: attr.json рядом с файлом (локально)
                 data_file_path = Path(settings.storage.local.base_path) / relative_path
                 attr_file_path = get_attr_file_path(data_file_path)
+                await write_attr_file(attr_file_path, attributes)
             else:
-                # S3: attr.json в отдельной директории
-                attr_relative_path = f"{storage_path}.attrs/{storage_filename}.attr.json"
-                attr_file_path = Path(settings.storage.local.base_path) / attr_relative_path
-
-            await write_attr_file(attr_file_path, attributes)
+                # S3: attr.json в S3 рядом с файлом данных
+                # Формат: storage_element_01/2025/11/25/16/file.pdf.attr.json
+                attr_relative_path = f"{relative_path}.attr.json"
+                await self.storage.write_attr_file(attr_relative_path, attributes.model_dump())
 
             # ШАГ 4: Сохранение в DB cache для быстрого поиска
             db_metadata = FileMetadata(
@@ -274,14 +274,15 @@ class FileService:
             # Удаление attr.json
             try:
                 if settings.storage.type.value == "local":
+                    # Local storage: удаление локального attr.json
                     data_file_path = Path(settings.storage.local.base_path) / relative_path
                     attr_file_path = get_attr_file_path(data_file_path)
+                    if attr_file_path.exists():
+                        await delete_attr_file(attr_file_path)
                 else:
-                    attr_relative_path = f"{storage_path}.attrs/{storage_filename}.attr.json"
-                    attr_file_path = Path(settings.storage.local.base_path) / attr_relative_path
-
-                if attr_file_path.exists():
-                    await delete_attr_file(attr_file_path)
+                    # S3: удаление attr.json из S3
+                    attr_relative_path = f"{relative_path}.attr.json"
+                    await self.storage.delete_attr_file(attr_relative_path)
             except Exception as attr_error:
                 logger.error(f"Failed to cleanup attr file: {attr_error}")
 
@@ -419,14 +420,15 @@ class FileService:
 
             # ШАГ 3: Удаление attr.json
             if settings.storage.type.value == "local":
+                # Local storage: удаление локального attr.json
                 data_file_path = Path(settings.storage.local.base_path) / relative_path
                 attr_file_path = get_attr_file_path(data_file_path)
+                if attr_file_path.exists():
+                    await delete_attr_file(attr_file_path)
             else:
-                attr_relative_path = f"{metadata.storage_path}.attrs/{metadata.storage_filename}.attr.json"
-                attr_file_path = Path(settings.storage.local.base_path) / attr_relative_path
-
-            if attr_file_path.exists():
-                await delete_attr_file(attr_file_path)
+                # S3: удаление attr.json из S3
+                attr_relative_path = f"{relative_path}.attr.json"
+                await self.storage.delete_attr_file(attr_relative_path)
 
             # ШАГ 4: Удаление из DB cache
             await self.db.delete(metadata)
@@ -577,27 +579,44 @@ class FileService:
             relative_path = f"{db_metadata.storage_path}{db_metadata.storage_filename}"
 
             if settings.storage.type.value == "local":
+                # Local storage: чтение и запись локального attr.json
                 data_file_path = Path(settings.storage.local.base_path) / relative_path
                 attr_file_path = get_attr_file_path(data_file_path)
+
+                # Чтение текущих атрибутов
+                attributes = await read_attr_file(attr_file_path)
+
+                # Обновление полей
+                if description is not None:
+                    attributes.description = description
+                if version is not None:
+                    attributes.version = version
+                if metadata is not None:
+                    attributes.metadata = metadata
+
+                attributes.updated_at = datetime.now(timezone.utc)
+
+                # Запись обновленных атрибутов
+                await write_attr_file(attr_file_path, attributes)
             else:
-                attr_relative_path = f"{db_metadata.storage_path}.attrs/{db_metadata.storage_filename}.attr.json"
-                attr_file_path = Path(settings.storage.local.base_path) / attr_relative_path
+                # S3: чтение и запись attr.json в S3
+                attr_relative_path = f"{relative_path}.attr.json"
 
-            # Чтение текущих атрибутов
-            attributes = await read_attr_file(attr_file_path)
+                # Чтение текущих атрибутов из S3
+                attributes_dict = await self.storage.read_attr_file(attr_relative_path)
 
-            # Обновление полей
-            if description is not None:
-                attributes.description = description
-            if version is not None:
-                attributes.version = version
-            if metadata is not None:
-                attributes.metadata = metadata
+                # Обновление полей
+                if description is not None:
+                    attributes_dict['description'] = description
+                if version is not None:
+                    attributes_dict['version'] = version
+                if metadata is not None:
+                    attributes_dict['metadata'] = metadata
 
-            attributes.updated_at = datetime.now(timezone.utc)
+                attributes_dict['updated_at'] = datetime.now(timezone.utc).isoformat()
 
-            # Запись обновленных атрибутов
-            await write_attr_file(attr_file_path, attributes)
+                # Запись обновленных атрибутов в S3
+                await self.storage.write_attr_file(attr_relative_path, attributes_dict)
 
             # ШАГ 4: Коммит WAL транзакции
             await self.wal.commit(
