@@ -106,7 +106,7 @@ async def async_client():
     """
     AsyncClient для тестирования API endpoints через real HTTP requests.
 
-    ВАЖНО: Использует real HTTP requests к Docker test container на localhost:8011.
+    ВАЖНО: Использует real HTTP requests к Docker container на localhost:8010.
     Это обеспечивает true integration testing с правильной конфигурацией.
 
     Yields:
@@ -117,9 +117,9 @@ async def async_client():
         ...     response = await async_client.get("/health/live")
         ...     assert response.status_code == 200
     """
-    # Real HTTP requests к Docker test container
-    # Порт 8011 настроен в docker-compose.test.yml
-    base_url = os.environ.get("STORAGE_API_URL", "http://localhost:8011")
+    # Real HTTP requests к Docker container
+    # Порт 8010 - стандартный порт Storage Element в docker-compose.yml
+    base_url = os.environ.get("STORAGE_API_URL", "http://localhost:8010")
 
     async with AsyncClient(
         base_url=base_url,
@@ -267,3 +267,119 @@ def verify_test_environment():
     print(f"JWT Key: {jwt_key_path}")
     print(f"Storage API: {os.environ.get('STORAGE_API_URL', 'N/A')}")
     print("="*60 + "\n")
+
+
+# =============================================================================
+# Real OAuth Fixtures (через Admin Module с test service account)
+# =============================================================================
+
+import pytest_asyncio
+from tests.utils.service_account_auth import (
+    get_sync_service_account_token,
+    create_auth_headers as sa_create_auth_headers,
+)
+
+
+@pytest.fixture(scope="module")
+def service_account_token():
+    """
+    Real OAuth token от test service account через Admin Module.
+
+    Использует OAuth 2.0 Client Credentials flow для получения
+    реального JWT токена. Требует запущенный Admin Module.
+
+    Scope: module - токен переиспользуется в рамках модуля тестов.
+    Используем синхронную версию для избежания проблем с event_loop scope.
+
+    Returns:
+        str: JWT access token от Admin Module
+
+    Raises:
+        httpx.HTTPStatusError: Если Admin Module недоступен или credentials неверные
+    """
+    return get_sync_service_account_token()
+
+
+@pytest.fixture(scope="module")
+def service_account_headers(service_account_token):
+    """
+    Auth headers с real OAuth token от service account.
+
+    Для тестов требующих реальную аутентификацию через Admin Module.
+
+    Args:
+        service_account_token: JWT token из service_account_token fixture
+
+    Returns:
+        dict: HTTP headers с Authorization Bearer токеном
+    """
+    return sa_create_auth_headers(service_account_token)
+
+
+@pytest_asyncio.fixture(scope="function")
+async def uploaded_file_with_cleanup(async_client, service_account_headers):
+    """
+    Загруженный файл с автоматической очисткой после теста.
+
+    Создает тестовый файл через API и удаляет его после завершения теста.
+    Использует real OAuth через service account.
+
+    Yields:
+        dict: Response от upload endpoint с file_id, checksum, и т.д.
+    """
+    import io
+
+    test_content = b"Test file for integration testing with service account.\n" * 50
+    test_file = io.BytesIO(test_content)
+
+    response = await async_client.post(
+        "/api/v1/files/upload",
+        headers=service_account_headers,
+        files={"file": ("test_sa_file.txt", test_file, "text/plain")},
+        data={"description": "Integration test file with service account"},
+    )
+
+    assert response.status_code == 201, f"Upload failed: {response.text}"
+    file_data = response.json()
+
+    yield file_data
+
+    # Cleanup
+    try:
+        await async_client.delete(
+            f"/api/v1/files/{file_data['file_id']}",
+            headers=service_account_headers,
+        )
+    except Exception:
+        pass  # Игнорируем ошибки cleanup
+
+
+@pytest_asyncio.fixture(scope="function")
+async def cleanup_uploaded_files(async_client, service_account_headers):
+    """
+    Fixture для автоматической очистки файлов после теста.
+
+    Использует real OAuth через service account.
+
+    Usage:
+        >>> async def test_multiple_uploads(cleanup_uploaded_files, async_client, service_account_headers):
+        ...     response = await async_client.post("/api/v1/files/upload", ...)
+        ...     cleanup_uploaded_files.append(response.json()["file_id"])
+        ...     # Test logic...
+        ...     # Files will be automatically deleted after test
+
+    Yields:
+        list: List для добавления file_id файлов для очистки
+    """
+    files_to_cleanup = []
+
+    yield files_to_cleanup
+
+    for file_id in files_to_cleanup:
+        try:
+            await async_client.delete(
+                f"/api/v1/files/{file_id}",
+                headers=service_account_headers,
+            )
+        except Exception:
+            pass
