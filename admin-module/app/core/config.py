@@ -23,17 +23,92 @@ class DatabaseSettings(BaseSettings):
     max_overflow: int = Field(default=20, alias="DB_MAX_OVERFLOW")
     echo: bool = Field(default=False, alias="DB_ECHO")
 
+    # SSL Configuration
+    ssl_enabled: bool = Field(
+        default=False,
+        alias="DB_SSL_ENABLED",
+        description="Enable SSL for PostgreSQL connection"
+    )
+    ssl_mode: str = Field(
+        default="require",
+        alias="DB_SSL_MODE",
+        description="SSL mode: disable, allow, prefer, require, verify-ca, verify-full"
+    )
+    ssl_ca_cert: Optional[str] = Field(
+        default=None,
+        alias="DB_SSL_CA_CERT",
+        description="Path to CA certificate file for SSL verification"
+    )
+    ssl_client_cert: Optional[str] = Field(
+        default=None,
+        alias="DB_SSL_CLIENT_CERT",
+        description="Path to client certificate file for SSL"
+    )
+    ssl_client_key: Optional[str] = Field(
+        default=None,
+        alias="DB_SSL_CLIENT_KEY",
+        description="Path to client private key file for SSL"
+    )
+
     model_config = SettingsConfigDict(env_prefix="DB_", case_sensitive=False, extra="allow")
+
+    @field_validator("ssl_mode")
+    @classmethod
+    def validate_ssl_mode(cls, v: str) -> str:
+        """Валидация SSL mode"""
+        valid_modes = ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"]
+        if v not in valid_modes:
+            raise ValueError(
+                f"Invalid DB_SSL_MODE: {v}. "
+                f"Valid modes: {', '.join(valid_modes)}"
+            )
+        return v
 
     @property
     def url(self) -> str:
         """Построение database URL для SQLAlchemy (async)."""
-        return f"postgresql+asyncpg://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+        base_url = f"postgresql+asyncpg://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+
+        if self.ssl_enabled:
+            ssl_params = []
+            ssl_params.append(f"ssl={self.ssl_mode}")
+
+            if self.ssl_ca_cert:
+                ssl_params.append(f"sslrootcert={self.ssl_ca_cert}")
+
+            if self.ssl_client_cert:
+                ssl_params.append(f"sslcert={self.ssl_client_cert}")
+
+            if self.ssl_client_key:
+                ssl_params.append(f"sslkey={self.ssl_client_key}")
+
+            if ssl_params:
+                base_url += "?" + "&".join(ssl_params)
+
+        return base_url
 
     @property
     def sync_url(self) -> str:
         """Построение database URL для Alembic (sync)."""
-        return f"postgresql+psycopg2://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+        base_url = f"postgresql+psycopg2://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+
+        if self.ssl_enabled:
+            ssl_params = []
+            ssl_params.append(f"sslmode={self.ssl_mode}")
+
+            if self.ssl_ca_cert:
+                ssl_params.append(f"sslrootcert={self.ssl_ca_cert}")
+
+            if self.ssl_client_cert:
+                ssl_params.append(f"sslcert={self.ssl_client_cert}")
+
+            if self.ssl_client_key:
+                ssl_params.append(f"sslkey={self.ssl_client_key}")
+
+            if ssl_params:
+                base_url += "?" + "&".join(ssl_params)
+
+        return base_url
 
 
 class RedisSettings(BaseSettings):
