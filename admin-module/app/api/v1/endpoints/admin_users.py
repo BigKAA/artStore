@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/admin-users",
-    tags=["admin-users"],
     responses={
         401: {"description": "Unauthorized - Invalid or missing JWT token"},
         403: {"description": "Forbidden - Insufficient permissions"}
