@@ -23,6 +23,31 @@
 #
 # ВАЖНО: Всегда запускайте из корня проекта!
 # ==============================================================================
+#
+# ==============================================================================
+# TEST SERVICE ACCOUNT CREDENTIALS
+# ==============================================================================
+# Для интеграционного тестирования других модулей используйте:
+#
+# Name: test-integration-service
+# Client ID: sa_dev_test_integration_ser_1ea5433c
+# Client Secret: 6vj(mpptg.C+(9WZ
+# Role: user
+# Rate Limit: 1000 req/min
+# Environment: dev
+# Status: active
+# Created: 2025-11-25
+#
+# OAuth 2.0 Token Endpoint:
+#   POST http://localhost:8000/api/v1/auth/token
+#   Body: {
+#     "grant_type": "client_credentials",
+#     "client_id": "sa_dev_test_integration_ser_1ea5433c",
+#     "client_secret": "6vj(mpptg.C+(9WZ"
+#   }
+#
+# Secret expires: 2026-02-23
+# ==============================================================================
 
 version: '3.8'
 
