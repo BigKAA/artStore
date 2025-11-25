@@ -232,7 +232,7 @@ class TestServiceAccountService:
 
         # Проверяем что возвращен plaintext secret
         assert plain_secret is not None
-        assert len(plain_secret) == 48  # Default length
+        assert len(plain_secret) == 16  # Default length (min_length + 4 = 12 + 4)
 
     @pytest.mark.asyncio
     async def test_get_by_client_id(self, db_session):
