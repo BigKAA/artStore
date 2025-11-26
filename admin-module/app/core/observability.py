@@ -9,13 +9,16 @@ from typing import Optional
 
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+# BatchSpanProcessor будет использоваться при добавлении OTLP exporter
+# from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+# PeriodicExportingMetricReader будет использоваться при добавлении OTLP metrics exporter
+# from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from prometheus_client import REGISTRY
+# REGISTRY используется неявно через PrometheusMetricReader
+# from prometheus_client import REGISTRY
 from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
@@ -26,7 +29,7 @@ def setup_observability(
     service_name: str,
     service_version: str,
     enable_tracing: bool = True,
-    exporter_endpoint: Optional[str] = None
+    exporter_endpoint: Optional[str] = None  # TODO: будет использоваться для OTLP exporter
 ) -> None:
     """
     Настройка OpenTelemetry distributed tracing и Prometheus metrics.
@@ -36,7 +39,7 @@ def setup_observability(
         service_name: Имя сервиса для идентификации в traces
         service_version: Версия сервиса
         enable_tracing: Включить distributed tracing
-        exporter_endpoint: Endpoint для отправки traces (OTLP exporter)
+        exporter_endpoint: Endpoint для отправки traces (OTLP exporter) - TODO: не реализовано
     """
     # Resource для идентификации сервиса
     resource = Resource.create({
