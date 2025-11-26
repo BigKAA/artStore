@@ -45,8 +45,12 @@ COPY --from=builder /opt/venv /opt/venv
 # Установка рабочей директории
 WORKDIR /app
 
-# Копирование application code
-COPY --chown=artstore:artstore . .
+# Копирование application code и конфигурации
+COPY --chown=artstore:artstore alembic ./alembic
+COPY --chown=artstore:artstore alembic.ini ./alembic.ini
+COPY --chown=artstore:artstore app ./app
+COPY --chown=artstore:artstore requirements.txt ./requirements.txt
+COPY --chown=artstore:artstore config.yaml ./config.yaml
 
 # Переменные окружения
 ENV PATH="/opt/venv/bin:$PATH" \

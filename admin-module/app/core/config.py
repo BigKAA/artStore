@@ -874,7 +874,7 @@ class InitialServiceAccountSettings(BaseSettings):
 
         return v_upper
 
-    @field_validator("password")
+    @field_validator("password", mode="before")
     @classmethod
     def validate_password_if_provided(cls, v: Optional[str]) -> Optional[str]:
         """
@@ -889,6 +889,10 @@ class InitialServiceAccountSettings(BaseSettings):
         Raises:
             ValueError: Если пароль задан но слишком короткий
         """
+        # Treat empty strings as None (for auto-generation)
+        if isinstance(v, str):
+            v = v.strip() if v.strip() else None
+
         if v is not None and len(v) < 12:
             raise ValueError("Initial service account password must be at least 12 characters if provided")
 

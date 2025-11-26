@@ -12,103 +12,12 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.models.user import User, UserRole, UserStatus
 from app.models.admin_user import AdminUser, AdminRole
 from app.models.service_account import ServiceAccount, ServiceAccountRole, ServiceAccountStatus
-from app.services.auth_service import AuthService
 from app.services.admin_auth_service import AdminAuthService
 from app.services.service_account_service import ServiceAccountService
 
 logger = logging.getLogger(__name__)
-
-
-async def create_initial_admin(settings: Settings, db: AsyncSession) -> None:
-    """
-    Создание начального администратора при первом запуске.
-
-    Выполняется только если:
-    - initial_admin.enabled = True в конфигурации
-    - В базе данных нет пользователей
-
-    Args:
-        settings: Настройки приложения
-        db: Async database session
-
-    Примеры:
-        >>> async with get_db_session() as db:
-        ...     await create_initial_admin(settings, db)
-    """
-    # Проверка что initial admin создание включено
-    if not settings.initial_admin.enabled:
-        logger.info("Initial admin creation disabled in configuration")
-        return
-
-    try:
-        # Проверка существования пользователей в БД
-        result = await db.execute(select(func.count()).select_from(User))
-        user_count = result.scalar()
-
-        if user_count > 0:
-            logger.debug(f"Users already exist in database (count: {user_count}), skipping initial admin creation")
-            return
-
-        # Создание initial admin пользователя
-        logger.info(
-            "No users found in database, creating initial administrator",
-            extra={
-                "username": settings.initial_admin.username,
-                "email": settings.initial_admin.email
-            }
-        )
-
-        # Хеширование пароля
-        password_hash = AuthService.hash_password(settings.initial_admin.password)
-
-        # Создание User объекта
-        admin_user = User(
-            username=settings.initial_admin.username,
-            hashed_password=password_hash,
-            email=settings.initial_admin.email,
-            first_name=settings.initial_admin.firstname,
-            last_name=settings.initial_admin.lastname,
-            role=UserRole.ADMIN,  # Административная роль
-            status=UserStatus.ACTIVE,
-            is_system=True  # System admin не может быть удален
-        )
-
-        db.add(admin_user)
-        await db.commit()
-        await db.refresh(admin_user)
-
-        logger.info(
-            "Initial administrator created successfully",
-            extra={
-                "user_id": admin_user.id,
-                "username": admin_user.username,
-                "email": admin_user.email,
-                "role": admin_user.role
-            }
-        )
-
-        # Audit log для безопасности
-        logger.warning(
-            "SECURITY AUDIT: Initial administrator account was automatically created. "
-            "Please change the password immediately through the API or admin interface.",
-            extra={
-                "event": "initial_admin_created",
-                "user_id": admin_user.id,
-                "username": admin_user.username
-            }
-        )
-
-    except Exception as e:
-        logger.error(
-            f"Failed to create initial administrator: {e}",
-            exc_info=True,
-            extra={"error": str(e)}
-        )
-        await db.rollback()
-        raise
 
 
 async def create_initial_admin_user(settings: Settings, db: AsyncSession) -> None:
@@ -117,7 +26,7 @@ async def create_initial_admin_user(settings: Settings, db: AsyncSession) -> Non
 
     Выполняется только если:
     - В базе данных нет admin_users
-    - Конфигурация позволяет создание
+    - Конфигурация initial_admin.enabled = True
 
     Args:
         settings: Настройки приложения
@@ -125,11 +34,23 @@ async def create_initial_admin_user(settings: Settings, db: AsyncSession) -> Non
 
     Note:
         Admin User используется для аутентификации в Admin UI через login/password.
+        Использует переменные окружения INITIAL_ADMIN_*:
+        - INITIAL_ADMIN_ENABLED: включить/выключить создание (default: true)
+        - INITIAL_ADMIN_USERNAME: username для логина (default: "admin")
+        - INITIAL_ADMIN_PASSWORD: пароль (default: "ChangeMe123!")
+        - INITIAL_ADMIN_EMAIL: email адрес (default: "admin@artstore.local")
+        - INITIAL_ADMIN_FIRSTNAME: имя администратора (опционально)
+        - INITIAL_ADMIN_LASTNAME: фамилия администратора (опционально)
 
     Examples:
         >>> async with get_db_session() as db:
         ...     await create_initial_admin_user(settings, db)
     """
+    # Проверка что initial admin создание включено
+    if not settings.initial_admin.enabled:
+        logger.info("Initial admin user creation disabled in configuration")
+        return
+
     try:
         # Проверка существования admin users в БД
         result = await db.execute(select(func.count()).select_from(AdminUser))
@@ -140,17 +61,26 @@ async def create_initial_admin_user(settings: Settings, db: AsyncSession) -> Non
             return
 
         # Создание initial admin user
-        logger.info("No admin users found in database, creating initial admin user for Admin UI")
+        logger.info(
+            "No admin users found in database, creating initial admin user for Admin UI",
+            extra={
+                "username": settings.initial_admin.username,
+                "email": settings.initial_admin.email
+            }
+        )
 
         # Хеширование пароля
         admin_auth_service = AdminAuthService()
-        password_hash = admin_auth_service.hash_password("admin123")  # TODO: Get from env variable
+        password_hash = admin_auth_service.hash_password(settings.initial_admin.password)
 
-        # Создание AdminUser объекта
+        # Создание AdminUser объекта с использованием конфигурации
         initial_admin = AdminUser(
-            username="admin",
-            email="admin@artstore.local",
+            username=settings.initial_admin.username,
+            email=settings.initial_admin.email,
             password_hash=password_hash,
+            first_name=settings.initial_admin.firstname or None,
+            last_name=settings.initial_admin.lastname or None,
+            organization="ArtStore",  # Default value
             role=AdminRole.SUPER_ADMIN,  # Первый admin всегда SUPER_ADMIN
             enabled=True,
             is_system=True  # System admin не может быть удален через API
@@ -245,8 +175,8 @@ async def create_initial_service_account(settings: Settings, db: AsyncSession) -
         logger.info(
             f"Creating initial Service Account: {settings.initial_service_account.name}",
             extra={
-                "name": settings.initial_service_account.name,
-                "role": settings.initial_service_account.role
+                "account_name": settings.initial_service_account.name,
+                "account_role": settings.initial_service_account.role
             }
         )
 
@@ -316,10 +246,10 @@ async def create_initial_service_account(settings: Settings, db: AsyncSession) -
             extra={
                 "event": "initial_service_account_created",
                 "service_account_id": str(service_account.id),
-                "name": service_account.name,
+                "account_name": service_account.name,
                 "client_id": service_account.client_id,
                 "client_secret": client_secret,  # Plain text - ТОЛЬКО при создании!
-                "role": service_account.role.value,
+                "account_role": service_account.role.value,
                 "rate_limit": service_account.rate_limit,
                 "secret_expires_at": service_account.secret_expires_at.isoformat(),
                 "security_risk": "critical"
@@ -330,9 +260,9 @@ async def create_initial_service_account(settings: Settings, db: AsyncSession) -
             "✅ Initial Service Account created successfully",
             extra={
                 "service_account_id": str(service_account.id),
-                "name": service_account.name,
+                "account_name": service_account.name,
                 "client_id": service_account.client_id,
-                "role": service_account.role.value
+                "account_role": service_account.role.value
             }
         )
 

@@ -22,8 +22,8 @@ from app.schemas.jwt_key import (
 )
 from app.models.jwt_key import JWTKey
 from app.services.jwt_key_rotation_service import JWTKeyRotationService
-from app.api.dependencies.auth import require_admin
-from app.models.user import User
+from app.api.dependencies.admin_auth import require_role
+from app.models.admin_user import AdminRole
 
 router = APIRouter()
 
@@ -35,7 +35,7 @@ router = APIRouter()
 )
 async def get_rotation_status(
     session: Session = Depends(get_sync_session),
-    current_user: User = Depends(require_admin)
+    current_admin_user = Depends(require_role(AdminRole.ADMIN))
 ):
     """
     Получение текущего статуса JWT key rotation.
@@ -91,7 +91,7 @@ async def get_rotation_status(
 )
 async def get_active_keys(
     session: Session = Depends(get_sync_session),
-    current_user: User = Depends(require_admin)
+    current_admin_user = Depends(require_role(AdminRole.ADMIN))
 ):
     """
     Получение списка всех активных JWT ключей.
@@ -126,7 +126,7 @@ async def get_active_keys(
 async def trigger_rotation(
     request: RotationTriggerRequest,
     session: Session = Depends(get_sync_session),
-    current_user: User = Depends(require_admin)
+    current_admin_user = Depends(require_role(AdminRole.ADMIN))
 ):
     """
     Ручной запуск ротации JWT ключей.
@@ -200,7 +200,7 @@ async def trigger_rotation(
 async def get_rotation_history(
     limit: int = 50,
     session: Session = Depends(get_sync_session),
-    current_user: User = Depends(require_admin)
+    current_admin_user = Depends(require_role(AdminRole.ADMIN))
 ):
     """
     Получение истории ротаций JWT ключей.

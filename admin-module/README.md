@@ -31,6 +31,54 @@
 - **Client Secret Rotation**: Каждые 90 дней с уведомлениями за 7 дней
 - **Webhook Support**: Уведомления о критических событиях безопасности
 
+### 1.5 Типы учетных записей
+
+Admin Module поддерживает **два типа** учетных записей:
+
+#### 1. System Administrators (AdminUser)
+
+**Назначение**: Администраторы системы с доступом к Admin UI
+
+**Атрибуты**:
+- Username (уникальный)
+- Email (уникальный)
+- ФИО (first_name, last_name)
+- Организация (organization)
+- Password (bcrypt hash, work factor 12)
+- Role: SUPER_ADMIN, ADMIN, READONLY
+- Status: enabled/disabled
+
+**Аутентификация**: Login/Password через `/api/admin-auth/login`
+
+**Use Cases**:
+- Управление системой через Admin UI
+- Создание и управление Service Accounts
+- Мониторинг и администрирование Storage Elements
+
+**Инициализация**: Автоматическое создание initial admin user при первом запуске через `INITIAL_ADMIN_*` переменные окружения.
+
+#### 2. Service Accounts (Клиентские учетные записи)
+
+**Назначение**: Machine-to-machine API доступ для внешних систем/приложений
+
+**Атрибуты**:
+- Client ID (автогенерация, формат: `sa_<env>_<name>_<random>`)
+- Client Secret (bcrypt hash, work factor 12)
+- Name (человекочитаемое название)
+- Description (опционально)
+- Role: ADMIN, USER, AUDITOR, READONLY
+- Status: ACTIVE, SUSPENDED, EXPIRED, DELETED
+- Rate Limit (default: 100 req/min)
+
+**Аутентификация**: OAuth 2.0 Client Credentials через `/api/auth/token`
+
+**Use Cases**:
+- API интеграции с внешними системами
+- Автоматизированные процессы и скрипты
+- Межсервисное взаимодействие
+
+**Инициализация**: Автоматическое создание initial service account при первом запуске через `INITIAL_ACCOUNT_*` переменные окружения.
+
 ### 2. Управление Storage Elements
 
 - **Регистрация и конфигурирование** Storage Elements
@@ -98,10 +146,30 @@
 
 ### API Endpoints
 
-#### Authentication (`/api/auth/*`)
+#### Admin Authentication (`/api/admin-auth/*`)
+```
+POST /api/admin-auth/login
+  - Admin User login через username/password
+  - Input: {"username": "admin", "password": "..."}
+  - Output: {"access_token": "eyJ...", "refresh_token": "...", "token_type": "Bearer", "expires_in": 1800}
+
+POST /api/admin-auth/refresh
+  - Обновление access token по refresh token
+  - Input: {"refresh_token": "..."}
+  - Output: {"access_token": "eyJ...", "token_type": "Bearer", "expires_in": 1800}
+
+POST /api/admin-auth/logout
+  - Logout текущего Admin User
+
+POST /api/admin-auth/change-password
+  - Смена пароля (requires current password)
+  - Input: {"old_password": "...", "new_password": "..."}
+```
+
+#### Service Account Authentication (`/api/auth/*`)
 ```
 POST /api/auth/token
-  - OAuth 2.0 Client Credentials authentication
+  - OAuth 2.0 Client Credentials authentication для Service Accounts
   - Input: {"client_id": "...", "client_secret": "..."}
   - Output: {"access_token": "eyJ...", "token_type": "Bearer", "expires_in": 1800}
 
@@ -112,6 +180,34 @@ GET /api/auth/public-key
 POST /api/auth/rotate-keys
   - Ручная ротация JWT ключей (admin only)
   - Автоматическая ротация каждые 24 часа
+```
+
+#### Admin Users Management (`/api/admin-users/*`)
+```
+GET /api/admin-users
+  - Список всех Admin Users (с пагинацией)
+  - Фильтры: role, enabled
+
+POST /api/admin-users
+  - Создание нового Admin User (admin only)
+
+GET /api/admin-users/{id}
+  - Детали конкретного Admin User
+
+PATCH /api/admin-users/{id}
+  - Обновление Admin User (имя, email, организация, роль)
+
+DELETE /api/admin-users/{id}
+  - Удаление Admin User (запрещено для is_system=True)
+
+POST /api/admin-users/{id}/disable
+  - Отключение Admin User
+
+POST /api/admin-users/{id}/enable
+  - Включение Admin User
+
+GET /api/admin-users/me
+  - Получение информации текущего Admin User
 ```
 
 #### Service Accounts (`/api/service-accounts/*`)

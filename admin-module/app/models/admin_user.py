@@ -38,6 +38,9 @@ class AdminUser(Base, TimestampMixin):
         id: Уникальный UUID идентификатор Admin User
         username: Уникальное имя пользователя для логина
         email: Уникальный email адрес
+        first_name: Имя администратора (опционально)
+        last_name: Фамилия администратора (опционально)
+        organization: Организация администратора (опционально)
         password_hash: Bcrypt хеш пароля
         password_history: История предыдущих password hashes (максимум 5)
         password_changed_at: Дата последней смены пароля
@@ -75,6 +78,25 @@ class AdminUser(Base, TimestampMixin):
         unique=True,
         index=True,
         comment="Уникальный email адрес администратора"
+    )
+
+    # Personal Information
+    first_name: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Имя администратора"
+    )
+
+    last_name: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Фамилия администратора"
+    )
+
+    organization: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Организация, к которой принадлежит администратор"
     )
 
     password_hash: Mapped[str] = mapped_column(
@@ -153,6 +175,24 @@ class AdminUser(Base, TimestampMixin):
             f"<AdminUser(id={self.id}, username='{self.username}', "
             f"role={self.role.value}, enabled={self.enabled})>"
         )
+
+    @property
+    def full_name(self) -> str:
+        """
+        Полное имя администратора.
+
+        Returns:
+            str: "{first_name} {last_name}" если оба заполнены,
+                 только одно из них если только одно заполнено,
+                 username если оба пусты
+        """
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            return self.first_name
+        elif self.last_name:
+            return self.last_name
+        return self.username
 
     def is_locked(self) -> bool:
         """

@@ -76,9 +76,8 @@ Thumbs.db
 *.swp
 tmp/
 
-# Alembic (migrations применяются отдельно)
-alembic.ini
-alembic/versions/
+# Alembic - ВАЖНО: НЕ исключаем, migrations нужны для инициализации БД
+# alembic.ini и alembic/ должны быть включены в Docker image
 
 # Scripts (используются только для development)
 create_test_user.py

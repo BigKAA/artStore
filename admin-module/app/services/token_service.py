@@ -15,7 +15,6 @@ from jose.exceptions import ExpiredSignatureError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.user import User
 from app.models.service_account import ServiceAccount
 from app.models.jwt_key import JWTKey
 
@@ -98,167 +97,10 @@ class TokenService:
             logger.error(f"Failed to load JWT keys: {e}")
             raise
 
-    def create_access_token(
-        self,
-        user: User,
-        extra_claims: Optional[Dict] = None,
-        session: Optional[Session] = None
-    ) -> str:
-        """
-        Создание access токена для пользователя.
-
-        Сначала пробует использовать latest active key из БД (если session передан),
-        потом fallback на file-based ключ.
-
-        Args:
-            user: Пользователь для которого создается токен
-            extra_claims: Дополнительные claims для токена
-            session: Database session для получения latest key (опционально)
-
-        Returns:
-            str: Закодированный JWT токен
-
-        Raises:
-            ValueError: Если ни один ключ не доступен
-        """
-        now = datetime.now(timezone.utc)
-        expire = now + timedelta(minutes=settings.jwt.access_token_expire_minutes)
-
-        # Базовые claims
-        claims = {
-            "sub": str(user.id),  # Subject - ID пользователя
-            "username": user.username,
-            "email": user.email,
-            "role": user.role.value,
-            "type": "access",
-            "iat": now,  # Issued At
-            "exp": expire,  # Expiration Time
-            "nbf": now,  # Not Before
-        }
-
-        # Добавляем дополнительные claims если есть
-        if extra_claims:
-            claims.update(extra_claims)
-
-        # Попытка 1: Использование latest database key
-        if session is not None:
-            try:
-                latest_key = JWTKey.get_latest_active_key(session)
-
-                if latest_key:
-                    token = jwt.encode(
-                        claims,
-                        latest_key.private_key,
-                        algorithm=latest_key.algorithm
-                    )
-                    logger.info(
-                        f"Created access token for user {user.username} using database key "
-                        f"version {latest_key.version[:8]}... (expires: {expire})"
-                    )
-                    return token
-                else:
-                    logger.debug("No active keys in database, falling back to file-based key")
-
-            except Exception as e:
-                logger.warning(f"Failed to use database key: {e}, falling back to file-based key")
-
-        # Попытка 2: Fallback на file-based ключ
-        if self._private_key:
-            token = jwt.encode(
-                claims,
-                self._private_key,
-                algorithm=settings.jwt.algorithm
-            )
-            logger.info(
-                f"Created access token for user {user.username} using file-based key "
-                f"(expires: {expire})"
-            )
-            return token
-
-        # Если ни один ключ не доступен
-        raise ValueError("No private key available (database or file-based)")
-
-    def create_refresh_token(self, user: User, session: Optional[Session] = None) -> str:
-        """
-        Создание refresh токена для пользователя.
-
-        Сначала пробует использовать latest active key из БД (если session передан),
-        потом fallback на file-based ключ.
-
-        Args:
-            user: Пользователь для которого создается токен
-            session: Database session для получения latest key (опционально)
-
-        Returns:
-            str: Закодированный JWT refresh токен
-
-        Raises:
-            ValueError: Если ни один ключ не доступен
-        """
-        now = datetime.now(timezone.utc)
-        expire = now + timedelta(days=settings.jwt.refresh_token_expire_days)
-
-        claims = {
-            "sub": str(user.id),
-            "username": user.username,
-            "type": "refresh",
-            "iat": now,
-            "exp": expire,
-            "nbf": now,
-        }
-
-        # Попытка 1: Использование latest database key
-        if session is not None:
-            try:
-                latest_key = JWTKey.get_latest_active_key(session)
-
-                if latest_key:
-                    token = jwt.encode(
-                        claims,
-                        latest_key.private_key,
-                        algorithm=latest_key.algorithm
-                    )
-                    logger.info(
-                        f"Created refresh token for user {user.username} using database key "
-                        f"version {latest_key.version[:8]}... (expires: {expire})"
-                    )
-                    return token
-                else:
-                    logger.debug("No active keys in database, falling back to file-based key")
-
-            except Exception as e:
-                logger.warning(f"Failed to use database key: {e}, falling back to file-based key")
-
-        # Попытка 2: Fallback на file-based ключ
-        if self._private_key:
-            token = jwt.encode(
-                claims,
-                self._private_key,
-                algorithm=settings.jwt.algorithm
-            )
-            logger.info(
-                f"Created refresh token for user {user.username} using file-based key "
-                f"(expires: {expire})"
-            )
-            return token
-
-        # Если ни один ключ не доступен
-        raise ValueError("No private key available (database or file-based)")
-
-    def create_token_pair(self, user: User, session: Optional[Session] = None) -> Tuple[str, str]:
-        """
-        Создание пары access и refresh токенов.
-
-        Args:
-            user: Пользователь для которого создаются токены
-            session: Database session для получения latest key (опционально)
-
-        Returns:
-            Tuple[str, str]: (access_token, refresh_token)
-        """
-        access_token = self.create_access_token(user, session=session)
-        refresh_token = self.create_refresh_token(user, session=session)
-        return access_token, refresh_token
+    # ПРИМЕЧАНИЕ: Старые методы create_access_token, create_refresh_token, create_token_pair
+    # для User модели удалены в Sprint 21. Используйте вместо них:
+    # - create_service_account_access_token() для Service Accounts
+    # - create_token_from_data() для Admin Users
 
     def create_token_from_data(
         self,
@@ -458,35 +300,8 @@ class TokenService:
         except (TypeError, ValueError):
             return None
 
-    def refresh_access_token(
-        self,
-        refresh_token: str,
-        user: User,
-        session: Optional[Session] = None
-    ) -> Optional[str]:
-        """
-        Обновление access токена используя refresh токен.
-
-        Args:
-            refresh_token: Валидный refresh токен
-            user: Пользователь для которого создается новый access токен
-            session: Database session для multi-version validation (опционально)
-
-        Returns:
-            Optional[str]: Новый access токен или None если refresh токен невалиден
-        """
-        payload = self.validate_token(refresh_token, token_type="refresh", session=session)
-        if not payload:
-            return None
-
-        # Проверяем что refresh токен принадлежит этому пользователю
-        token_user_id = payload.get("sub")
-        if str(user.id) != token_user_id:
-            logger.warning(f"Refresh token user mismatch: {token_user_id} != {user.id}")
-            return None
-
-        # Создаем новый access токен
-        return self.create_access_token(user, session=session)
+    # ПРИМЕЧАНИЕ: Метод refresh_access_token для User модели удален в Sprint 21.
+    # Используйте create_token_from_data() для Admin Users вместо этого.
 
     # ========================================================================
     # SERVICE ACCOUNT TOKEN METHODS
