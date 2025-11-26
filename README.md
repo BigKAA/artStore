@@ -102,6 +102,22 @@
 - **Automated Key Rotation** (JWT каждые 24 часа, secrets каждые 90 дней)
 - **PostgreSQL SSL** для шифрования database соединений (опционально, для production)
 
+#### Типы учетных записей
+
+ArtStore использует **два типа учетных записей**:
+
+1. **System Administrators** (AdminUser) - для людей, управляющих системой через Admin UI
+   - Аутентификация: Login/Password
+   - Роли: SUPER_ADMIN, ADMIN, READONLY
+   - API: `/api/admin-auth/*` и `/api/admin-users/*`
+
+2. **Service Accounts** - для machine-to-machine API доступа внешних систем
+   - Аутентификация: OAuth 2.0 Client Credentials
+   - Роли: ADMIN, USER, AUDITOR, READONLY
+   - API: `/api/auth/token` и `/api/service-accounts/*`
+
+Детальное описание см. [Admin Module README](admin-module/README.md#15-типы-учетных-записей)
+
 ### Monitoring & Observability
 - **OpenTelemetry** для distributed tracing
 - **Prometheus** для сбора метрик

@@ -16,7 +16,6 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
-from app.models.user import User
 from app.models.service_account import ServiceAccount
 from app.models.admin_user import AdminUser
 import uuid

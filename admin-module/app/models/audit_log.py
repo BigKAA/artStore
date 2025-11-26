@@ -36,9 +36,9 @@ class AuditLog(Base):
         event_type: Тип события (login_success, jwt_rotation, etc.)
         severity: Уровень важности (debug, info, warning, error, critical)
 
-        user_id: Foreign key к users (NULL для system events)
-        service_account_id: Foreign key к service_accounts (NULL для user events)
-        actor_type: Тип актора (user, service_account, system)
+        service_account_id: Foreign key к service_accounts (NULL для non-service-account events)
+        admin_user_id: Foreign key к admin_users (NULL для non-admin events)
+        actor_type: Тип актора (service_account, admin_user, system)
 
         resource_type: Тип ресурса (user, service_account, jwt_key, etc.)
         resource_id: ID ресурса
@@ -84,13 +84,6 @@ class AuditLog(Base):
     )
 
     # Actor Information
-    user_id = Column(
-        Integer,
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-        comment="ID пользователя (NULL для system events)"
-    )
     service_account_id = Column(
         PG_UUID(as_uuid=True),
         ForeignKey("service_accounts.id", ondelete="SET NULL"),
@@ -185,8 +178,7 @@ class AuditLog(Base):
         comment="Timestamp события"
     )
 
-    # Relationships
-    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    # Relationships (User removed - use admin_user_id or service_account_id for actor tracking)
     service_account = relationship("ServiceAccount", foreign_keys=[service_account_id], lazy="joined")
     admin_user = relationship("AdminUser", foreign_keys=[admin_user_id], lazy="joined")
 
@@ -232,7 +224,6 @@ class AuditLog(Base):
         action: str,
         success: bool,
         actor_type: str = "system",
-        user_id: Optional[int] = None,
         service_account_id: Optional[int] = None,
         admin_user_id: Optional[uuid.UUID] = None,
         resource_type: Optional[str] = None,
@@ -253,8 +244,7 @@ class AuditLog(Base):
             event_type: Тип события (e.g., "login_success")
             action: Действие (e.g., "login")
             success: Успешность операции
-            actor_type: Тип актора (user, service_account, admin_user, system)
-            user_id: ID пользователя (опционально)
+            actor_type: Тип актора (service_account, admin_user, system)
             service_account_id: ID service account (опционально)
             admin_user_id: ID admin user (опционально)
             resource_type: Тип ресурса (опционально)
@@ -288,7 +278,6 @@ class AuditLog(Base):
             "action": action,
             "success": success,
             "actor_type": actor_type,
-            "user_id": user_id,
             "service_account_id": str(service_account_id) if service_account_id else None,
             "admin_user_id": str(admin_user_id) if admin_user_id else None,
             "resource_type": resource_type,
@@ -305,7 +294,6 @@ class AuditLog(Base):
         audit_log = cls(
             event_type=event_type,
             severity=severity,
-            user_id=user_id,
             service_account_id=service_account_id,
             admin_user_id=admin_user_id,
             actor_type=actor_type,
@@ -345,7 +333,6 @@ class AuditLog(Base):
             "action": self.action,
             "success": self.success,
             "actor_type": self.actor_type,
-            "user_id": self.user_id,
             "service_account_id": str(self.service_account_id) if self.service_account_id else None,
             "admin_user_id": str(self.admin_user_id) if self.admin_user_id else None,
             "resource_type": self.resource_type,
@@ -401,21 +388,14 @@ class AuditLog(Base):
 
         Args:
             session: Database session
-            actor_type: Тип актора (user, service_account, admin_user)
-            actor_id: ID актора (int для user, UUID для service_account/admin_user)
+            actor_type: Тип актора (service_account, admin_user)
+            actor_id: ID актора (UUID для service_account/admin_user)
             limit: Максимальное количество записей (default: 100)
 
         Returns:
             List[AuditLog]: Список audit logs отсортированных по created_at (desc)
         """
-        if actor_type == "user":
-            stmt = (
-                select(cls)
-                .where(cls.user_id == actor_id)
-                .order_by(desc(cls.created_at))
-                .limit(limit)
-            )
-        elif actor_type == "service_account":
+        if actor_type == "service_account":
             stmt = (
                 select(cls)
                 .where(cls.service_account_id == actor_id)
