@@ -45,10 +45,6 @@ git checkout -b <type>/<short-description>
 <type>(<scope>): <subject>
 
 [optional body]
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 **Types:**
