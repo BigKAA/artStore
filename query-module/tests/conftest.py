@@ -10,25 +10,44 @@ Shared fixtures для всех тестов:
 
 import os
 from pathlib import Path
+import tempfile
 
-# ВАЖНО: Установка env переменных ДО импорта app модулей
-# Предотвращает ValidationError при загрузке config
-if "AUTH_PUBLIC_KEY_PATH" not in os.environ:
-    test_key_path = Path(__file__).parent.parent / "keys" / "public_key.pem"
-    os.environ["AUTH_PUBLIC_KEY_PATH"] = str(test_key_path)
+# ========================================
+# CRITICAL: Setup BEFORE any app imports
+# ========================================
 
+# Create temporary public key file BEFORE importing app modules
+public_key_content = """-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqXDrQgyOZKpjIRz2uwXD
+Jbu6/QPSOwvArP/ETWnGrckYmTSEgkXQM0WF3eYZnA3C1h2FkVImeOU7w0m3cY+8
+7nDYqDI++z8ns+bZzz4B+vTsMnbGzAfyDbVPy53mVUyTOT9Vt/+Ll0CAeXRgeNyj
+hGjIAs0ARY/TQSdYNcscHuRxL0hzOxlh3Ioe56g7kGNxOrhyRfIAnhGEnXvIaynG
+uXs7LJXIhlN1PDS1Mx+fEDR8lyDkFXUgz0HCHcMc7IxFpceJli+4sKiieRxbkqam
+ZTlSIIJakpwUHwnr2t6HcyWISThPlEkOl3jyXH02cCifhbcwbmZCz9D23ujb7qni
+jQIDAQAB
+-----END PUBLIC KEY-----"""
+
+# Create temp file and set env var
+temp_key_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+temp_key_file.write(public_key_content)
+temp_key_file.flush()
+_temp_key_path = temp_key_file.name
+temp_key_file.close()
+
+os.environ["AUTH_PUBLIC_KEY_PATH"] = _temp_key_path
+
+# NOW import pytest and other modules
 import pytest
 from datetime import datetime, timezone, timedelta
 from typing import AsyncGenerator, Generator
 from unittest.mock import Mock, AsyncMock, MagicMock, patch
-import tempfile
 
 import jwt
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 
-
+# NOW safe to import app modules
 from app.main import app
 from app.db.database import Base, get_db_session
 from app.core.security import UserContext, UserRole, TokenType
@@ -39,7 +58,7 @@ from app.core.config import settings
 # Database Fixtures
 # ========================================
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 async def async_engine():
     """Async SQLite engine для тестов (in-memory)."""
     engine = create_async_engine(
@@ -47,37 +66,46 @@ async def async_engine():
         poolclass=StaticPool,
         echo=False
     )
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     yield engine
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-    
+
     await engine.dispose()
 
 
-@pytest.fixture
-async def async_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Async database session для тестов."""
+@pytest.fixture(scope="function")
+async def async_session(async_engine) -> AsyncSession:
+    """
+    Async database session для тестов.
+
+    Returns session directly (not generator) для использования в тестах.
+    """
     async_session_maker = async_sessionmaker(
         async_engine,
         class_=AsyncSession,
         expire_on_commit=False
     )
-    
+
     async with async_session_maker() as session:
         yield session
+        await session.rollback()
 
 
 @pytest.fixture
 def override_get_db(async_session):
-    """Override get_db_session dependency для FastAPI."""
+    """
+    Override get_db_session dependency для FastAPI.
+
+    ВАЖНО: Возвращает функцию которая yields async_session.
+    """
     async def _override_get_db():
         yield async_session
-    
+
     return _override_get_db
 
 
@@ -134,36 +162,55 @@ jQIDAQAB
 
 @pytest.fixture
 def valid_jwt_token(private_key) -> str:
-    """Валидный JWT токен для тестов."""
+    """
+    Валидный JWT токен для тестов.
+
+    Включает все обязательные поля UnifiedJWTPayload:
+    - sub, type, role, name, jti, iat, exp, nbf
+    """
+    import uuid
     now = datetime.now(timezone.utc)
     payload = {
         "sub": "test-user-id",
+        "type": "admin_user",  # Unified type (admin_user или service_account)
+        "role": "USER",
+        "name": "testuser",  # Обязательное поле для display name
+        "jti": str(uuid.uuid4()),  # JWT ID для revocation
+        "iat": int(now.timestamp()),  # Целочисленный timestamp
+        "exp": int((now + timedelta(minutes=30)).timestamp()),
+        "nbf": int(now.timestamp()),
+        # Backward compatibility (deprecated)
         "username": "testuser",
         "email": "test@example.com",
-        "role": "USER",
-        "type": "access",
-        "iat": now,
-        "exp": now + timedelta(minutes=30),
-        "nbf": now
+        "client_id": "test-client"
     }
-    
+
     return jwt.encode(payload, private_key, algorithm="RS256")
 
 
 @pytest.fixture
 def expired_jwt_token(private_key) -> str:
-    """Истекший JWT токен для тестов."""
+    """
+    Истекший JWT токен для тестов.
+
+    Включает все обязательные поля UnifiedJWTPayload.
+    """
+    import uuid
     now = datetime.now(timezone.utc)
+    past = now - timedelta(hours=2)
     payload = {
         "sub": "test-user-id",
-        "username": "testuser",
+        "type": "admin_user",
         "role": "USER",
-        "type": "access",
-        "iat": now - timedelta(hours=2),
-        "exp": now - timedelta(hours=1),
-        "nbf": now - timedelta(hours=2)
+        "name": "testuser",
+        "jti": str(uuid.uuid4()),
+        "iat": int(past.timestamp()),
+        "exp": int((now - timedelta(hours=1)).timestamp()),  # Истекший
+        "nbf": int(past.timestamp()),
+        "username": "testuser",
+        "client_id": "test-client"
     }
-    
+
     return jwt.encode(payload, private_key, algorithm="RS256")
 
 
