@@ -788,6 +788,113 @@ class PasswordSettings(BaseSettings):
         return v
 
 
+class InitialServiceAccountSettings(BaseSettings):
+    """
+    Настройки для автоматического создания initial Service Account при первом запуске.
+
+    При первом старте системы, если в БД нет Service Account с заданным именем, автоматически
+    создается учетная запись с параметрами из этой конфигурации.
+
+    ВАЖНО: Если INITIAL_ACCOUNT_PASSWORD не задан, client_secret будет сгенерирован автоматически
+    и выведен в логи при создании (это единственный момент когда он доступен в plain text).
+    """
+
+    enabled: bool = Field(
+        default=True,
+        alias="INITIAL_ACCOUNT_ENABLED",
+        description="Включить автоматическое создание Service Account"
+    )
+    name: str = Field(
+        default="admin-service",
+        alias="INITIAL_ACCOUNT_NAME",
+        description="Имя Service Account"
+    )
+    password: Optional[str] = Field(
+        default=None,
+        alias="INITIAL_ACCOUNT_PASSWORD",
+        description="Client secret для Service Account (если не задан - автогенерация)"
+    )
+    role: str = Field(
+        default="ADMIN",
+        alias="INITIAL_ACCOUNT_ROLE",
+        description="Роль Service Account (ADMIN, USER, AUDITOR, READONLY)"
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="INITIAL_ACCOUNT_",
+        case_sensitive=False,
+        extra="allow"
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """
+        Валидация имени Service Account.
+
+        Args:
+            v: Имя для валидации
+
+        Returns:
+            str: Валидированное имя
+
+        Raises:
+            ValueError: Если имя пустое или содержит недопустимые символы
+        """
+        if not v or not v.strip():
+            raise ValueError("Initial service account name cannot be empty")
+
+        # Проверка на допустимые символы (alphanumeric + underscore + dash)
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError("Initial service account name can only contain alphanumeric characters, underscore and dash")
+
+        return v.strip()
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        """
+        Валидация роли Service Account.
+
+        Args:
+            v: Роль для валидации
+
+        Returns:
+            str: Валидированная роль в uppercase
+
+        Raises:
+            ValueError: Если роль не входит в список допустимых
+        """
+        allowed_roles = ["ADMIN", "USER", "AUDITOR", "READONLY"]
+        v_upper = v.upper()
+
+        if v_upper not in allowed_roles:
+            raise ValueError(f"Invalid role: {v}. Must be one of {allowed_roles}")
+
+        return v_upper
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_if_provided(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Валидация пароля если он задан.
+
+        Args:
+            v: Пароль для валидации (может быть None для автогенерации)
+
+        Returns:
+            Optional[str]: Валидированный пароль или None
+
+        Raises:
+            ValueError: Если пароль задан но слишком короткий
+        """
+        if v is not None and len(v) < 12:
+            raise ValueError("Initial service account password must be at least 12 characters if provided")
+
+        return v
+
+
 class Settings(BaseSettings):
     """Главные настройки приложения."""
 
@@ -813,6 +920,7 @@ class Settings(BaseSettings):
     initial_admin: InitialAdminSettings = Field(default_factory=InitialAdminSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     password: PasswordSettings = Field(default_factory=PasswordSettings)
+    initial_service_account: InitialServiceAccountSettings = Field(default_factory=InitialServiceAccountSettings)
 
     model_config = SettingsConfigDict(
         env_file=".env",
