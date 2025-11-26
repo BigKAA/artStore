@@ -212,12 +212,42 @@ Environment variables > config files
 
 ### Initial Service Account
 
-Автоматически создается при первом запуске:
-- Name: `admin-service`
-- Role: `ADMIN`
-- Client ID/Secret: Автогенерация
+Автоматически создается при первом запуске (если включено `INITIAL_ACCOUNT_ENABLED=true`):
+
+**Конфигурация через Environment Variables**:
+- `INITIAL_ACCOUNT_ENABLED` - включить/выключить автоматическое создание (default: true)
+- `INITIAL_ACCOUNT_NAME` - название Service Account (default: "admin-service")
+- `INITIAL_ACCOUNT_ROLE` - роль: ADMIN/USER/AUDITOR/READONLY (default: ADMIN)
+- `INITIAL_ACCOUNT_PASSWORD` - client_secret (если не задан → автогенерация)
+
+**Поведение**:
+- Если `INITIAL_ACCOUNT_PASSWORD` **не задан**: client_secret автоматически генерируется, сохраняется в БД в зашифрованном виде (bcrypt), а plain text secret выводится в логи **ОДИН РАЗ** при создании
+- Если `INITIAL_ACCOUNT_PASSWORD` **задан**: используется указанный пароль
+- Если Service Account с таким именем **уже существует**: ничего не делается (идемпотентность)
+
+**Характеристики**:
+- Name: `admin-service` (или из `INITIAL_ACCOUNT_NAME`)
+- Role: `ADMIN` (или из `INITIAL_ACCOUNT_ROLE`)
+- Client ID: Автоматическая генерация (формат: `sa_prod_<name>_<random>`)
+- Client Secret: Bcrypt хеш (work factor 12)
+- Rate Limit: 1000 req/min (повышенный лимит для системного аккаунта)
+- Secret Expiration: 90 дней
 - **ВАЖНО**: `is_system=True` - не удаляется через API
-- **PRODUCTION**: Обязательно изменить client_secret через `.env`
+
+**PRODUCTION Security**:
+- ✅ **Обязательно установить** `INITIAL_ACCOUNT_PASSWORD` через `.env` или environment variable
+- ✅ **Никогда не использовать** автогенерированный пароль в production
+- ✅ **Сразу после деплоя** проверить логи для получения credentials (если автогенерация)
+- ✅ **Хранить credentials** в защищенном секретном хранилище (Vault, AWS Secrets Manager)
+- ⚠️ **Минимальная длина пароля**: 12 символов
+
+**Пример конфигурации** (`.env` или `docker-compose.yml`):
+```bash
+INITIAL_ACCOUNT_ENABLED=true
+INITIAL_ACCOUNT_NAME=admin-service
+INITIAL_ACCOUNT_PASSWORD=YourSecurePasswordHere123!  # Production: обязательно задать!
+INITIAL_ACCOUNT_ROLE=ADMIN
+```
 
 ### OAuth 2.0 пример
 

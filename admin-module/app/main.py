@@ -15,7 +15,7 @@ from app.core.redis import close_redis, check_redis_connection, service_discover
 from app.core.logging_config import setup_logging, get_logger
 from app.core.observability import setup_observability
 from app.core.scheduler import init_scheduler, shutdown_scheduler
-from app.db.init_db import create_initial_admin, create_initial_admin_user
+from app.db.init_db import create_initial_admin, create_initial_admin_user, create_initial_service_account
 from app.api.v1.endpoints import health, auth, jwt_keys, admin_auth, admin_users, service_accounts, storage_elements
 from app.middleware import RateLimitMiddleware, AuditMiddleware
 from prometheus_client import make_asgi_app
@@ -45,6 +45,8 @@ async def lifespan(app: FastAPI):
                 await create_initial_admin(settings, db)
                 # Создание initial admin user для Admin UI
                 await create_initial_admin_user(settings, db)
+                # Создание initial service account для OAuth 2.0 Client Credentials
+                await create_initial_service_account(settings, db)
             finally:
                 await db.close()
             break  # Получаем только одну сессию

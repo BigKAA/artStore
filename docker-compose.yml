@@ -251,6 +251,7 @@ services:
       INITIAL_ACCOUNT_ENABLED: "true"
       INITIAL_ACCOUNT_NAME: admin-service
       INITIAL_ACCOUNT_ROLE: ADMIN
+      INITIAL_ACCOUNT_PASSWORD: ${INITIAL_ACCOUNT_PASSWORD:-}  # Empty = auto-generate
     volumes:
       # JWT keys (persist для всех узлов кластера)
       - admin_jwt_keys:/app/secrets
