@@ -118,6 +118,8 @@ ArtStore использует **два типа учетных записей**:
 
 Детальное описание см. [Admin Module README](admin-module/README.md#15-типы-учетных-записей)
 
+**Механизмы аутентификации** подробно описаны в документе [AUTH-MECHANICS.md](admin-module/AUTH-MECHANICS.md)
+
 ### Monitoring & Observability
 - **OpenTelemetry** для distributed tracing
 - **Prometheus** для сбора метрик
