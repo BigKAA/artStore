@@ -11,6 +11,40 @@ import yaml
 from pathlib import Path
 
 
+def parse_bool_from_env(v) -> bool:
+    """
+    Парсинг boolean значения из формата on/off.
+
+    Поддерживаемые форматы:
+    - on/off (единственный допустимый)
+    - Python bool (для внутреннего использования)
+
+    Args:
+        v: Значение для парсинга (str, bool)
+
+    Returns:
+        bool: Распарсенное boolean значение
+
+    Raises:
+        ValueError: Если значение невалидно
+    """
+    if isinstance(v, bool):
+        return v
+
+    if isinstance(v, str):
+        v_lower = v.lower().strip()
+
+        if v_lower == "on":
+            return True
+        if v_lower == "off":
+            return False
+
+    raise ValueError(
+        f"Невалидное boolean значение: '{v}'. "
+        f"Допустимые значения: on/off"
+    )
+
+
 class DatabaseSettings(BaseSettings):
     """Настройки подключения к PostgreSQL."""
 
@@ -51,6 +85,12 @@ class DatabaseSettings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(env_prefix="DB_", case_sensitive=False, extra="allow")
+
+    @field_validator("echo", "ssl_enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @field_validator("ssl_mode")
     @classmethod
@@ -283,6 +323,12 @@ class CORSSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="CORS_", case_sensitive=False, extra="allow")
 
+    @field_validator("enabled", "allow_credentials", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
     @field_validator("allow_origins")
     @classmethod
     def validate_no_wildcards_in_production(cls, v: List[str]) -> List[str]:
@@ -375,6 +421,12 @@ class RateLimitSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="RATE_LIMIT_", case_sensitive=False, extra="allow")
 
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
 
 class LoggingSettings(BaseSettings):
     """Настройки логирования."""
@@ -405,6 +457,12 @@ class MonitoringSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="MONITORING_", case_sensitive=False, extra="allow")
 
+    @field_validator("prometheus_enabled", "opentelemetry_enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
 
 class ServiceDiscoverySettings(BaseSettings):
     """Настройки Service Discovery."""
@@ -416,6 +474,12 @@ class ServiceDiscoverySettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="SERVICE_DISCOVERY_", case_sensitive=False, extra="allow")
 
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
 
 class SagaSettings(BaseSettings):
     """Настройки Saga оркестрации."""
@@ -426,6 +490,12 @@ class SagaSettings(BaseSettings):
     retry_backoff_seconds: int = Field(default=5, alias="SAGA_RETRY_BACKOFF_SECONDS")
 
     model_config = SettingsConfigDict(env_prefix="SAGA_", case_sensitive=False, extra="allow")
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
 
 class HealthSettings(BaseSettings):
@@ -486,6 +556,12 @@ class InitialAdminSettings(BaseSettings):
         extra="allow"
     )
 
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
     @field_validator("password")
     @classmethod
     def validate_password_strength(cls, v: str) -> str:
@@ -540,6 +616,12 @@ class SchedulerSettings(BaseSettings):
     timezone: str = Field(default="UTC", alias="SCHEDULER_TIMEZONE")
 
     model_config = SettingsConfigDict(env_prefix="SCHEDULER_", case_sensitive=False, extra="allow")
+
+    @field_validator("enabled", "jwt_rotation_enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @field_validator("jwt_rotation_interval_hours")
     @classmethod
@@ -741,6 +823,12 @@ class PasswordSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="PASSWORD_", case_sensitive=False, extra="allow")
 
+    @field_validator("require_uppercase", "require_lowercase", "require_digits", "require_special", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
     @field_validator("min_length")
     @classmethod
     def validate_min_length(cls, v: int) -> int:
@@ -825,6 +913,12 @@ class InitialServiceAccountSettings(BaseSettings):
         case_sensitive=False,
         extra="allow"
     )
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @field_validator("name")
     @classmethod
@@ -932,6 +1026,12 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore"
     )
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @classmethod
     def load_from_yaml(cls, config_path: str = "config.yaml") -> "Settings":

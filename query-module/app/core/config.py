@@ -12,6 +12,40 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def parse_bool_from_env(v) -> bool:
+    """
+    Парсинг boolean значения из формата on/off.
+
+    Поддерживаемые форматы:
+    - on/off (единственный допустимый)
+    - Python bool (для внутреннего использования)
+
+    Args:
+        v: Значение для парсинга (str, bool)
+
+    Returns:
+        bool: Распарсенное boolean значение
+
+    Raises:
+        ValueError: Если значение невалидно
+    """
+    if isinstance(v, bool):
+        return v
+
+    if isinstance(v, str):
+        v_lower = v.lower().strip()
+
+        if v_lower == "on":
+            return True
+        if v_lower == "off":
+            return False
+
+    raise ValueError(
+        f"Невалидное boolean значение: '{v}'. "
+        f"Допустимые значения: on/off"
+    )
+
+
 class AuthSettings(BaseSettings):
     """0AB@>9:8 JWT 0CB5=B8D8:0F88 (RS256)."""
 
@@ -74,7 +108,13 @@ class DatabaseSettings(BaseSettings):
         default=None,
         description="Path to client private key file for SSL"
     )
-    
+
+    @field_validator("echo", "ssl_enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
     @field_validator("ssl_mode")
     @classmethod
     def validate_ssl_mode(cls, v: str) -> str:
@@ -186,6 +226,12 @@ class CacheSettings(BaseSettings):
         default=True, description="5H8@>20BL <5B040==K5 D09;>2"
     )
 
+    @field_validator("local_enabled", "redis_enabled", "cache_search_results", "cache_file_metadata", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
 
 class SearchSettings(BaseSettings):
     """0AB@>9:8 PostgreSQL Full-Text Search."""
@@ -251,6 +297,12 @@ class DownloadSettings(BaseSettings):
         default=True, description="Разрешить resumable downloads"
     )
 
+    @field_validator("enable_resume", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
 
 class CORSSettings(BaseSettings):
     """
@@ -293,6 +345,12 @@ class CORSSettings(BaseSettings):
         default=600,
         description="Preflight cache duration в seconds (default: 10 minutes)",
     )
+
+    @field_validator("enabled", "allow_credentials", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @field_validator("allow_origins")
     @classmethod
@@ -411,6 +469,12 @@ class QueryModuleSettings(BaseSettings):
     search: SearchSettings = Field(default_factory=SearchSettings)
     download: DownloadSettings = Field(default_factory=DownloadSettings)
     cors: CORSSettings = Field(default_factory=CORSSettings)
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @field_validator("log_level")
     @classmethod

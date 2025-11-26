@@ -28,7 +28,7 @@ services:
   admin-module:
     environment:
       # Development режим
-      APP_DEBUG: "true"
+      APP_DEBUG: "on"
       ENVIRONMENT: development
 
       # Text logging для удобства чтения в консоли
@@ -36,7 +36,7 @@ services:
       LOG_FORMAT: text
 
       # Uvicorn hot-reload
-      SERVER_RELOAD: "true"
+      SERVER_RELOAD: "on"
       SERVER_WORKERS: "1"  # Single worker для debugging
 
       # CORS для frontend разработки
@@ -66,10 +66,10 @@ services:
   # ==============================================================================
   storage-element-01:
     environment:
-      APP_DEBUG: "true"
+      APP_DEBUG: "on"
       LOG_LEVEL: DEBUG
       LOG_FORMAT: text
-      SERVER_RELOAD: "true"
+      SERVER_RELOAD: "on"
       SERVER_WORKERS: "1"
 
     volumes:
@@ -96,10 +96,10 @@ services:
   # ==============================================================================
   storage-element-02:
     environment:
-      APP_DEBUG: "true"
+      APP_DEBUG: "on"
       LOG_LEVEL: DEBUG
       LOG_FORMAT: text
-      SERVER_RELOAD: "true"
+      SERVER_RELOAD: "on"
       SERVER_WORKERS: "1"
 
     volumes:
@@ -123,7 +123,7 @@ services:
   # ==============================================================================
   ingester-module:
     environment:
-      APP_DEBUG: "true"
+      APP_DEBUG: "on"
       LOG_LEVEL: DEBUG
       LOG_FORMAT: text
 
@@ -149,7 +149,7 @@ services:
   # ==============================================================================
   query-module:
     environment:
-      DEBUG: "true"
+      DEBUG: "on"
       LOG_LEVEL: DEBUG
       LOG_FORMAT: text
 

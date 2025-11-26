@@ -178,7 +178,7 @@ services:
     environment:
       # Application
       APP_NAME: artstore-admin-module
-      APP_DEBUG: "true"
+      APP_DEBUG: "on"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: json
 
@@ -192,7 +192,7 @@ services:
       DB_MAX_OVERFLOW: 20
 
       # PostgreSQL SSL (optional)
-      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-false}
+      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
       DB_SSL_MODE: ${DB_SSL_MODE:-require}
       DB_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
       DB_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
@@ -248,7 +248,7 @@ services:
       SECURITY_AUDIT_HMAC_SECRET: "test-hmac-secret-for-development-32chars-minimum"
 
       # Initial System Account
-      INITIAL_ACCOUNT_ENABLED: "true"
+      INITIAL_ACCOUNT_ENABLED: "on"
       INITIAL_ACCOUNT_NAME: admin-service
       INITIAL_ACCOUNT_ROLE: ADMIN
       INITIAL_ACCOUNT_PASSWORD: ${INITIAL_ACCOUNT_PASSWORD:-}  # Empty = auto-generate
@@ -289,7 +289,7 @@ services:
       # Application
       APP_NAME: artstore-storage-element
       APP_MODE: edit  # edit, rw, ro, ar
-      APP_SWAGGER_ENABLED: true
+      APP__SWAGGER_ENABLED: "on"  # Двойное подчеркивание для вложенных настроек
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: json
 
@@ -322,7 +322,7 @@ services:
       DB_TABLE_PREFIX: storage_elem_01
 
       # PostgreSQL SSL (optional)
-      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-false}
+      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
       DB_SSL_MODE: ${DB_SSL_MODE:-require}
       DB_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
       DB_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
@@ -332,7 +332,7 @@ services:
       REDIS_URL: redis://redis:6379/0
 
       # WAL
-      WAL_ENABLED: "true"
+      WAL_ENABLED: "on"
       WAL_RETENTION_HOURS: 24
     volumes:
       # JWT Keys
@@ -384,7 +384,7 @@ services:
       CHUNK_SIZE_MB: 10
 
       # Compression
-      COMPRESSION_ENABLED: "true"
+      COMPRESSION_ENABLED: "on"
       COMPRESSION_MIN_SIZE_MB: 10
 
       # Redis (Service Discovery)
@@ -392,7 +392,7 @@ services:
       SERVICE_DISCOVERY_CHANNEL: artstore:storage-elements
 
       # Circuit Breaker
-      CIRCUIT_BREAKER_ENABLED: "true"
+      CIRCUIT_BREAKER_ENABLED: "on"
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5
     volumes:
       # Logs
@@ -436,7 +436,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
 
       # PostgreSQL SSL (optional)
-      DATABASE_SSL_ENABLED: ${DB_SSL_ENABLED:-false}
+      DATABASE_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
       DATABASE_SSL_MODE: ${DB_SSL_MODE:-require}
       DATABASE_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
       DATABASE_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
@@ -456,7 +456,7 @@ services:
       SEARCH_MAX_PAGE_SIZE: 1000
 
       # Circuit Breaker
-      CIRCUIT_BREAKER_ENABLED: "true"
+      CIRCUIT_BREAKER_ENABLED: "on"
     volumes:
       # Logs
       - query_logs:/app/logs

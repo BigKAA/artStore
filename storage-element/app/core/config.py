@@ -15,6 +15,40 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def parse_bool_from_env(v) -> bool:
+    """
+    Парсинг boolean значения из формата on/off.
+
+    Поддерживаемые форматы:
+    - on/off (единственный допустимый)
+    - Python bool (для внутреннего использования)
+
+    Args:
+        v: Значение для парсинга (str, bool)
+
+    Returns:
+        bool: Распарсенное boolean значение
+
+    Raises:
+        ValueError: Если значение невалидно
+    """
+    if isinstance(v, bool):
+        return v
+
+    if isinstance(v, str):
+        v_lower = v.lower().strip()
+
+        if v_lower == "on":
+            return True
+        if v_lower == "off":
+            return False
+
+    raise ValueError(
+        f"Невалидное boolean значение: '{v}'. "
+        f"Допустимые значения: on/off"
+    )
+
+
 class StorageMode(str, Enum):
     """Режимы работы Storage Element"""
     EDIT = "edit"  # Полный CRUD
@@ -49,6 +83,12 @@ class AppSettings(BaseSettings):
     mode: StorageMode = StorageMode.RW
     rebuild_cache_on_startup: bool = False
 
+    @field_validator("debug", "swagger_enabled", "rebuild_cache_on_startup", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
 
 class ServerSettings(BaseSettings):
     """Настройки веб-сервера"""
@@ -61,6 +101,12 @@ class ServerSettings(BaseSettings):
     port: int = 8000
     workers: int = 1
     reload: bool = False  # Hot reload для development
+
+    @field_validator("reload", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
 
 class DatabaseSettings(BaseSettings):
@@ -111,6 +157,12 @@ class DatabaseSettings(BaseSettings):
         alias="SSL_CLIENT_KEY",
         description="Path to client private key file for SSL"
     )
+
+    @field_validator("ssl_enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @field_validator("ssl_mode")
     @classmethod
@@ -268,6 +320,12 @@ class MetricsSettings(BaseSettings):
     enabled: bool = True
     path: str = "/metrics"
 
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
 
 class HealthSettings(BaseSettings):
     """Настройки health checks"""
@@ -323,6 +381,12 @@ class CORSSettings(BaseSettings):
         default=600,
         description="Preflight cache duration в seconds (default: 10 minutes)"
     )
+
+    @field_validator("enabled", "allow_credentials", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @field_validator("allow_origins")
     @classmethod
@@ -419,7 +483,8 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"
+        extra="ignore",
+        env_nested_delimiter="__"  # Для чтения вложенных settings: APP__SWAGGER_ENABLED -> app.swagger_enabled
     )
 
     # Вложенные настройки

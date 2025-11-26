@@ -12,6 +12,40 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def parse_bool_from_env(v) -> bool:
+    """
+    Парсинг boolean значения из формата on/off.
+
+    Поддерживаемые форматы:
+    - on/off (единственный допустимый)
+    - Python bool (для внутреннего использования)
+
+    Args:
+        v: Значение для парсинга (str, bool)
+
+    Returns:
+        bool: Распарсенное boolean значение
+
+    Raises:
+        ValueError: Если значение невалидно
+    """
+    if isinstance(v, bool):
+        return v
+
+    if isinstance(v, str):
+        v_lower = v.lower().strip()
+
+        if v_lower == "on":
+            return True
+        if v_lower == "off":
+            return False
+
+    raise ValueError(
+        f"Невалидное boolean значение: '{v}'. "
+        f"Допустимые значения: on/off"
+    )
+
+
 class LogLevel(str, Enum):
     """Уровни логирования."""
     DEBUG = "DEBUG"
@@ -41,6 +75,12 @@ class AppSettings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8020
 
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
 
 class AuthSettings(BaseSettings):
     """Настройки аутентификации."""
@@ -53,6 +93,12 @@ class AuthSettings(BaseSettings):
     enabled: bool = True
     public_key_path: Path = Path("./keys/public_key.pem")
     algorithm: str = "RS256"
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
 
 class StorageElementSettings(BaseSettings):
@@ -96,6 +142,12 @@ class CompressionSettings(BaseSettings):
     algorithm: str = "gzip"  # gzip или brotli
     level: int = 6  # 1-9 для gzip, 0-11 для brotli
     min_size: int = 1024  # Минимальный размер файла для сжатия (bytes)
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
 
 class LoggingSettings(BaseSettings):
@@ -155,6 +207,12 @@ class CORSSettings(BaseSettings):
         default=600,
         description="Preflight cache duration в seconds (default: 10 minutes)"
     )
+
+    @field_validator("enabled", "allow_credentials", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
 
     @field_validator("allow_origins")
     @classmethod
