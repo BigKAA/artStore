@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 
 from app.models.admin_user import AdminUser, AdminRole
-from app.schemas.admin_auth import AdminJWTPayload
 from app.services.token_service import TokenService
 from app.core.password_policy import PasswordPolicy, PasswordValidator, PasswordGenerator
 from app.services.audit_service import AuditService

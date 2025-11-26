@@ -353,7 +353,7 @@ class TestUpdateServiceAccount:
         data = response.json()
         assert data["role"] == "AUDITOR"
 
-    def test_update_system_service_account_forbidden(self, client, admin_token, db_session):
+    async def test_update_system_service_account_forbidden(self, client, admin_token, db_session):
         """Тест что системные Service Accounts нельзя обновить."""
         # Находим системный Service Account (admin-service)
         service = ServiceAccountService()
@@ -401,7 +401,7 @@ class TestDeleteServiceAccount:
 
         assert response.status_code == 404
 
-    def test_delete_system_service_account_forbidden(self, client, admin_token, db_session):
+    async def test_delete_system_service_account_forbidden(self, client, admin_token, db_session):
         """Тест что системные Service Accounts нельзя удалить."""
         service = ServiceAccountService()
         system_sa = await service.get_by_client_id(db_session, "admin-service")

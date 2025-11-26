@@ -35,7 +35,7 @@ router = APIRouter()
 )
 async def get_rotation_status(
     session: Session = Depends(get_sync_session),
-    current_admin_user = Depends(require_role(AdminRole.ADMIN))
+    _: None = Depends(require_role(AdminRole.ADMIN))  # Авторизация: только ADMIN
 ):
     """
     Получение текущего статуса JWT key rotation.
@@ -91,7 +91,7 @@ async def get_rotation_status(
 )
 async def get_active_keys(
     session: Session = Depends(get_sync_session),
-    current_admin_user = Depends(require_role(AdminRole.ADMIN))
+    _: None = Depends(require_role(AdminRole.ADMIN))  # Авторизация: только ADMIN
 ):
     """
     Получение списка всех активных JWT ключей.
@@ -126,7 +126,7 @@ async def get_active_keys(
 async def trigger_rotation(
     request: RotationTriggerRequest,
     session: Session = Depends(get_sync_session),
-    current_admin_user = Depends(require_role(AdminRole.ADMIN))
+    _: None = Depends(require_role(AdminRole.ADMIN))  # Авторизация: только ADMIN
 ):
     """
     Ручной запуск ротации JWT ключей.
@@ -200,7 +200,7 @@ async def trigger_rotation(
 async def get_rotation_history(
     limit: int = 50,
     session: Session = Depends(get_sync_session),
-    current_admin_user = Depends(require_role(AdminRole.ADMIN))
+    _: None = Depends(require_role(AdminRole.ADMIN))  # Авторизация: только ADMIN
 ):
     """
     Получение истории ротаций JWT ключей.
