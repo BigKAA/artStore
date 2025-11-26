@@ -25,28 +25,26 @@
 # ==============================================================================
 #
 # ==============================================================================
-# TEST SERVICE ACCOUNT CREDENTIALS
+# SERVICE ACCOUNT CREDENTIALS
 # ==============================================================================
-# Для интеграционного тестирования других модулей используйте:
+# Для интеграционного тестирования используйте:
 #
-# Name: test-integration-service
-# Client ID: sa_dev_test_integration_ser_1ea5433c
-# Client Secret: 6vj(mpptg.C+(9WZ
-# Role: user
+# Name: admin-service
+# Client ID: sa_prod_admin_service_66e7f458
+# Client Secret: D#^Cj)h3e,Ih%Fnf
+# Role: ADMIN
 # Rate Limit: 1000 req/min
-# Environment: dev
-# Status: active
-# Created: 2025-11-25
+# Created: 2025-11-26
 #
 # OAuth 2.0 Token Endpoint:
 #   POST http://localhost:8000/api/v1/auth/token
 #   Body: {
 #     "grant_type": "client_credentials",
-#     "client_id": "sa_dev_test_integration_ser_1ea5433c",
-#     "client_secret": "6vj(mpptg.C+(9WZ"
+#     "client_id": "sa_prod_admin_service_66e7f458",
+#     "client_secret": "D#^Cj)h3e,Ih%Fnf"
 #   }
 #
-# Secret expires: 2026-02-23
+# Secret expires: 2026-02-24
 # ==============================================================================
 
 version: '3.8'
@@ -251,7 +249,7 @@ services:
       INITIAL_ACCOUNT_ENABLED: "on"
       INITIAL_ACCOUNT_NAME: admin-service
       INITIAL_ACCOUNT_ROLE: ADMIN
-      INITIAL_ACCOUNT_PASSWORD: ${INITIAL_ACCOUNT_PASSWORD:-}  # Empty = auto-generate
+      INITIAL_ACCOUNT_PASSWORD: TestPassword123!
     volumes:
       # JWT keys (persist для всех узлов кластера)
       - admin_jwt_keys:/app/secrets
@@ -371,7 +369,7 @@ services:
     container_name: artstore_ingester_module
     restart: unless-stopped
     ports:
-      - "8020:8000"
+      - "8020:8020"
     environment:
       # Application
       APP_NAME: artstore-ingester-module
@@ -394,7 +392,22 @@ services:
       # Circuit Breaker
       CIRCUIT_BREAKER_ENABLED: "on"
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5
+
+      # Storage Element connection
+      STORAGE_ELEMENT_BASE_URL: http://storage-element:8000
+
+      # Service Account для аутентификации с Admin Module
+      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_66e7f458
+      SERVICE_ACCOUNT_CLIENT_SECRET: "D#^Cj)h3e,Ih%Fnf"
+      SERVICE_ACCOUNT_ADMIN_MODULE_URL: http://admin-module:8000
+
+      # JWT для валидации входящих запросов
+      JWT_PUBLIC_KEY_PATH: /app/keys/public_key.pem
+      JWT_ALGORITHM: RS256
     volumes:
+      # JWT Keys
+      - ./ingester-module/keys:/app/keys:ro
+
       # Logs
       - ingester_logs:/app/logs
 
