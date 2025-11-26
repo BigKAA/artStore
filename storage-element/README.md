@@ -377,6 +377,20 @@ storage-element/
 
 ### Environment Variables
 
+#### Application Settings
+
+```bash
+# Application Configuration
+APP_DEBUG=false              # Debug режим (дополнительное логирование)
+APP_SWAGGER_ENABLED=false    # Swagger UI и ReDoc документация
+```
+
+**Swagger/OpenAPI Documentation**:
+- `APP_SWAGGER_ENABLED=true` - включает Swagger UI (`/docs`) и ReDoc (`/redoc`)
+- **Production**: По умолчанию выключено для безопасности
+- **Development**: Рекомендуется включить для удобства разработки
+- Независим от `APP_DEBUG` режима
+
 ```bash
 # Storage Configuration
 STORAGE_MODE=rw  # edit, rw, ro, ar

@@ -45,6 +45,7 @@ class AppSettings(BaseSettings):
     name: str = "storage-element"
     version: str = "1.0.0"
     debug: bool = False
+    swagger_enabled: bool = False
     mode: StorageMode = StorageMode.RW
     rebuild_cache_on_startup: bool = False
 

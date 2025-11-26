@@ -70,9 +70,21 @@ app = FastAPI(
     description="Distributed file storage with metadata caching and high availability",
     version=settings.app.version,
     lifespan=lifespan,
-    docs_url="/docs" if settings.app.debug else None,
-    redoc_url="/redoc" if settings.app.debug else None
+    docs_url="/docs" if settings.app.swagger_enabled else None,
+    redoc_url="/redoc" if settings.app.swagger_enabled else None
 )
+
+# Логирование статуса Swagger
+if settings.app.swagger_enabled:
+    logger.info(
+        "Swagger UI enabled",
+        extra={
+            "docs_url": "/docs",
+            "redoc_url": "/redoc"
+        }
+    )
+else:
+    logger.info("Swagger UI disabled (production mode)")
 
 # Настройка OpenTelemetry observability
 setup_observability(
