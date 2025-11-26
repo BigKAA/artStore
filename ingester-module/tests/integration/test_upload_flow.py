@@ -34,7 +34,7 @@ class TestUploadFlowIntegration:
         Note: This test requires mock-storage service running
         """
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=auth_headers,
             files=sample_multipart_file
         )
@@ -62,7 +62,7 @@ class TestUploadFlowIntegration:
         Test upload без authentication - должен вернуть 401 Unauthorized.
         """
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             files=sample_multipart_file
         )
 
@@ -81,7 +81,7 @@ class TestUploadFlowIntegration:
         headers = {"Authorization": "Bearer invalid-token"}
 
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=headers,
             files=sample_multipart_file
         )
@@ -104,7 +104,7 @@ class TestUploadFlowIntegration:
         }
 
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=auth_headers,
             files=sample_multipart_file,
             data=metadata
@@ -131,7 +131,7 @@ class TestUploadFlowIntegration:
         }
 
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=auth_headers,
             files=large_file
         )
@@ -152,7 +152,7 @@ class TestUploadFlowIntegration:
         }
 
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=auth_headers,
             files=empty_file
         )
@@ -179,7 +179,7 @@ class TestUploadFlowIntegration:
             }
 
             response = await client.post(
-                "/api/v1/upload",
+                "/api/v1/files/upload",
                 headers=auth_headers,
                 files=files
             )
@@ -209,7 +209,7 @@ class TestUploadFlowIntegration:
         }
 
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=auth_headers,
             files=files
         )
@@ -239,7 +239,7 @@ class TestUploadFlowIntegration:
             files = {"file": (filename, content, content_type)}
 
             response = await client.post(
-                "/api/v1/upload",
+                "/api/v1/files/upload",
                 headers=auth_headers,
                 files=files
             )
@@ -276,7 +276,7 @@ class TestUploadFlowErrorHandling:
         )
 
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=auth_headers,
             files=sample_multipart_file
         )
@@ -294,7 +294,7 @@ class TestUploadFlowErrorHandling:
         """
         # Отправляем без multipart/form-data
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=auth_headers,
             json={"file": "not a file"}
         )
@@ -323,7 +323,7 @@ class TestUploadFlowErrorHandling:
         }
 
         response = await client.post(
-            "/api/v1/upload",
+            "/api/v1/files/upload",
             headers=auth_headers,
             files=files,
             data=oversized_metadata
@@ -331,3 +331,267 @@ class TestUploadFlowErrorHandling:
 
         # Small file should succeed
         assert response.status_code == 200
+
+    # ==========================================
+    # Storage Mode Validation Tests (Sprint 27)
+    # ==========================================
+
+    async def test_upload_rejects_ro_storage_mode(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        sample_multipart_file: dict
+    ):
+        """
+        Test upload отклоняет storage_mode="ro" (read-only).
+
+        Ingester endpoint должен принимать только "edit" и "rw" modes.
+        Режимы "ro" и "ar" доступны только через конфигурацию Storage Element.
+        """
+        data = {
+            "storage_mode": "ro",
+            "description": "Test read-only mode"
+        }
+
+        response = await client.post(
+            "/api/v1/files/upload",  # Correct API path
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data
+        )
+
+        # Должен вернуть 422 Unprocessable Entity (validation error)
+        assert response.status_code == 422
+        error_data = response.json()
+        assert "detail" in error_data
+
+    async def test_upload_rejects_ar_storage_mode(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        sample_multipart_file: dict
+    ):
+        """
+        Test upload отклоняет storage_mode="ar" (archive).
+
+        Архивный режим доступен только через конфигурацию, не через API.
+        """
+        data = {
+            "storage_mode": "ar",
+            "description": "Test archive mode"
+        }
+
+        response = await client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data
+        )
+
+        # Должен вернуть 422 Unprocessable Entity (validation error)
+        assert response.status_code == 422
+        error_data = response.json()
+        assert "detail" in error_data
+
+    async def test_upload_accepts_valid_storage_modes(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        sample_multipart_file: dict
+    ):
+        """
+        Test upload принимает валидные storage_mode значения: "edit" и "rw".
+
+        Default storage_mode = "edit".
+        """
+        # Test storage_mode="edit"
+        data_edit = {
+            "storage_mode": "edit",
+            "description": "Test edit mode"
+        }
+
+        response_edit = await client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data_edit
+        )
+
+        assert response_edit.status_code == 200
+
+        # Test storage_mode="rw"
+        data_rw = {
+            "storage_mode": "rw",
+            "description": "Test read-write mode"
+        }
+
+        response_rw = await client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data_rw
+        )
+
+        assert response_rw.status_code == 200
+
+    # ==========================================
+    # Compression Algorithm Validation Tests (Sprint 27)
+    # ==========================================
+
+    async def test_upload_invalid_compression_algorithm(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        sample_multipart_file: dict
+    ):
+        """
+        Test upload отклоняет неизвестный compression algorithm.
+
+        Допустимые значения: "gzip", "brotli".
+        """
+        data = {
+            "compress": "true",  # on/off format для boolean
+            "compression_algorithm": "invalid_algo",
+            "description": "Test invalid compression"
+        }
+
+        response = await client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data
+        )
+
+        # Должен вернуть 422 Unprocessable Entity (validation error)
+        assert response.status_code == 422
+        error_data = response.json()
+        assert "detail" in error_data
+
+    async def test_upload_compression_gzip_success(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        sample_multipart_file: dict
+    ):
+        """
+        Test успешное сжатие с gzip algorithm.
+
+        compress=true и compression_algorithm="gzip" должны быть приняты.
+        """
+        data = {
+            "compress": "true",  # on/off format
+            "compression_algorithm": "gzip",
+            "description": "Test gzip compression"
+        }
+
+        response = await client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        # Compression metadata должна присутствовать
+        assert "compressed" in result
+        assert "compression_ratio" in result
+
+    async def test_upload_compression_brotli_success(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        sample_multipart_file: dict
+    ):
+        """
+        Test успешное сжатие с brotli algorithm.
+
+        compress=true и compression_algorithm="brotli" должны быть приняты.
+        """
+        data = {
+            "compress": "true",  # on/off format
+            "compression_algorithm": "brotli",
+            "description": "Test brotli compression"
+        }
+
+        response = await client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        # Compression metadata должна присутствовать
+        assert "compressed" in result
+        assert "compression_ratio" in result
+
+    # ==========================================
+    # Compression Ratio Validation Tests (Sprint 27)
+    # ==========================================
+
+    async def test_upload_compression_ratio_calculated(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        sample_multipart_file: dict
+    ):
+        """
+        Test compression_ratio присутствует при compress=true.
+
+        compression_ratio должен быть числом > 0 когда файл сжат.
+        """
+        data = {
+            "compress": "true",
+            "compression_algorithm": "gzip",
+            "description": "Test compression ratio"
+        }
+
+        response = await client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        # compression_ratio должен присутствовать и быть числом
+        assert "compression_ratio" in result
+        if result["compression_ratio"] is not None:
+            assert isinstance(result["compression_ratio"], (int, float))
+            assert result["compression_ratio"] > 0
+
+    async def test_upload_compression_ratio_null_when_disabled(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        sample_multipart_file: dict
+    ):
+        """
+        Test compression_ratio = null при compress=false.
+
+        Когда сжатие отключено, compression_ratio должен быть null.
+        """
+        data = {
+            "compress": "false",  # off/on format
+            "description": "Test no compression"
+        }
+
+        response = await client.post(
+            "/api/v1/files/upload",
+            headers=auth_headers,
+            files=sample_multipart_file,
+            data=data
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        # compression_ratio должен быть null (None в Python)
+        assert "compression_ratio" in result
+        assert result["compression_ratio"] is None

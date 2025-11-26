@@ -16,7 +16,7 @@ from typing import AsyncGenerator, Dict
 from uuid import uuid4
 
 # Sprint 23: Set default test environment variables BEFORE importing app modules
-os.environ.setdefault("APP_DEBUG", "true")
+os.environ.setdefault("APP_DEBUG", "on")  # Boolean format: on/off
 os.environ.setdefault("LOG_FORMAT", "text")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 os.environ.setdefault("SERVICE_ACCOUNT_CLIENT_ID", "test-client-id")
