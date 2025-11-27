@@ -274,19 +274,19 @@ services:
       retries: 3
       start_period: 60s
 
-  # Storage Element - Physical File Storage
-  storage-element:
+  # Storage Element 01 - Physical File Storage (RW mode)
+  storage-element-01:
     build:
       context: ./storage-element
       dockerfile: Dockerfile
-    container_name: artstore_storage_element
+    container_name: artstore_storage_element_01
     restart: unless-stopped
     ports:
       - "8010:8000"
     environment:
       # Application
-      APP_NAME: artstore-storage-element
-      APP_MODE: edit  # edit, rw, ro, ar
+      APP_NAME: artstore-storage-element-01
+      APP_MODE: rw  # edit, rw, ro, ar
       APP__SWAGGER_ENABLED: "on"  # Двойное подчеркивание для вложенных настроек
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: json
@@ -309,6 +309,11 @@ services:
       # JWT Authentication
       JWT_PUBLIC_KEY_PATH: /app/keys/public_key.pem
       JWT_ALGORITHM: RS256
+
+      # Service Account для взаимодействия с Admin Module
+      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_66e7f458
+      SERVICE_ACCOUNT_CLIENT_SECRET: "D#^Cj)h3e,Ih%Fnf"
+      SERVICE_ACCOUNT_ADMIN_MODULE_URL: http://admin-module:8000
 
       # Database
       DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
@@ -337,10 +342,10 @@ services:
       - ./storage-element/keys:/app/keys:ro
 
       # Данные хранилища (именованный volume)
-      - storage_data:/app/.data/storage
+      - storage_data_01:/app/.data/storage
 
       # Logs
-      - storage_logs:/app/logs
+      - storage_logs_01:/app/logs
 
       # tmpfs для временных файлов
       - type: tmpfs
@@ -353,6 +358,102 @@ services:
       redis:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      admin-module:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Storage Element 02 - Physical File Storage (EDIT mode)
+  storage-element-02:
+    build:
+      context: ./storage-element
+      dockerfile: Dockerfile
+    container_name: artstore_storage_element_02
+    restart: unless-stopped
+    ports:
+      - "8011:8000"
+    environment:
+      # Application
+      APP_NAME: artstore-storage-element-02
+      APP_MODE: edit  # edit, rw, ro, ar
+      APP__SWAGGER_ENABLED: "on"  # Двойное подчеркивание для вложенных настроек
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+      # Storage Configuration
+      STORAGE_TYPE: s3  # local или s3
+      STORAGE_MAX_SIZE_GB: 100
+
+      # Local Filesystem
+      STORAGE_LOCAL_BASE_PATH: /app/.data/storage
+
+      # S3 Configuration
+      STORAGE_S3_ENDPOINT_URL: http://minio:9000
+      STORAGE_S3_ACCESS_KEY_ID: minioadmin
+      STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
+      STORAGE_S3_BUCKET_NAME: artstore-files
+      STORAGE_S3_REGION: us-east-1
+      STORAGE_S3_APP_FOLDER: storage_element_02
+
+      # JWT Authentication
+      JWT_PUBLIC_KEY_PATH: /app/keys/public_key.pem
+      JWT_ALGORITHM: RS256
+
+      # Service Account для взаимодействия с Admin Module
+      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_66e7f458
+      SERVICE_ACCOUNT_CLIENT_SECRET: "D#^Cj)h3e,Ih%Fnf"
+      SERVICE_ACCOUNT_ADMIN_MODULE_URL: http://admin-module:8000
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore
+      DB_TABLE_PREFIX: storage_elem_02
+
+      # PostgreSQL SSL (optional)
+      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
+      DB_SSL_MODE: ${DB_SSL_MODE:-require}
+      DB_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
+      DB_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
+      DB_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
+
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+
+      # WAL
+      WAL_ENABLED: "on"
+      WAL_RETENTION_HOURS: 24
+    volumes:
+      # JWT Keys
+      - ./storage-element/keys:/app/keys:ro
+
+      # Данные хранилища (именованный volume)
+      - storage_data_02:/app/.data/storage
+
+      # Logs
+      - storage_logs_02:/app/logs
+
+      # tmpfs для временных файлов
+      - type: tmpfs
+        target: /tmp
+    networks:
+      - artstore_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      admin-module:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
@@ -421,8 +522,6 @@ services:
         condition: service_healthy
       admin-module:
         condition: service_healthy
-      storage-element:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 30s
@@ -484,8 +583,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      storage-element:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 30s
@@ -524,11 +621,17 @@ volumes:
   admin_logs:
     name: artstore_admin_logs
 
-  # Storage Element
-  storage_data:
-    name: artstore_storage_data
-  storage_logs:
-    name: artstore_storage_logs
+  # Storage Element 01
+  storage_data_01:
+    name: artstore_storage_data_01
+  storage_logs_01:
+    name: artstore_storage_logs_01
+
+  # Storage Element 02
+  storage_data_02:
+    name: artstore_storage_data_02
+  storage_logs_02:
+    name: artstore_storage_logs_02
 
   # Ingester Module
   ingester_logs:
