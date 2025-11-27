@@ -315,6 +315,31 @@ GET /api/admin/health
   - Проверяет: filesystem space, database connectivity, WAL status
 ```
 
+### System Information (`/api/v1/info`)
+
+```
+GET /api/v1/info
+  - Полная информация о Storage Element для auto-discovery
+  - Используется Admin Module для автоматической регистрации и синхронизации
+  - Output: {
+      "name": "storage-element",
+      "display_name": "Storage Element 01",
+      "version": "1.0.0",
+      "mode": "edit",  # Определяется конфигурацией при запуске
+      "storage_type": "local",  # local или s3
+      "base_path": "/data/storage",
+      "capacity_bytes": 1099511627776,  # Общая емкость
+      "used_bytes": 549755813888,       # Использовано
+      "file_count": 1234,
+      "status": "operational"           # operational, degraded, offline
+    }
+  - Не требует авторизации
+```
+
+**ВАЖНО**: Mode определяется ТОЛЬКО конфигурацией storage element при запуске.
+Admin Module использует этот endpoint для получения актуальной информации,
+но НЕ МОЖЕТ изменять mode через API.
+
 ### Health & Monitoring
 
 ```
@@ -344,6 +369,7 @@ storage-element/
 │   │       └── endpoints/
 │   │           ├── files.py       # File operations
 │   │           ├── admin.py       # Admin operations
+│   │           ├── info.py        # System info for auto-discovery
 │   │           └── health.py
 │   ├── models/
 │   │   ├── file.py                # File metadata (cache)
@@ -393,10 +419,11 @@ APP_SWAGGER_ENABLED=false    # Swagger UI и ReDoc документация
 
 ```bash
 # Storage Configuration
-STORAGE_MODE=rw  # edit, rw, ro, ar
-STORAGE_TYPE=local  # local или s3
+STORAGE_MODE=rw           # edit, rw, ro, ar - ВАЖНО: определяется ТОЛЬКО здесь, не через API
+STORAGE_TYPE=local        # local или s3
 STORAGE_MAX_SIZE_GB=1000
 STORAGE_RETENTION_DAYS=1825  # 5 лет
+DISPLAY_NAME="Storage Element 01"  # Читаемое название для UI (используется при auto-discovery)
 
 # Local Filesystem
 STORAGE_LOCAL_BASE_PATH=./.data/storage

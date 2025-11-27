@@ -1,4 +1,5 @@
 <!-- Storage Elements Management Page -->
+<!-- Sprint 19 Phase 2: Auto-discovery и Sync implementation -->
 <div class="container-fluid p-4">
   <!-- Page Header -->
   <div class="d-flex justify-content-between align-items-center mb-4">
@@ -6,9 +7,21 @@
       <h2 class="mb-1">Storage Elements</h2>
       <p class="text-muted mb-0">Monitor and manage physical storage locations</p>
     </div>
-    <div>
+    <div class="d-flex gap-2">
+      <!-- Sync All Button -->
+      <button type="button" class="btn btn-outline-info"
+              (click)="syncAllStorageElements()"
+              [disabled]="isSyncingAll"
+              title="Синхронизировать все ONLINE storage elements">
+        @if (isSyncingAll) {
+          <span class="spinner-border spinner-border-sm me-2"></span>Syncing...
+        } @else {
+          <i class="bi bi-arrow-repeat me-2"></i>Sync All
+        }
+      </button>
+      <!-- Create Button -->
       <button type="button" class="btn btn-primary" (click)="openCreateModal()">
-        <i class="bi bi-plus-circle me-2"></i>Create Storage Element
+        <i class="bi bi-plus-circle me-2"></i>Add Storage Element
       </button>
     </div>
   </div>
@@ -225,7 +238,8 @@
 
                   <!-- Mode -->
                   <td>
-                    <span [class]="storageElementsService.getModeBadgeClass(element.mode)">
+                    <span [class]="storageElementsService.getModeBadgeClass(element.mode)"
+                          title="Mode определяется конфигурацией storage element">
                       {{ element.mode.toUpperCase() }}
                     </span>
                   </td>
@@ -300,6 +314,19 @@
                         (click)="viewDetails(element)"
                         title="View Details">
                         <i class="bi bi-eye"></i>
+                      </button>
+                      <!-- Sync Button -->
+                      <button
+                        type="button"
+                        class="btn btn-outline-info"
+                        (click)="syncSingleStorageElement(element)"
+                        [disabled]="isSyncing && syncingElementId === element.id"
+                        title="Синхронизировать данные с storage element">
+                        @if (isSyncing && syncingElementId === element.id) {
+                          <span class="spinner-border spinner-border-sm"></span>
+                        } @else {
+                          <i class="bi bi-arrow-repeat"></i>
+                        }
                       </button>
                       <button
                         type="button"
@@ -396,7 +423,8 @@
         <div class="modal-body">
           <!-- Status Badges -->
           <div class="mb-3">
-            <span [class]="storageElementsService.getModeBadgeClass(selectedStorageElement.mode)" class="me-2">
+            <span [class]="storageElementsService.getModeBadgeClass(selectedStorageElement.mode)" class="me-2"
+                  title="Mode определяется конфигурацией storage element">
               {{ selectedStorageElement.mode.toUpperCase() }}
             </span>
             <span [class]="storageElementsService.getStatusBadgeClass(selectedStorageElement.status)" class="me-2">
@@ -430,6 +458,14 @@
               <strong>API URL:</strong>
               <p class="mb-0"><code>{{ selectedStorageElement.api_url }}</code></p>
             </div>
+          </div>
+
+          <!-- Mode Information -->
+          <div class="alert alert-secondary mb-4">
+            <i class="bi bi-info-circle me-2"></i>
+            <strong>Mode:</strong> {{ storageElementsService.getModeDescription(selectedStorageElement.mode) }}
+            <br>
+            <small class="text-muted">{{ storageElementsService.getModeEditHint() }}</small>
           </div>
 
           <!-- Capacity & Usage -->
@@ -529,6 +565,16 @@
           </div>
         </div>
         <div class="modal-footer">
+          <!-- Sync Button in Details -->
+          <button type="button" class="btn btn-info me-auto"
+                  (click)="syncSingleStorageElement(selectedStorageElement)"
+                  [disabled]="isSyncing && syncingElementId === selectedStorageElement.id">
+            @if (isSyncing && syncingElementId === selectedStorageElement.id) {
+              <span class="spinner-border spinner-border-sm me-2"></span>Syncing...
+            } @else {
+              <i class="bi bi-arrow-repeat me-2"></i>Sync Now
+            }
+          </button>
           <button type="button" class="btn btn-secondary" (click)="closeDetailsModal()">
             Close
           </button>
@@ -538,14 +584,14 @@
   </div>
 }
 
-<!-- Create Storage Element Modal -->
+<!-- Create Storage Element Modal (Auto-Discovery) -->
 @if (showCreateModal) {
   <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0, 0, 0, 0.5);">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title">
-            <i class="bi bi-plus-circle me-2"></i>Create Storage Element
+            <i class="bi bi-plus-circle me-2"></i>Add Storage Element
           </h5>
           <button type="button" class="btn-close" (click)="closeCreateModal()"></button>
         </div>
@@ -556,142 +602,237 @@
             </div>
           }
 
-          <form>
-            <!-- Name -->
-            <div class="mb-3">
-              <label for="createName" class="form-label">Name <span class="text-danger">*</span></label>
-              <input type="text" class="form-control" id="createName"
-                     [(ngModel)]="formData.name" name="name"
-                     [class.is-invalid]="formErrors.name"
-                     placeholder="Enter storage element name">
-              @if (formErrors.name) {
-                <div class="invalid-feedback d-block">{{ formErrors.name }}</div>
-              }
+          <!-- Step 1: Enter URL and Discover -->
+          <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+              <h6 class="mb-0">
+                <i class="bi bi-search me-2"></i>Step 1: Discover Storage Element
+              </h6>
             </div>
+            <div class="card-body">
+              <p class="text-muted mb-3">
+                Введите URL API storage element для автоматического получения информации.
+                Все данные (mode, storage_type, capacity и т.д.) будут получены автоматически.
+              </p>
 
-            <!-- Description -->
-            <div class="mb-3">
-              <label for="createDescription" class="form-label">Description</label>
-              <textarea class="form-control" id="createDescription" rows="2"
-                        [(ngModel)]="formData.description" name="description"
-                        placeholder="Optional description"></textarea>
-            </div>
-
-            <!-- Mode and Storage Type -->
-            <div class="row mb-3">
-              <div class="col-md-6">
-                <label for="createMode" class="form-label">Mode <span class="text-danger">*</span></label>
-                <select class="form-select" id="createMode"
-                        [(ngModel)]="formData.mode" name="mode">
-                  @for (mode of modes; track mode) {
-                    <option [value]="mode">{{ storageElementsService.getModeDescription(mode) }}</option>
-                  }
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label for="createStorageType" class="form-label">Storage Type <span class="text-danger">*</span></label>
-                <select class="form-select" id="createStorageType"
-                        [(ngModel)]="formData.storage_type" name="storage_type">
-                  @for (type of types; track type) {
-                    <option [value]="type">{{ type.toUpperCase() }}</option>
-                  }
-                </select>
-              </div>
-            </div>
-
-            <!-- Base Path -->
-            <div class="mb-3">
-              <label for="createBasePath" class="form-label">Base Path <span class="text-danger">*</span></label>
-              <input type="text" class="form-control" id="createBasePath"
-                     [(ngModel)]="formData.base_path" name="base_path"
-                     [class.is-invalid]="formErrors.base_path"
-                     placeholder="/path/to/storage">
-              @if (formErrors.base_path) {
-                <div class="invalid-feedback d-block">{{ formErrors.base_path }}</div>
-              }
-            </div>
-
-            <!-- API URL -->
-            <div class="mb-3">
-              <label for="createApiUrl" class="form-label">API URL <span class="text-danger">*</span></label>
-              <input type="text" class="form-control" id="createApiUrl"
-                     [(ngModel)]="formData.api_url" name="api_url"
-                     [class.is-invalid]="formErrors.api_url"
-                     placeholder="http://storage-element:8010">
-              @if (formErrors.api_url) {
-                <div class="invalid-feedback d-block">{{ formErrors.api_url }}</div>
-              }
-            </div>
-
-            <!-- API Key -->
-            <div class="mb-3">
-              <label for="createApiKey" class="form-label">API Key</label>
-              <input type="password" class="form-control" id="createApiKey"
-                     [(ngModel)]="formData.api_key" name="api_key"
-                     placeholder="Optional API key for authentication">
-            </div>
-
-            <!-- Capacity and Retention -->
-            <div class="row mb-3">
-              <div class="col-md-6">
-                <label for="createCapacity" class="form-label">Capacity (GB)</label>
-                <input type="number" class="form-control" id="createCapacity"
-                       [(ngModel)]="formData.capacity_gb" name="capacity_gb"
-                       [class.is-invalid]="formErrors.capacity_gb"
-                       placeholder="Optional capacity limit" min="0" step="0.01">
-                @if (formErrors.capacity_gb) {
-                  <div class="invalid-feedback d-block">{{ formErrors.capacity_gb }}</div>
-                }
-              </div>
-              <div class="col-md-6">
-                <label for="createRetention" class="form-label">Retention (days)</label>
-                <input type="number" class="form-control" id="createRetention"
-                       [(ngModel)]="formData.retention_days" name="retention_days"
-                       [class.is-invalid]="formErrors.retention_days"
-                       placeholder="Optional retention period" min="1">
-                @if (formErrors.retention_days) {
-                  <div class="invalid-feedback d-block">{{ formErrors.retention_days }}</div>
-                }
-              </div>
-            </div>
-
-            <!-- Replication -->
-            <div class="row mb-3">
-              <div class="col-md-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="createIsReplicated"
-                         [(ngModel)]="formData.is_replicated" name="is_replicated">
-                  <label class="form-check-label" for="createIsReplicated">
-                    Enable Replication
-                  </label>
+              <!-- API URL Input -->
+              <div class="mb-3">
+                <label for="createApiUrl" class="form-label">
+                  API URL <span class="text-danger">*</span>
+                </label>
+                <div class="input-group">
+                  <input type="text" class="form-control" id="createApiUrl"
+                         [(ngModel)]="formData.api_url" name="api_url"
+                         [class.is-invalid]="formErrors.api_url || discoveryError"
+                         placeholder="http://storage-element:8010"
+                         [disabled]="isDiscovering">
+                  <button class="btn btn-outline-primary" type="button"
+                          (click)="discoverStorageElement()"
+                          [disabled]="isDiscovering || !formData.api_url">
+                    @if (isDiscovering) {
+                      <span class="spinner-border spinner-border-sm me-2"></span>Discovering...
+                    } @else {
+                      <i class="bi bi-search me-2"></i>Discover
+                    }
+                  </button>
                 </div>
-              </div>
-              <div class="col-md-6">
-                <label for="createReplicaCount" class="form-label">Replica Count</label>
-                <input type="number" class="form-control" id="createReplicaCount"
-                       [(ngModel)]="formData.replica_count" name="replica_count"
-                       [class.is-invalid]="formErrors.replica_count"
-                       min="0">
-                @if (formErrors.replica_count) {
-                  <div class="invalid-feedback d-block">{{ formErrors.replica_count }}</div>
+                @if (formErrors.api_url) {
+                  <div class="invalid-feedback d-block">{{ formErrors.api_url }}</div>
+                }
+                @if (discoveryError) {
+                  <div class="invalid-feedback d-block">{{ discoveryError }}</div>
                 }
               </div>
             </div>
-          </form>
+          </div>
+
+          <!-- Discovery Result Preview -->
+          @if (discoveryResult) {
+            <div class="card mb-4">
+              <div class="card-header"
+                   [ngClass]="discoveryResult.already_registered ? 'bg-warning' : 'bg-success text-white'">
+                <h6 class="mb-0">
+                  @if (discoveryResult.already_registered) {
+                    <i class="bi bi-exclamation-triangle me-2"></i>Storage Element Already Registered
+                  } @else {
+                    <i class="bi bi-check-circle me-2"></i>Storage Element Found
+                  }
+                </h6>
+              </div>
+              <div class="card-body">
+                @if (discoveryResult.already_registered) {
+                  <div class="alert alert-warning mb-3">
+                    <i class="bi bi-info-circle me-2"></i>
+                    Этот storage element уже зарегистрирован в системе (ID: {{ discoveryResult.existing_id }}).
+                    Вы можете синхронизировать его данные через список storage elements.
+                  </div>
+                }
+
+                <!-- Discovered Data Grid -->
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <strong>Name:</strong>
+                    <p class="mb-0">{{ discoveryResult.display_name }}</p>
+                  </div>
+                  <div class="col-md-6">
+                    <strong>Version:</strong>
+                    <p class="mb-0">{{ discoveryResult.version }}</p>
+                  </div>
+                  <div class="col-md-6">
+                    <strong>Mode:</strong>
+                    <span [class]="storageElementsService.getModeBadgeClass($any(discoveryResult.mode))">
+                      {{ discoveryResult.mode.toUpperCase() }}
+                    </span>
+                    <br>
+                    <small class="text-muted">Определяется конфигурацией storage element</small>
+                  </div>
+                  <div class="col-md-6">
+                    <strong>Storage Type:</strong>
+                    <span class="badge bg-light text-dark">
+                      {{ discoveryResult.storage_type.toUpperCase() }}
+                    </span>
+                  </div>
+                  <div class="col-md-6">
+                    <strong>Base Path:</strong>
+                    <p class="mb-0"><code>{{ discoveryResult.base_path }}</code></p>
+                  </div>
+                  <div class="col-md-6">
+                    <strong>Status:</strong>
+                    <span class="badge"
+                          [ngClass]="{
+                            'bg-success': discoveryResult.status === 'operational' || discoveryResult.status === 'online',
+                            'bg-warning': discoveryResult.status === 'degraded',
+                            'bg-danger': discoveryResult.status === 'offline'
+                          }">
+                      {{ discoveryResult.status }}
+                    </span>
+                  </div>
+                  <div class="col-md-4">
+                    <strong>Capacity:</strong>
+                    <p class="mb-0">{{ storageElementsService.formatSize(discoveryResult.capacity_gb) }}</p>
+                  </div>
+                  <div class="col-md-4">
+                    <strong>Used:</strong>
+                    <p class="mb-0">{{ storageElementsService.formatSize(discoveryResult.used_gb) }}</p>
+                  </div>
+                  <div class="col-md-4">
+                    <strong>Files:</strong>
+                    <p class="mb-0">{{ discoveryResult.file_count.toLocaleString() }}</p>
+                  </div>
+                </div>
+
+                <!-- Usage Progress -->
+                @if (discoveryResult.usage_percent !== null) {
+                  <div class="mt-3">
+                    <strong>Usage:</strong>
+                    <div class="progress mt-1" style="height: 20px;">
+                      <div
+                        class="progress-bar"
+                        [ngClass]="getUsageProgressClass(discoveryResult.usage_percent)"
+                        [style.width.%]="discoveryResult.usage_percent"
+                        role="progressbar">
+                        {{ discoveryResult.usage_percent.toFixed(1) }}%
+                      </div>
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+
+          <!-- Step 2: Optional Fields (only if discovery successful and not registered) -->
+          @if (discoveryResult && !discoveryResult.already_registered) {
+            <div class="card mb-4">
+              <div class="card-header bg-secondary text-white">
+                <h6 class="mb-0">
+                  <i class="bi bi-pencil me-2"></i>Step 2: Additional Settings (Optional)
+                </h6>
+              </div>
+              <div class="card-body">
+                <form>
+                  <!-- Custom Name -->
+                  <div class="mb-3">
+                    <label for="createName" class="form-label">Custom Name</label>
+                    <input type="text" class="form-control" id="createName"
+                           [(ngModel)]="formData.name" name="name"
+                           [placeholder]="discoveryResult.display_name">
+                    <small class="text-muted">
+                      Если не указано, будет использовано название из discovery: "{{ discoveryResult.display_name }}"
+                    </small>
+                  </div>
+
+                  <!-- Description -->
+                  <div class="mb-3">
+                    <label for="createDescription" class="form-label">Description</label>
+                    <textarea class="form-control" id="createDescription" rows="2"
+                              [(ngModel)]="formData.description" name="description"
+                              placeholder="Optional description"></textarea>
+                  </div>
+
+                  <!-- API Key -->
+                  <div class="mb-3">
+                    <label for="createApiKey" class="form-label">API Key</label>
+                    <input type="password" class="form-control" id="createApiKey"
+                           [(ngModel)]="formData.api_key" name="api_key"
+                           placeholder="Optional API key for authentication">
+                  </div>
+
+                  <!-- Retention -->
+                  <div class="mb-3">
+                    <label for="createRetention" class="form-label">Retention (days)</label>
+                    <input type="number" class="form-control" id="createRetention"
+                           [(ngModel)]="formData.retention_days" name="retention_days"
+                           [class.is-invalid]="formErrors.retention_days"
+                           placeholder="Optional retention period" min="1">
+                    @if (formErrors.retention_days) {
+                      <div class="invalid-feedback d-block">{{ formErrors.retention_days }}</div>
+                    }
+                  </div>
+
+                  <!-- Replication -->
+                  <div class="row mb-3">
+                    <div class="col-md-6">
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="createIsReplicated"
+                               [(ngModel)]="formData.is_replicated" name="is_replicated">
+                        <label class="form-check-label" for="createIsReplicated">
+                          Enable Replication
+                        </label>
+                      </div>
+                    </div>
+                    <div class="col-md-6">
+                      @if (formData.is_replicated) {
+                        <label for="createReplicaCount" class="form-label">Replica Count</label>
+                        <input type="number" class="form-control" id="createReplicaCount"
+                               [(ngModel)]="formData.replica_count" name="replica_count"
+                               [class.is-invalid]="formErrors.replica_count"
+                               min="1">
+                        @if (formErrors.replica_count) {
+                          <div class="invalid-feedback d-block">{{ formErrors.replica_count }}</div>
+                        }
+                      }
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          }
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" (click)="closeCreateModal()"
                   [disabled]="isSubmitting">
             Cancel
           </button>
-          <button type="button" class="btn btn-primary" (click)="createStorageElement()"
-                  [disabled]="isSubmitting">
-            @if (isSubmitting) {
-              <span class="spinner-border spinner-border-sm me-2"></span>Creating...
-            } @else {
-              <i class="bi bi-check-circle me-2"></i>Create
-            }
-          </button>
+          @if (discoveryResult && !discoveryResult.already_registered) {
+            <button type="button" class="btn btn-success" (click)="createStorageElement()"
+                    [disabled]="isSubmitting">
+              @if (isSubmitting) {
+                <span class="spinner-border spinner-border-sm me-2"></span>Creating...
+              } @else {
+                <i class="bi bi-check-circle me-2"></i>Add Storage Element
+              }
+            </button>
+          }
         </div>
       </div>
     </div>
@@ -737,16 +878,22 @@
                         placeholder="Optional description"></textarea>
             </div>
 
-            <!-- Mode and Status -->
+            <!-- Mode (Read-only) and Status -->
             <div class="row mb-3">
               <div class="col-md-6">
-                <label for="editMode" class="form-label">Mode</label>
-                <select class="form-select" id="editMode"
-                        [(ngModel)]="formData.mode" name="mode">
-                  @for (mode of modes; track mode) {
-                    <option [value]="mode">{{ storageElementsService.getModeDescription(mode) }}</option>
-                  }
-                </select>
+                <label class="form-label">Mode</label>
+                <div class="input-group">
+                  <span class="form-control bg-light" readonly>
+                    <span [class]="storageElementsService.getModeBadgeClass(selectedStorageElement.mode)">
+                      {{ selectedStorageElement.mode.toUpperCase() }}
+                    </span>
+                    - {{ storageElementsService.getModeDescription(selectedStorageElement.mode) }}
+                  </span>
+                  <span class="input-group-text" title="{{ storageElementsService.getModeEditHint() }}">
+                    <i class="bi bi-lock"></i>
+                  </span>
+                </div>
+                <small class="text-muted">{{ storageElementsService.getModeEditHint() }}</small>
               </div>
               <div class="col-md-6">
                 <label for="editStatus" class="form-label">Status</label>
@@ -756,6 +903,7 @@
                     <option [value]="status">{{ storageElementsService.getStatusDescription(status) }}</option>
                   }
                 </select>
+                <small class="text-muted">Используйте для переключения в режим Maintenance</small>
               </div>
             </div>
 
@@ -763,15 +911,15 @@
             <div class="row mb-3">
               <div class="col-md-6">
                 <label class="form-label">Storage Type</label>
-                <input type="text" class="form-control" readonly
+                <input type="text" class="form-control bg-light" readonly
                        [value]="selectedStorageElement.storage_type.toUpperCase()">
-                <small class="text-muted">Cannot be changed</small>
+                <small class="text-muted">Определяется конфигурацией storage element</small>
               </div>
               <div class="col-md-6">
                 <label class="form-label">Base Path</label>
-                <input type="text" class="form-control" readonly
+                <input type="text" class="form-control bg-light" readonly
                        [value]="selectedStorageElement.base_path">
-                <small class="text-muted">Cannot be changed</small>
+                <small class="text-muted">Определяется конфигурацией storage element</small>
               </div>
             </div>
 
@@ -796,28 +944,16 @@
               <small class="text-muted">Only enter if you want to change the API key</small>
             </div>
 
-            <!-- Capacity and Retention -->
-            <div class="row mb-3">
-              <div class="col-md-6">
-                <label for="editCapacity" class="form-label">Capacity (GB)</label>
-                <input type="number" class="form-control" id="editCapacity"
-                       [(ngModel)]="formData.capacity_gb" name="capacity_gb"
-                       [class.is-invalid]="formErrors.capacity_gb"
-                       placeholder="Optional capacity limit" min="0" step="0.01">
-                @if (formErrors.capacity_gb) {
-                  <div class="invalid-feedback d-block">{{ formErrors.capacity_gb }}</div>
-                }
-              </div>
-              <div class="col-md-6">
-                <label for="editRetention" class="form-label">Retention (days)</label>
-                <input type="number" class="form-control" id="editRetention"
-                       [(ngModel)]="formData.retention_days" name="retention_days"
-                       [class.is-invalid]="formErrors.retention_days"
-                       placeholder="Optional retention period" min="1">
-                @if (formErrors.retention_days) {
-                  <div class="invalid-feedback d-block">{{ formErrors.retention_days }}</div>
-                }
-              </div>
+            <!-- Retention -->
+            <div class="mb-3">
+              <label for="editRetention" class="form-label">Retention (days)</label>
+              <input type="number" class="form-control" id="editRetention"
+                     [(ngModel)]="formData.retention_days" name="retention_days"
+                     [class.is-invalid]="formErrors.retention_days"
+                     placeholder="Optional retention period" min="1">
+              @if (formErrors.retention_days) {
+                <div class="invalid-feedback d-block">{{ formErrors.retention_days }}</div>
+              }
             </div>
 
             <!-- Replica Count -->
@@ -831,9 +967,31 @@
                 <div class="invalid-feedback d-block">{{ formErrors.replica_count }}</div>
               }
             </div>
+
+            <!-- Capacity Info (Read-only) -->
+            <div class="alert alert-info">
+              <i class="bi bi-info-circle me-2"></i>
+              <strong>Capacity & Usage:</strong> Эти данные обновляются автоматически при синхронизации.
+              <br>
+              <small>
+                Текущее значение: {{ storageElementsService.formatSize(selectedStorageElement.capacity_gb) }} capacity,
+                {{ storageElementsService.formatSize(selectedStorageElement.used_gb) }} used
+                ({{ storageElementsService.formatUsagePercent(selectedStorageElement.usage_percent) }})
+              </small>
+            </div>
           </form>
         </div>
         <div class="modal-footer">
+          <!-- Sync Button -->
+          <button type="button" class="btn btn-info me-auto"
+                  (click)="syncSingleStorageElement(selectedStorageElement)"
+                  [disabled]="isSyncing && syncingElementId === selectedStorageElement.id">
+            @if (isSyncing && syncingElementId === selectedStorageElement.id) {
+              <span class="spinner-border spinner-border-sm me-2"></span>Syncing...
+            } @else {
+              <i class="bi bi-arrow-repeat me-2"></i>Sync Data
+            }
+          </button>
           <button type="button" class="btn btn-secondary" (click)="closeEditModal()"
                   [disabled]="isSubmitting">
             Cancel
@@ -917,7 +1075,8 @@
             <div class="alert alert-danger mt-3" role="alert">
               <i class="bi bi-x-circle me-2"></i>
               <strong>Cannot delete:</strong> This storage element is in EDIT mode.
-              Change the mode before deletion.
+              <br>
+              <small>{{ storageElementsService.getModeEditHint() }}</small>
             </div>
           }
         </div>

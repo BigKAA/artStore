@@ -3,11 +3,18 @@
  *
  * Сервис для взаимодействия с API управления Storage Elements.
  * Предоставляет методы для:
+ * - Auto-discovery Storage Elements по URL
+ * - Синхронизация данных Storage Elements
  * - Получения списка Storage Elements с фильтрацией и пагинацией
  * - Получения детальной информации о Storage Element
  * - Получения сводной статистики
+ * - CRUD операции
  *
- * Sprint 18 Phase 2: Read-only endpoints (CRUD в Sprint 19)
+ * Sprint 19 Phase 2: Auto-discovery и Sync implementation
+ *
+ * ВАЖНО: Mode Storage Element определяется ТОЛЬКО его конфигурацией при запуске.
+ *        Изменить mode можно только через изменение конфигурации и перезапуск storage element.
+ *        Admin Module НЕ МОЖЕТ изменять mode через API.
  */
 
 import { Injectable } from '@angular/core';
@@ -17,6 +24,7 @@ import { environment } from '../../../environments/environment';
 
 /**
  * Режимы работы Storage Element
+ * ВАЖНО: Mode определяется ТОЛЬКО конфигурацией storage element при запуске
  */
 export enum StorageMode {
   EDIT = 'edit',  // Полные CRUD операции
@@ -97,6 +105,92 @@ export interface StorageElementsSummary {
   average_usage_percent: number;
 }
 
+/**
+ * Request для discovery Storage Element
+ */
+export interface StorageElementDiscoverRequest {
+  api_url: string;
+}
+
+/**
+ * Response от discovery endpoint
+ * Содержит информацию о storage element до его регистрации
+ */
+export interface StorageElementDiscoverResponse {
+  // Данные от storage element
+  name: string;
+  display_name: string;
+  version: string;
+  mode: string;
+  storage_type: string;
+  base_path: string;
+  capacity_bytes: number;
+  used_bytes: number;
+  file_count: number;
+  status: string;
+  api_url: string;
+
+  // Computed fields
+  capacity_gb: number;
+  used_gb: number;
+  usage_percent: number | null;
+
+  // Флаги для UI
+  already_registered: boolean;
+  existing_id: number | null;
+}
+
+/**
+ * Request для создания Storage Element с auto-discovery
+ * ВАЖНО: mode, storage_type, base_path, capacity_bytes получаются автоматически
+ */
+export interface StorageElementCreateRequest {
+  api_url: string;                      // ОБЯЗАТЕЛЬНО - URL для auto-discovery
+  name?: string;                        // Опционально - если не указано, из discovery
+  description?: string;                 // Опционально
+  api_key?: string;                     // Опционально
+  retention_days?: number;              // Опционально
+  is_replicated?: boolean;              // Default: false
+  replica_count?: number;               // Default: 0
+}
+
+/**
+ * Request для обновления Storage Element
+ * ВАЖНО: mode НЕ может быть изменен через API
+ */
+export interface StorageElementUpdateRequest {
+  name?: string;
+  description?: string;
+  api_url?: string;
+  api_key?: string;
+  status?: StorageStatus;
+  retention_days?: number;
+  replica_count?: number;
+  // mode УДАЛЕН - изменяется только через конфигурацию storage element
+}
+
+/**
+ * Response для sync операции
+ */
+export interface StorageElementSyncResponse {
+  storage_element_id: number;
+  name: string;
+  success: boolean;
+  changes: string[];
+  error_message: string | null;
+  synced_at: string | null;
+}
+
+/**
+ * Response для массовой синхронизации
+ */
+export interface StorageElementSyncAllResponse {
+  total: number;
+  synced: number;
+  failed: number;
+  results: StorageElementSyncResponse[];
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -104,6 +198,61 @@ export class StorageElementsService {
   private apiUrl = `${environment.apiUrl}/storage-elements`;
 
   constructor(private http: HttpClient) {}
+
+  // =============================================================================
+  // Discovery и Sync методы
+  // =============================================================================
+
+  /**
+   * Discovery Storage Element по URL
+   *
+   * Выполняет запрос к storage element для получения информации
+   * без регистрации в системе. Используется для preview перед добавлением.
+   *
+   * @param apiUrl URL API storage element
+   * @returns Observable с информацией о storage element
+   */
+  discoverStorageElement(apiUrl: string): Observable<StorageElementDiscoverResponse> {
+    return this.http.post<StorageElementDiscoverResponse>(
+      `${this.apiUrl}/discover`,
+      { api_url: apiUrl }
+    );
+  }
+
+  /**
+   * Синхронизация одного Storage Element
+   *
+   * Выполняет запрос к storage element и обновляет данные в БД.
+   * Синхронизируются: mode, capacity_bytes, used_bytes, file_count, status.
+   *
+   * @param id ID storage element
+   * @returns Observable с результатом синхронизации
+   */
+  syncStorageElement(id: number): Observable<StorageElementSyncResponse> {
+    return this.http.post<StorageElementSyncResponse>(
+      `${this.apiUrl}/sync/${id}`,
+      {}
+    );
+  }
+
+  /**
+   * Массовая синхронизация всех Storage Elements
+   *
+   * @param onlyOnline Синхронизировать только ONLINE (default: true)
+   * @returns Observable со сводкой синхронизации
+   */
+  syncAllStorageElements(onlyOnline: boolean = true): Observable<StorageElementSyncAllResponse> {
+    let params = new HttpParams().set('only_online', onlyOnline.toString());
+    return this.http.post<StorageElementSyncAllResponse>(
+      `${this.apiUrl}/sync-all`,
+      {},
+      { params }
+    );
+  }
+
+  // =============================================================================
+  // CRUD методы
+  // =============================================================================
 
   /**
    * Получение списка Storage Elements с фильтрацией и пагинацией
@@ -151,16 +300,30 @@ export class StorageElementsService {
   }
 
   /**
-   * Создание нового Storage Element
+   * Создание нового Storage Element с auto-discovery
+   *
+   * При создании выполняется автоматический discovery storage element
+   * для получения: mode, storage_type, base_path, capacity_bytes.
+   *
+   * @param data Данные для создания (обязательно api_url)
+   * @returns Observable созданного Storage Element
    */
-  createStorageElement(data: any): Observable<StorageElement> {
+  createStorageElement(data: StorageElementCreateRequest): Observable<StorageElement> {
     return this.http.post<StorageElement>(this.apiUrl, data);
   }
 
   /**
    * Обновление Storage Element
+   *
+   * ВАЖНО: mode НЕ может быть изменен через API.
+   * Для изменения mode необходимо изменить конфигурацию
+   * storage element и перезапустить его.
+   *
+   * @param id ID storage element
+   * @param data Данные для обновления (без mode)
+   * @returns Observable обновленного Storage Element
    */
-  updateStorageElement(id: number, data: any): Observable<StorageElement> {
+  updateStorageElement(id: number, data: StorageElementUpdateRequest): Observable<StorageElement> {
     return this.http.put<StorageElement>(`${this.apiUrl}/${id}`, data);
   }
 
@@ -171,8 +334,12 @@ export class StorageElementsService {
     return this.http.delete<void>(`${this.apiUrl}/${id}`);
   }
 
+  // =============================================================================
+  // Вспомогательные функции
+  // =============================================================================
+
   /**
-   * Вспомогательная функция: Форматирование размера
+   * Форматирование размера
    */
   formatSize(gb: number | null): string {
     if (gb === null) return 'N/A';
@@ -183,7 +350,7 @@ export class StorageElementsService {
   }
 
   /**
-   * Вспомогательная функция: Форматирование процента использования
+   * Форматирование процента использования
    */
   formatUsagePercent(percent: number | null): string {
     if (percent === null) return 'N/A';
@@ -191,7 +358,7 @@ export class StorageElementsService {
   }
 
   /**
-   * Вспомогательная функция: Получение badge класса для статуса
+   * Получение badge класса для статуса
    */
   getStatusBadgeClass(status: StorageStatus): string {
     switch (status) {
@@ -209,7 +376,7 @@ export class StorageElementsService {
   }
 
   /**
-   * Вспомогательная функция: Получение badge класса для режима
+   * Получение badge класса для режима
    */
   getModeBadgeClass(mode: StorageMode): string {
     switch (mode) {
@@ -227,7 +394,7 @@ export class StorageElementsService {
   }
 
   /**
-   * Вспомогательная функция: Получение описания режима
+   * Получение описания режима
    */
   getModeDescription(mode: StorageMode): string {
     switch (mode) {
@@ -245,7 +412,7 @@ export class StorageElementsService {
   }
 
   /**
-   * Вспомогательная функция: Получение описания статуса
+   * Получение описания статуса
    */
   getStatusDescription(status: StorageStatus): string {
     switch (status) {
@@ -260,5 +427,35 @@ export class StorageElementsService {
       default:
         return status;
     }
+  }
+
+  /**
+   * Получение описания типа хранилища
+   */
+  getStorageTypeDescription(storageType: StorageType): string {
+    switch (storageType) {
+      case StorageType.LOCAL:
+        return 'Local Storage';
+      case StorageType.S3:
+        return 'S3 Compatible';
+      default:
+        return storageType;
+    }
+  }
+
+  /**
+   * Проверка - можно ли редактировать mode через UI
+   * (Ответ всегда false - mode только через конфигурацию)
+   */
+  canEditMode(): boolean {
+    return false;
+  }
+
+  /**
+   * Получение подсказки почему mode нельзя изменить
+   */
+  getModeEditHint(): string {
+    return 'Mode определяется конфигурацией storage element при запуске. ' +
+           'Для изменения mode необходимо изменить конфигурацию и перезапустить storage element.';
   }
 }

@@ -77,6 +77,7 @@ class AppSettings(BaseSettings):
     )
 
     name: str = "storage-element"
+    display_name: str = "Storage Element"  # Читаемое имя для auto-discovery
     version: str = "1.0.0"
     debug: bool = False
     swagger_enabled: bool = False

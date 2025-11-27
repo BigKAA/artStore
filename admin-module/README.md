@@ -81,10 +81,14 @@ Admin Module поддерживает **два типа** учетных зап�
 
 ### 2. Управление Storage Elements
 
-- **Регистрация и конфигурирование** Storage Elements
-- **Monitoring статусов**: edit, rw, ro, ar режимы
+- **Auto-discovery**: Автоматическое получение информации от storage element по URL
+- **Синхронизация**: Периодическая и ручная синхронизация данных (mode, capacity, used, files)
+- **Monitoring статусов**: edit, rw, ro, ar режимы (только чтение, изменение через config storage element)
 - **Публикация в Service Discovery**: Redis pub/sub для обновлений
 - **Health checking**: Периодическая проверка доступности
+
+**ВАЖНО**: Mode Storage Element определяется ТОЛЬКО его конфигурацией при запуске.
+Для изменения mode необходимо изменить конфигурацию storage element и перезапустить его.
 
 ### 3. Координация распределенных транзакций
 
@@ -241,26 +245,53 @@ POST /api/service-accounts/{id}/activate
 ```
 
 #### Storage Elements (`/api/storage-elements/*`)
+
+**ВАЖНО**: Mode Storage Element определяется ТОЛЬКО его конфигурацией при запуске.
+Изменить mode можно только через изменение конфигурации и перезапуск storage element.
+Admin Module НЕ МОЖЕТ изменять mode через API.
+
 ```
 GET /api/storage-elements
   - Список всех Storage Elements
-  - Фильтры: mode, status, location
+  - Фильтры: mode, status, storage_type, search
+  - Пагинация: skip, limit
+
+GET /api/storage-elements/stats/summary
+  - Сводная статистика по всем Storage Elements
+  - Output: total_count, by_status, by_mode, by_type, total_capacity_gb, total_used_gb, total_files
+
+POST /api/storage-elements/discover
+  - Auto-discovery Storage Element по URL
+  - Input: {"api_url": "http://storage:8010"}
+  - Output: Информация о storage element без регистрации
+  - Используется для preview перед добавлением
 
 POST /api/storage-elements
-  - Регистрация нового Storage Element
+  - Регистрация нового Storage Element с auto-discovery
+  - Input: {"api_url": "http://storage:8010", "name": "optional", "description": "optional"}
+  - mode, storage_type, base_path, capacity_bytes получаются автоматически от storage element
+
+POST /api/storage-elements/sync/{id}
+  - Синхронизация данных одного Storage Element
+  - Обновляет: mode, capacity_bytes, used_bytes, file_count, status
+  - Output: Результат синхронизации с списком изменений
+
+POST /api/storage-elements/sync-all
+  - Массовая синхронизация всех Storage Elements
+  - Query: only_online=true (default) - синхронизировать только ONLINE
+  - Output: Сводка синхронизации (total, synced, failed, results)
 
 GET /api/storage-elements/{id}
   - Детали конкретного Storage Element
 
-PATCH /api/storage-elements/{id}
+PUT /api/storage-elements/{id}
   - Обновление конфигурации Storage Element
+  - ВАЖНО: mode НЕ может быть изменен через API
+  - Доступные поля: name, description, api_url, api_key, status, retention_days, replica_count
 
 DELETE /api/storage-elements/{id}
-  - Удаление Storage Element (проверка отсутствия файлов)
-
-POST /api/storage-elements/{id}/change-mode
-  - Смена режима работы (rw → ro, ro → ar)
-  - Two-Phase Commit для консистентности
+  - Удаление Storage Element
+  - Проверка: file_count == 0 и mode != EDIT
 ```
 
 #### Webhooks (`/api/webhooks/*`)
@@ -351,6 +382,8 @@ admin-module/
 │   │   ├── auth_service.py          # Authentication business logic
 │   │   ├── account_service.py       # Service account management
 │   │   ├── storage_service.py       # Storage element management
+│   │   ├── storage_discovery_service.py  # Auto-discovery storage elements
+│   │   ├── storage_sync_service.py  # Synchronization storage elements
 │   │   ├── webhook_service.py       # Webhook management
 │   │   ├── saga_orchestrator.py     # Saga pattern coordinator
 │   │   ├── service_discovery.py     # Redis pub/sub for config

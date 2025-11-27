@@ -1,11 +1,13 @@
 /**
  * Storage Elements Component
  *
- * Компонент для управления Storage Elements.
+ * Компонент для управления Storage Elements с auto-discovery.
  * Функциональность:
+ * - Auto-discovery Storage Element по URL
+ * - Создание Storage Element с автоматическим получением информации
+ * - Синхронизация данных Storage Elements
  * - Отображение списка Storage Elements с метриками
- * - Создание нового Storage Element
- * - Редактирование существующего Storage Element
+ * - Редактирование существующего Storage Element (без mode!)
  * - Удаление Storage Element
  * - Фильтрация по mode, status, storage_type
  * - Поиск по name или api_url
@@ -13,7 +15,11 @@
  * - Сводная статистика системы
  * - Пагинация
  *
- * Sprint 19 Phase 2: Full CRUD implementation
+ * ВАЖНО: Mode Storage Element определяется ТОЛЬКО его конфигурацией при запуске.
+ *        Изменить mode можно только через изменение конфигурации и перезапуск storage element.
+ *        Admin Module НЕ МОЖЕТ изменять mode через API.
+ *
+ * Sprint 19 Phase 2: Auto-discovery implementation
  */
 
 import { Component, OnInit } from '@angular/core';
@@ -25,7 +31,10 @@ import {
   StorageMode,
   StorageStatus,
   StorageType,
-  StorageElementsSummary
+  StorageElementsSummary,
+  StorageElementDiscoverResponse,
+  StorageElementSyncResponse,
+  StorageElementCreateRequest
 } from '../../services/storage-elements/storage-elements.service';
 
 @Component({
@@ -40,6 +49,17 @@ export class StorageElementsComponent implements OnInit {
   storageElements: StorageElement[] = [];
   summary: StorageElementsSummary | null = null;
   selectedStorageElement: StorageElement | null = null;
+
+  // Discovery
+  discoveryResult: StorageElementDiscoverResponse | null = null;
+  isDiscovering: boolean = false;
+  discoveryError: string | null = null;
+
+  // Sync
+  syncResult: StorageElementSyncResponse | null = null;
+  isSyncing: boolean = false;
+  syncingElementId: number | null = null;
+  isSyncingAll: boolean = false;
 
   // Filters
   modeFilter: StorageMode | '' = '';
@@ -59,6 +79,7 @@ export class StorageElementsComponent implements OnInit {
   showCreateModal: boolean = false;
   showEditModal: boolean = false;
   showDeleteModal: boolean = false;
+  showSyncResultModal: boolean = false;
 
   // CRUD State
   formData: any = {};
@@ -134,7 +155,7 @@ export class StorageElementsComponent implements OnInit {
    * Применить фильтры
    */
   applyFilters(): void {
-    this.page = 1; // Reset to first page
+    this.page = 1;
     this.loadStorageElements();
   }
 
@@ -203,17 +224,14 @@ export class StorageElementsComponent implements OnInit {
     const maxPagesToShow = 5;
 
     if (totalPages <= maxPagesToShow) {
-      // Показываем все страницы
       for (let i = 1; i <= totalPages; i++) {
         pages.push(i);
       }
     } else {
-      // Показываем первую, последнюю и несколько вокруг текущей
       const halfWindow = Math.floor(maxPagesToShow / 2);
       let start = Math.max(1, this.page - halfWindow);
       let end = Math.min(totalPages, this.page + halfWindow);
 
-      // Корректировка если в начале или в конце
       if (this.page <= halfWindow) {
         end = maxPagesToShow;
       } else if (this.page >= totalPages - halfWindow) {
@@ -265,26 +283,142 @@ export class StorageElementsComponent implements OnInit {
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   }
 
+  // ==================== Discovery Operations ====================
+
+  /**
+   * Выполнить discovery по URL
+   */
+  discoverStorageElement(): void {
+    if (!this.formData.api_url || this.formData.api_url.trim().length === 0) {
+      this.discoveryError = 'Please enter Storage Element URL';
+      return;
+    }
+
+    this.isDiscovering = true;
+    this.discoveryError = null;
+    this.discoveryResult = null;
+
+    this.storageElementsService.discoverStorageElement(this.formData.api_url).subscribe({
+      next: (result) => {
+        this.discoveryResult = result;
+        this.isDiscovering = false;
+
+        // Если уже зарегистрирован - показываем предупреждение
+        if (result.already_registered) {
+          this.discoveryError = `This Storage Element is already registered (ID: ${result.existing_id})`;
+        }
+      },
+      error: (err) => {
+        console.error('Discovery failed:', err);
+        this.discoveryError = err.error?.detail || 'Failed to discover Storage Element. Check URL and try again.';
+        this.isDiscovering = false;
+      }
+    });
+  }
+
+  /**
+   * Сбросить результат discovery
+   */
+  resetDiscovery(): void {
+    this.discoveryResult = null;
+    this.discoveryError = null;
+  }
+
+  // ==================== Sync Operations ====================
+
+  /**
+   * Синхронизировать один Storage Element
+   */
+  syncSingleStorageElement(storageElement: StorageElement): void {
+    this.isSyncing = true;
+    this.syncingElementId = storageElement.id;
+    this.error = null;
+
+    this.storageElementsService.syncStorageElement(storageElement.id).subscribe({
+      next: (result) => {
+        this.syncResult = result;
+        this.isSyncing = false;
+        this.syncingElementId = null;
+
+        if (result.success) {
+          if (result.changes.length > 0) {
+            this.successMessage = `Synced "${result.name}": ${result.changes.length} changes`;
+          } else {
+            this.successMessage = `"${result.name}" is already up to date`;
+          }
+          this.loadStorageElements();
+          this.loadSummary();
+        } else {
+          this.error = `Sync failed: ${result.error_message}`;
+        }
+
+        setTimeout(() => {
+          this.successMessage = null;
+        }, 5000);
+      },
+      error: (err) => {
+        console.error('Sync failed:', err);
+        this.error = err.error?.detail || 'Failed to sync Storage Element';
+        this.isSyncing = false;
+        this.syncingElementId = null;
+      }
+    });
+  }
+
+  /**
+   * Синхронизировать все Storage Elements
+   */
+  syncAllStorageElements(): void {
+    this.isSyncingAll = true;
+    this.error = null;
+
+    this.storageElementsService.syncAllStorageElements(true).subscribe({
+      next: (result) => {
+        this.isSyncingAll = false;
+        this.successMessage = `Sync completed: ${result.synced} synced, ${result.failed} failed`;
+        this.loadStorageElements();
+        this.loadSummary();
+
+        // Показать детальный результат если есть ошибки
+        if (result.failed > 0) {
+          const failedNames = result.results
+            .filter(r => !r.success)
+            .map(r => r.name)
+            .join(', ');
+          this.error = `Failed to sync: ${failedNames}`;
+        }
+
+        setTimeout(() => {
+          this.successMessage = null;
+        }, 5000);
+      },
+      error: (err) => {
+        console.error('Sync all failed:', err);
+        this.error = err.error?.detail || 'Failed to sync Storage Elements';
+        this.isSyncingAll = false;
+      }
+    });
+  }
+
   // ==================== CRUD Operations ====================
 
   /**
    * Открыть модал создания Storage Element
+   * Новая версия с auto-discovery
    */
   openCreateModal(): void {
     this.formData = {
+      api_url: '',
       name: '',
       description: '',
-      mode: StorageMode.EDIT,
-      storage_type: StorageType.LOCAL,
-      base_path: '',
-      api_url: '',
       api_key: '',
-      capacity_bytes: null,
       retention_days: null,
       is_replicated: false,
       replica_count: 0
     };
     this.formErrors = {};
+    this.discoveryResult = null;
+    this.discoveryError = null;
     this.successMessage = null;
     this.showCreateModal = true;
   }
@@ -296,24 +430,44 @@ export class StorageElementsComponent implements OnInit {
     this.showCreateModal = false;
     this.formData = {};
     this.formErrors = {};
+    this.discoveryResult = null;
+    this.discoveryError = null;
   }
 
   /**
-   * Создать Storage Element
+   * Создать Storage Element с auto-discovery
    */
   createStorageElement(): void {
-    if (!this.validateForm()) {
+    if (!this.validateCreateForm()) {
       return;
     }
 
     this.isSubmitting = true;
     this.error = null;
 
-    // Преобразование capacity из GB в bytes если указано
-    const requestData = { ...this.formData };
-    if (requestData.capacity_gb) {
-      requestData.capacity_bytes = Math.floor(requestData.capacity_gb * 1024 * 1024 * 1024);
-      delete requestData.capacity_gb;
+    // Формируем request для создания с auto-discovery
+    const requestData: StorageElementCreateRequest = {
+      api_url: this.formData.api_url.trim()
+    };
+
+    // Добавляем опциональные поля если указаны
+    if (this.formData.name && this.formData.name.trim()) {
+      requestData.name = this.formData.name.trim();
+    }
+    if (this.formData.description && this.formData.description.trim()) {
+      requestData.description = this.formData.description.trim();
+    }
+    if (this.formData.api_key && this.formData.api_key.trim()) {
+      requestData.api_key = this.formData.api_key.trim();
+    }
+    if (this.formData.retention_days) {
+      requestData.retention_days = this.formData.retention_days;
+    }
+    if (this.formData.is_replicated) {
+      requestData.is_replicated = this.formData.is_replicated;
+    }
+    if (this.formData.replica_count > 0) {
+      requestData.replica_count = this.formData.replica_count;
     }
 
     this.storageElementsService.createStorageElement(requestData).subscribe({
@@ -324,7 +478,6 @@ export class StorageElementsComponent implements OnInit {
         this.loadStorageElements();
         this.loadSummary();
 
-        // Очистить сообщение через 5 секунд
         setTimeout(() => {
           this.successMessage = null;
         }, 5000);
@@ -339,19 +492,19 @@ export class StorageElementsComponent implements OnInit {
 
   /**
    * Открыть модал редактирования Storage Element
+   * ВАЖНО: mode НЕ редактируется!
    */
   openEditModal(storageElement: StorageElement): void {
     this.selectedStorageElement = storageElement;
     this.formData = {
       name: storageElement.name,
-      description: storageElement.description,
-      mode: storageElement.mode,
+      description: storageElement.description || '',
       api_url: storageElement.api_url,
       api_key: '',
       status: storageElement.status,
-      capacity_gb: storageElement.capacity_gb,
       retention_days: storageElement.retention_days,
       replica_count: storageElement.replica_count
+      // mode НЕ включен - редактирование через конфигурацию storage element
     };
     this.formErrors = {};
     this.successMessage = null;
@@ -370,25 +523,24 @@ export class StorageElementsComponent implements OnInit {
 
   /**
    * Обновить Storage Element
+   * ВАЖНО: mode НЕ может быть изменен через API!
    */
   updateStorageElement(): void {
-    if (!this.selectedStorageElement || !this.validateForm(true)) {
+    if (!this.selectedStorageElement || !this.validateEditForm()) {
       return;
     }
 
     this.isSubmitting = true;
     this.error = null;
 
-    // Подготовка данных для обновления (только измененные поля)
+    // Подготовка данных для обновления (только измененные поля, БЕЗ mode)
     const updateData: any = {};
+
     if (this.formData.name !== this.selectedStorageElement.name) {
       updateData.name = this.formData.name;
     }
-    if (this.formData.description !== this.selectedStorageElement.description) {
+    if (this.formData.description !== (this.selectedStorageElement.description || '')) {
       updateData.description = this.formData.description;
-    }
-    if (this.formData.mode !== this.selectedStorageElement.mode) {
-      updateData.mode = this.formData.mode;
     }
     if (this.formData.api_url !== this.selectedStorageElement.api_url) {
       updateData.api_url = this.formData.api_url;
@@ -399,15 +551,13 @@ export class StorageElementsComponent implements OnInit {
     if (this.formData.status !== this.selectedStorageElement.status) {
       updateData.status = this.formData.status;
     }
-    if (this.formData.capacity_gb !== this.selectedStorageElement.capacity_gb) {
-      updateData.capacity_bytes = Math.floor((this.formData.capacity_gb || 0) * 1024 * 1024 * 1024);
-    }
     if (this.formData.retention_days !== this.selectedStorageElement.retention_days) {
       updateData.retention_days = this.formData.retention_days;
     }
     if (this.formData.replica_count !== this.selectedStorageElement.replica_count) {
       updateData.replica_count = this.formData.replica_count;
     }
+    // mode НЕ включаем - изменяется только через конфигурацию storage element
 
     this.storageElementsService.updateStorageElement(this.selectedStorageElement.id, updateData).subscribe({
       next: (updated) => {
@@ -477,44 +627,28 @@ export class StorageElementsComponent implements OnInit {
     });
   }
 
+  // ==================== Validation ====================
+
   /**
-   * Валидация формы
+   * Валидация формы создания (с auto-discovery)
    */
-  validateForm(isEdit: boolean = false): boolean {
+  validateCreateForm(): boolean {
     this.formErrors = {};
     let isValid = true;
 
-    // Валидация name
-    if (!this.formData.name || this.formData.name.trim().length < 3) {
-      this.formErrors.name = 'Name must be at least 3 characters';
+    // Обязательно: api_url
+    if (!this.formData.api_url || this.formData.api_url.trim().length === 0) {
+      this.formErrors.api_url = 'API URL is required';
       isValid = false;
-    }
-
-    // Валидация для создания (обязательные поля)
-    if (!isEdit) {
-      if (!this.formData.base_path || this.formData.base_path.trim().length === 0) {
-        this.formErrors.base_path = 'Base path is required';
-        isValid = false;
-      }
-
-      if (!this.formData.api_url || this.formData.api_url.trim().length === 0) {
-        this.formErrors.api_url = 'API URL is required';
-        isValid = false;
-      }
-    }
-
-    // Валидация API URL формата
-    if (this.formData.api_url && !this.formData.api_url.match(/^https?:\/\/.+/)) {
+    } else if (!this.formData.api_url.match(/^https?:\/\/.+/)) {
       this.formErrors.api_url = 'API URL must start with http:// or https://';
       isValid = false;
     }
 
-    // Валидация capacity_gb
-    if (this.formData.capacity_gb !== null && this.formData.capacity_gb !== undefined) {
-      if (this.formData.capacity_gb < 0) {
-        this.formErrors.capacity_gb = 'Capacity must be positive';
-        isValid = false;
-      }
+    // Опционально: name (если указано, минимум 3 символа)
+    if (this.formData.name && this.formData.name.trim().length > 0 && this.formData.name.trim().length < 3) {
+      this.formErrors.name = 'Name must be at least 3 characters';
+      isValid = false;
     }
 
     // Валидация retention_days
@@ -532,5 +666,56 @@ export class StorageElementsComponent implements OnInit {
     }
 
     return isValid;
+  }
+
+  /**
+   * Валидация формы редактирования
+   */
+  validateEditForm(): boolean {
+    this.formErrors = {};
+    let isValid = true;
+
+    // Валидация name
+    if (!this.formData.name || this.formData.name.trim().length < 3) {
+      this.formErrors.name = 'Name must be at least 3 characters';
+      isValid = false;
+    }
+
+    // Валидация API URL
+    if (this.formData.api_url && !this.formData.api_url.match(/^https?:\/\/.+/)) {
+      this.formErrors.api_url = 'API URL must start with http:// or https://';
+      isValid = false;
+    }
+
+    // Валидация retention_days
+    if (this.formData.retention_days !== null && this.formData.retention_days !== undefined) {
+      if (this.formData.retention_days < 1) {
+        this.formErrors.retention_days = 'Retention days must be at least 1';
+        isValid = false;
+      }
+    }
+
+    // Валидация replica_count
+    if (this.formData.replica_count < 0) {
+      this.formErrors.replica_count = 'Replica count cannot be negative';
+      isValid = false;
+    }
+
+    return isValid;
+  }
+
+  /**
+   * Проверка - можно ли редактировать mode
+   * Всегда false - mode только через конфигурацию storage element
+   */
+  canEditMode(): boolean {
+    return this.storageElementsService.canEditMode();
+  }
+
+  /**
+   * Получение подсказки почему mode нельзя изменить
+   */
+  getModeEditHint(): string {
+    return this.storageElementsService.getModeEditHint();
   }
 }
