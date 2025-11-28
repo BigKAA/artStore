@@ -48,6 +48,7 @@ from app.services.storage_discovery_service import (
     StorageElementDiscoveryResult
 )
 from app.services.storage_sync_service import storage_sync_service
+from app.services.storage_element_publish_service import storage_element_publish_service
 from app.core.exceptions import (
     StorageElementDiscoveryError,
     StorageElementAlreadyExistsError
@@ -254,6 +255,14 @@ async def sync_storage_element(
             }
         )
 
+        # Публикуем обновленную конфигурацию в Redis для Service Discovery
+        # Получаем storage element для публикации
+        query = select(StorageElement).where(StorageElement.id == storage_element_id)
+        result = await db.execute(query)
+        storage_element = result.scalar_one_or_none()
+        if storage_element:
+            await storage_element_publish_service.publish_on_sync(db, storage_element)
+
         return StorageElementSyncResponse(
             storage_element_id=sync_result.storage_element_id,
             name=sync_result.name,
@@ -340,6 +349,10 @@ async def sync_all_storage_elements(
                 "admin_username": current_admin.username
             }
         )
+
+        # Публикуем обновленную конфигурацию в Redis для Service Discovery
+        # после массовой синхронизации - публикуем без конкретного storage element
+        await storage_element_publish_service.publish_on_sync(db)
 
         return StorageElementSyncAllResponse(
             total=len(results),
@@ -593,6 +606,9 @@ async def create_storage_element(
                 "admin_username": current_admin.username
             }
         )
+
+        # Публикуем обновленную конфигурацию в Redis для Service Discovery
+        await storage_element_publish_service.publish_on_create(db, storage_element)
 
         # Формирование response с computed fields
         computed = calculate_computed_fields(storage_element)
@@ -875,6 +891,9 @@ async def update_storage_element(
             }
         )
 
+        # Публикуем обновленную конфигурацию в Redis для Service Discovery
+        await storage_element_publish_service.publish_on_update(db, storage_element)
+
         # Формирование response с computed fields
         computed = calculate_computed_fields(storage_element)
         item_dict = {
@@ -960,19 +979,27 @@ async def delete_storage_element(
                 )
             )
 
+        # Сохраняем имя для публикации (объект будет удален)
+        deleted_name = storage_element.name
+
         # Удаление Storage Element
         await db.delete(storage_element)
         await db.commit()
 
         logger.info(
-            f"Storage Element deleted: {storage_element.name} by {current_admin.username}",
+            f"Storage Element deleted: {deleted_name} by {current_admin.username}",
             extra={
                 "storage_element_id": storage_element_id,
-                "storage_element_name": storage_element.name,
+                "storage_element_name": deleted_name,
                 "mode": storage_element.mode.value,
                 "admin_id": str(current_admin.id),
                 "admin_username": current_admin.username
             }
+        )
+
+        # Публикуем обновленную конфигурацию в Redis для Service Discovery
+        await storage_element_publish_service.publish_on_delete(
+            db, storage_element_id, deleted_name
         )
 
         return None

@@ -3,10 +3,12 @@ APScheduler background задачи для Admin Module.
 
 Функции:
 - Автоматическая ротация JWT ключей каждые 24 часа
+- Периодическая публикация конфигурации Storage Elements в Redis
 - Background job scheduling с error handling
 - Graceful shutdown при остановке приложения
 """
 
+import asyncio
 import logging
 from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -15,8 +17,9 @@ from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from pytz import timezone as pytz_timezone
 
 from app.core.config import settings
-from app.core.database import get_sync_session
+from app.core.database import get_sync_session, create_standalone_async_session
 from app.services.jwt_key_rotation_service import get_rotation_service
+from app.services.storage_element_publish_service import storage_element_publish_service
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,53 @@ def jwt_rotation_job() -> None:
         # Закрываем session
         if session:
             session.close()
+
+
+def storage_element_publish_job() -> None:
+    """
+    Background задача для периодической публикации конфигурации Storage Elements в Redis.
+
+    Выполняется периодически согласно настройкам service_discovery.publish_interval_seconds.
+    Публикует текущую конфигурацию всех Storage Elements в Redis для Service Discovery.
+
+    Ingester и Query модули подписываются на обновления через Redis Pub/Sub
+    и получают актуальную конфигурацию без перезапуска.
+
+    Процесс:
+    1. Создание async database session
+    2. Получение всех storage elements
+    3. Публикация конфигурации в Redis
+    4. Cleanup session
+
+    Note:
+        Эта функция запускает async код через asyncio.run(),
+        так как APScheduler BackgroundScheduler работает синхронно.
+    """
+    logger.debug("Storage element publish job started")
+
+    async def _publish():
+        """Внутренняя async функция для публикации."""
+        # Создаем standalone session для нового event loop
+        session = await create_standalone_async_session()
+        try:
+            # Используем standalone метод с собственным Redis client
+            subscribers = await storage_element_publish_service.publish_scheduled_standalone(session)
+            logger.debug(
+                f"Storage element config published to {subscribers} subscribers"
+            )
+        except Exception as e:
+            logger.error(
+                f"Storage element publish job failed: {e}",
+                exc_info=True
+            )
+        finally:
+            await session.close()
+
+    try:
+        # Запускаем async функцию в sync контексте
+        asyncio.run(_publish())
+    except Exception as e:
+        logger.error(f"Storage element publish job failed with exception: {e}", exc_info=True)
 
 
 def job_listener(event) -> None:
@@ -155,6 +205,28 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             logger.info(
                 f"JWT key rotation job scheduled: "
                 f"interval={settings.scheduler.jwt_rotation_interval_hours}h, "
+                f"timezone={settings.scheduler.timezone}"
+            )
+
+        # Storage Element Publish job для Service Discovery
+        if settings.service_discovery.enabled:
+            _scheduler.add_job(
+                func=storage_element_publish_job,
+                trigger=IntervalTrigger(
+                    seconds=settings.service_discovery.publish_interval_seconds,
+                    timezone=tz
+                ),
+                id="storage_element_publish",
+                name="Storage Element Config Publish",
+                replace_existing=True,
+                max_instances=1,  # Только одна инстанция job может выполняться одновременно
+                coalesce=True,  # Если пропущено несколько запусков, выполнить только один
+                misfire_grace_time=60  # 1 минута grace period для missed jobs
+            )
+
+            logger.info(
+                f"Storage element publish job scheduled: "
+                f"interval={settings.service_discovery.publish_interval_seconds}s, "
                 f"timezone={settings.scheduler.timezone}"
             )
 

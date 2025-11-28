@@ -1,5 +1,5 @@
 """
-JWT Key Rotation Service с distributed locking через Redis.
+JWT Key Rotation Service с distributed locking через Redis (ASYNC).
 
 Функции:
 - Автоматическая ротация RSA ключей каждые 24 часа
@@ -7,16 +7,20 @@ JWT Key Rotation Service с distributed locking через Redis.
 - Graceful transition period (25h validity = 24h + 1h overlap)
 - Cleanup expired keys с сохранением audit trail
 - Prometheus metrics для monitoring
+
+ВАЖНО: Redis работает в АСИНХРОННОМ режиме (redis.asyncio)
+согласно архитектурным требованиям ArtStore проекта.
 """
 
 from datetime import datetime, timezone
 import logging
 from typing import Optional
-import time
+import asyncio
 
-from redis import Redis
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.redis import get_redis
 from app.models.jwt_key import JWTKey
@@ -32,14 +36,16 @@ logger = logging.getLogger(__name__)
 
 class JWTKeyRotationService:
     """
-    Сервис ротации JWT ключей с distributed locking.
+    Сервис ротации JWT ключей с distributed locking (ASYNC).
 
     Features:
-    - Redis distributed lock для cluster-safe rotation
+    - Redis distributed lock для cluster-safe rotation (async)
     - Automatic cleanup expired keys
     - Graceful transition period (25h validity)
     - Comprehensive error handling и logging
     - Prometheus metrics integration
+
+    ВАЖНО: Все методы работы с Redis асинхронные.
     """
 
     # Redis lock configuration
@@ -51,44 +57,54 @@ class JWTKeyRotationService:
     # Key rotation configuration
     KEY_VALIDITY_HOURS = 25  # 24h + 1h grace period
 
-    def __init__(self, redis_client: Optional[Redis] = None):
+    def __init__(self):
         """
         Инициализация JWT Key Rotation Service.
 
-        Args:
-            redis_client: Redis client (если None, использует get_redis())
+        Redis client инициализируется асинхронно при первом использовании.
         """
-        self.redis = redis_client or get_redis()
+        self._redis: Optional[Redis] = None
 
-    def rotate_keys(self, session: Session) -> bool:
+    async def _get_redis(self) -> Redis:
         """
-        Выполнение ротации JWT ключей с distributed locking.
+        Получение асинхронного Redis клиента (lazy initialization).
+
+        Returns:
+            Redis: Async Redis клиент
+        """
+        if self._redis is None:
+            self._redis = await get_redis()
+        return self._redis
+
+    async def rotate_keys(self, session: AsyncSession) -> bool:
+        """
+        Асинхронное выполнение ротации JWT ключей с distributed locking.
 
         Процесс:
-        1. Получение distributed lock через Redis
+        1. Получение distributed lock через Redis (async)
         2. Cleanup expired keys
         3. Создание нового ключа
         4. Commit транзакции
         5. Освобождение lock
 
         Args:
-            session: Database session
+            session: Async Database session
 
         Returns:
             bool: True если ротация успешна, False иначе
 
         Example:
-            success = rotation_service.rotate_keys(db_session)
+            success = await rotation_service.rotate_keys(db_session)
             if success:
                 logger.info("JWT key rotation completed successfully")
         """
         lock_acquired = False
-        lock_value = f"{int(time.time() * 1000)}"  # Уникальный идентификатор lock
-        start_time = time.time()  # Измеряем время выполнения
+        lock_value = f"{int(asyncio.get_event_loop().time() * 1000)}"  # Уникальный идентификатор lock
+        start_time = asyncio.get_event_loop().time()
 
         try:
             # Попытка получить distributed lock с retry logic
-            lock_acquired = self._acquire_lock(lock_value)
+            lock_acquired = await self._acquire_lock(lock_value)
 
             if not lock_acquired:
                 logger.warning(
@@ -100,25 +116,25 @@ class JWTKeyRotationService:
             logger.info("Acquired rotation lock, starting key rotation")
 
             # Cleanup expired keys
-            deactivated_count = JWTKey.cleanup_expired_keys(session)
+            deactivated_count = await JWTKey.cleanup_expired_keys(session)
             logger.info(f"Deactivated {deactivated_count} expired keys")
 
             # Создание нового ключа
-            new_key = JWTKey.create_new_key(
+            new_key = await JWTKey.create_new_key(
                 session=session,
                 validity_hours=self.KEY_VALIDITY_HOURS
             )
 
             # Инкремент rotation_count для всех активных ключей
-            active_keys = JWTKey.get_active_keys(session)
+            active_keys = await JWTKey.get_active_keys(session)
             for key in active_keys:
                 key.rotation_count += 1
 
             # Добавление нового ключа в БД
             session.add(new_key)
-            session.commit()
+            await session.commit()
 
-            duration = time.time() - start_time
+            duration = asyncio.get_event_loop().time() - start_time
 
             logger.info(
                 f"JWT key rotation completed successfully. "
@@ -128,7 +144,7 @@ class JWTKeyRotationService:
             )
 
             # Метрики для Prometheus
-            self._record_rotation_metrics(
+            await self._record_rotation_metrics(
                 success=True,
                 deactivated_count=deactivated_count,
                 duration_seconds=duration,
@@ -138,12 +154,12 @@ class JWTKeyRotationService:
             return True
 
         except Exception as e:
-            duration = time.time() - start_time
+            duration = asyncio.get_event_loop().time() - start_time
             logger.error(f"JWT key rotation failed: {e}", exc_info=True)
-            session.rollback()
+            await session.rollback()
 
             # Метрики для Prometheus
-            self._record_rotation_metrics(
+            await self._record_rotation_metrics(
                 success=False,
                 error=str(e),
                 duration_seconds=duration,
@@ -155,12 +171,12 @@ class JWTKeyRotationService:
         finally:
             # Обязательно освобождаем lock
             if lock_acquired:
-                self._release_lock(lock_value)
+                await self._release_lock(lock_value)
                 logger.info("Released rotation lock")
 
-    def _acquire_lock(self, lock_value: str) -> bool:
+    async def _acquire_lock(self, lock_value: str) -> bool:
         """
-        Получение distributed lock через Redis с retry logic.
+        Асинхронное получение distributed lock через Redis с retry logic.
 
         Args:
             lock_value: Уникальный идентификатор lock
@@ -168,12 +184,14 @@ class JWTKeyRotationService:
         Returns:
             bool: True если lock получен, False иначе
         """
+        redis = await self._get_redis()
+
         for attempt in range(self.LOCK_MAX_RETRIES):
             try:
                 # SET key value NX EX timeout
                 # NX = Set if Not eXists (получить lock только если его нет)
                 # EX = EXpire time в секундах
-                acquired = self.redis.set(
+                acquired = await redis.set(
                     self.LOCK_KEY,
                     lock_value,
                     nx=True,  # Only set if key doesn't exist
@@ -191,7 +209,7 @@ class JWTKeyRotationService:
                         f"Lock not available (attempt {attempt + 1}/{self.LOCK_MAX_RETRIES}), "
                         f"retrying in {self.LOCK_RETRY_DELAY}s"
                     )
-                    time.sleep(self.LOCK_RETRY_DELAY)
+                    await asyncio.sleep(self.LOCK_RETRY_DELAY)
 
             except RedisError as e:
                 logger.error(f"Redis error during lock acquisition: {e}")
@@ -202,9 +220,9 @@ class JWTKeyRotationService:
         record_rotation_lock_attempt(result="timeout")
         return False
 
-    def _release_lock(self, lock_value: str) -> bool:
+    async def _release_lock(self, lock_value: str) -> bool:
         """
-        Освобождение distributed lock через Redis.
+        Асинхронное освобождение distributed lock через Redis.
 
         Использует Lua script для atomic check-and-delete:
         - Проверяет что текущий lock принадлежит нам (lock_value совпадает)
@@ -217,6 +235,8 @@ class JWTKeyRotationService:
             bool: True если lock освобожден, False иначе
         """
         try:
+            redis = await self._get_redis()
+
             # Lua script для atomic check-and-delete
             # Проверяем что lock принадлежит нам перед удалением
             lua_script = """
@@ -227,7 +247,7 @@ class JWTKeyRotationService:
             end
             """
 
-            result = self.redis.eval(lua_script, 1, self.LOCK_KEY, lock_value)
+            result = await redis.eval(lua_script, 1, self.LOCK_KEY, lock_value)
 
             if result == 1:
                 logger.debug("Lock released successfully")
@@ -240,22 +260,22 @@ class JWTKeyRotationService:
             logger.error(f"Redis error during lock release: {e}")
             return False
 
-    def check_rotation_needed(self, session: Session) -> bool:
+    async def check_rotation_needed(self, session: AsyncSession) -> bool:
         """
-        Проверка необходимости ротации ключей.
+        Асинхронная проверка необходимости ротации ключей.
 
         Ротация нужна если:
         - Нет активных ключей
         - Самый новый ключ скоро истечет (< 1 час до expiration)
 
         Args:
-            session: Database session
+            session: Async Database session
 
         Returns:
             bool: True если ротация необходима, False иначе
         """
         try:
-            latest_key = JWTKey.get_latest_active_key(session)
+            latest_key = await JWTKey.get_latest_active_key(session)
 
             if not latest_key:
                 logger.warning("No active JWT keys found, rotation needed")
@@ -283,12 +303,12 @@ class JWTKeyRotationService:
             # В случае ошибки лучше попробовать ротацию
             return True
 
-    def get_rotation_status(self, session: Session) -> dict:
+    async def get_rotation_status(self, session: AsyncSession) -> dict:
         """
-        Получение статуса JWT key rotation.
+        Асинхронное получение статуса JWT key rotation.
 
         Args:
-            session: Database session
+            session: Async Database session
 
         Returns:
             dict: Статус ротации с метриками
@@ -303,8 +323,8 @@ class JWTKeyRotationService:
             }
         """
         try:
-            active_keys = JWTKey.get_active_keys(session)
-            latest_key = JWTKey.get_latest_active_key(session)
+            active_keys = await JWTKey.get_active_keys(session)
+            latest_key = await JWTKey.get_latest_active_key(session)
 
             if not latest_key:
                 return {
@@ -325,7 +345,7 @@ class JWTKeyRotationService:
                 "latest_key_expires_at": latest_key.expires_at.isoformat(),
                 "hours_until_expiry": round(hours_until_expiry, 2),
                 "rotation_needed": hours_until_expiry < 1,
-                "lock_status": self._check_lock_status()
+                "lock_status": await self._check_lock_status()
             }
 
         except Exception as e:
@@ -334,18 +354,19 @@ class JWTKeyRotationService:
                 "error": str(e)
             }
 
-    def _check_lock_status(self) -> dict:
+    async def _check_lock_status(self) -> dict:
         """
-        Проверка статуса distributed lock.
+        Асинхронная проверка статуса distributed lock.
 
         Returns:
             dict: Статус lock
         """
         try:
-            lock_value = self.redis.get(self.LOCK_KEY)
+            redis = await self._get_redis()
+            lock_value = await redis.get(self.LOCK_KEY)
 
             if lock_value:
-                ttl = self.redis.ttl(self.LOCK_KEY)
+                ttl = await redis.ttl(self.LOCK_KEY)
                 return {
                     "locked": True,
                     "ttl_seconds": ttl
@@ -361,21 +382,21 @@ class JWTKeyRotationService:
                 "error": str(e)
             }
 
-    def _record_rotation_metrics(
+    async def _record_rotation_metrics(
         self,
         success: bool,
         duration_seconds: float,
-        session: Session,
+        session: AsyncSession,
         deactivated_count: int = 0,
         error: Optional[str] = None
     ) -> None:
         """
-        Запись метрик ротации для Prometheus.
+        Асинхронная запись метрик ротации для Prometheus.
 
         Args:
             success: Успешность ротации
             duration_seconds: Время выполнения ротации в секундах
-            session: Database session для подсчета ключей
+            session: Async Database session для подсчета ключей
             deactivated_count: Количество деактивированных ключей
             error: Текст ошибки если ротация failed
         """
@@ -384,8 +405,9 @@ class JWTKeyRotationService:
             record_jwt_rotation(success=success, duration_seconds=duration_seconds)
 
             if success:
-                # Обновление счетчиков ключей
-                all_keys = session.query(JWTKey).all()
+                # Получаем все ключи для подсчета
+                result = await session.execute(select(JWTKey))
+                all_keys = result.scalars().all()
                 active_keys = [key for key in all_keys if key.is_active]
 
                 update_jwt_keys_count(
@@ -394,7 +416,7 @@ class JWTKeyRotationService:
                 )
 
                 # Обновление времени до истечения latest ключа
-                latest_key = JWTKey.get_latest_active_key(session)
+                latest_key = await JWTKey.get_latest_active_key(session)
                 if latest_key:
                     now = datetime.now(timezone.utc)
                     time_until_expiry = latest_key.expires_at - now
@@ -417,8 +439,6 @@ class JWTKeyRotationService:
         except Exception as e:
             # Не прерываем rotation из-за ошибки метрик
             logger.warning(f"Failed to record rotation metrics: {e}", exc_info=True)
-        # else:
-        #     jwt_rotation_failed.inc()
 
         log_data = {
             "success": success,
@@ -436,7 +456,7 @@ class JWTKeyRotationService:
 _rotation_service: Optional[JWTKeyRotationService] = None
 
 
-def get_rotation_service() -> JWTKeyRotationService:
+async def get_rotation_service() -> JWTKeyRotationService:
     """
     Получение singleton instance JWTKeyRotationService.
 
@@ -444,13 +464,13 @@ def get_rotation_service() -> JWTKeyRotationService:
         JWTKeyRotationService: Rotation service instance
 
     Example:
-        service = get_rotation_service()
-        success = service.rotate_keys(db_session)
+        service = await get_rotation_service()
+        success = await service.rotate_keys(db_session)
     """
     global _rotation_service
 
     if _rotation_service is None:
         _rotation_service = JWTKeyRotationService()
-        logger.info("JWT Key Rotation Service initialized")
+        logger.info("JWT Key Rotation Service initialized (async)")
 
     return _rotation_service

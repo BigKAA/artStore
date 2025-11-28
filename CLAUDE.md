@@ -63,7 +63,7 @@ ArtStore - это распределенная система файлового
 
 1. **Attribute-First Storage Model**: Файлы `*.attr.json` - единственный источник истины для метаданных
 2. **JWT RS256 Authentication**: Центральная аутентификация через Admin Module с публичным ключом
-3. **Redis SYNC Mode**: Все модули используют синхронный redis-py (не asyncio) для Service Discovery
+3. **Redis ASYNC Mode**: Все модули используют **асинхронный** `redis.asyncio` (НЕ синхронный redis-py) для Service Discovery и кеширования
 4. **PostgreSQL ASYNC**: Database операции через asyncpg
 5. **WAL Protocol**: Write-Ahead Log для атомарности операций с файлами
 6. **Saga Pattern**: Координация распределенных транзакций через Admin Module
@@ -74,6 +74,55 @@ ArtStore - это распределенная система файлового
 - Admin Module публикует конфигурацию storage-elements в Redis
 - Ingester/Query подписываются на обновления через Redis Pub/Sub
 - Fallback на локальную конфигурацию при недоступности Redis
+
+### Redis Async Usage Pattern
+
+**КРИТИЧЕСКИ ВАЖНО**: Все модули используют **асинхронный** `redis.asyncio`, а НЕ синхронный `redis-py`.
+
+**Правильная реализация** (см. `admin-module/app/core/redis.py`):
+
+```python
+import redis.asyncio as aioredis
+from redis.asyncio import Redis
+from redis.asyncio.client import PubSub
+
+# Создание async client
+async def get_redis() -> Redis:
+    client = await aioredis.from_url(
+        settings.redis.url,
+        max_connections=settings.redis.pool_size,
+        decode_responses=True
+    )
+    return client
+
+# Использование в FastAPI endpoints
+@app.get("/cache")
+async def get_cache():
+    redis_client = await get_redis()
+    value = await redis_client.get("key")  # await обязателен!
+    return {"value": value}
+
+# Service Discovery через Pub/Sub
+async def subscribe_to_updates():
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(channel)
+
+    async for message in pubsub.listen():
+        if message["type"] == "message":
+            await handle_update(message["data"])
+```
+
+**Почему async**:
+- Неблокирующая работа с event loop FastAPI
+- Высокая производительность при concurrent requests
+- Корректная интеграция с asyncpg и другими async компонентами
+- Избежание blocking I/O в async контексте
+
+**Примеры операций**:
+- `await redis.get(key)` - чтение
+- `await redis.set(key, value, ex=3600)` - запись с TTL
+- `await redis.publish(channel, message)` - публикация
+- `async for msg in pubsub.listen()` - подписка
 
 ## Быстрый старт
 
@@ -274,7 +323,7 @@ curl -X POST http://localhost:8000/api/auth/token \
 2. **Attribute Files First**: Всегда сначала запись в `*.attr.json`, затем в DB cache
 3. **Stateless Design**: Все модули должны быть stateless
 4. **Circuit Breaker**: Обязателен для всех inter-service communications
-5. **Redis SYNC Mode**: Используй синхронный redis-py для Service Discovery
+5. **Redis ASYNC Mode**: Используй **асинхронный** `redis.asyncio` (НЕ синхронный redis-py) для Service Discovery и кеширования
 6. **PostgreSQL ASYNC**: Используй asyncpg для database операций
 
 ## Мониторинг

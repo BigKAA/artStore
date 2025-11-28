@@ -11,7 +11,8 @@ from datetime import datetime
 
 from app.core.config import settings
 from app.core.database import init_db, close_db, check_db_connection, get_db
-from app.core.redis import close_redis, check_redis_connection, service_discovery, redis_client
+from app.core.redis import close_redis, check_redis_connection, service_discovery
+from app.services.storage_element_publish_service import storage_element_publish_service
 from app.core.logging_config import setup_logging, get_logger
 from app.core.observability import setup_observability
 from app.core.scheduler import init_scheduler, shutdown_scheduler
@@ -52,15 +53,25 @@ async def lifespan(app: FastAPI):
 
         # Проверка подключений
         db_ok = await check_db_connection()
-        redis_ok = check_redis_connection()  # Синхронный вызов для Redis
+        redis_ok = await check_redis_connection()  # Async вызов для Redis
 
         if not db_ok:
             logger.error("Database connection failed!")
         if not redis_ok:
             logger.warning("Redis connection failed (non-critical)")
 
-        # Инициализация Service Discovery
-        service_discovery.initialize()  # Синхронный вызов
+        # Инициализация Service Discovery (async)
+        await service_discovery.initialize()
+
+        # Публикация начальной конфигурации Storage Elements при startup
+        # Используем тот же цикл db session
+        async for db in get_db():
+            try:
+                await storage_element_publish_service.publish_startup(db)
+                logger.info("Initial storage element config published to Redis")
+            finally:
+                await db.close()
+            break  # Получаем только одну сессию
 
         # Инициализация APScheduler для background задач
         init_scheduler()
@@ -82,8 +93,8 @@ async def lifespan(app: FastAPI):
         shutdown_scheduler()
         logger.info("APScheduler shut down")
 
-        service_discovery.close()  # Синхронный вызов
-        close_redis()  # Синхронный вызов
+        await service_discovery.close()  # Async вызов
+        await close_redis()  # Async вызов
         await close_db()
         logger.info("Application shutdown complete")
 
@@ -130,7 +141,8 @@ if settings.cors.enabled:
     )
 
 # Rate Limiting middleware для Service Accounts
-app.add_middleware(RateLimitMiddleware, redis_client=redis_client)
+# Middleware создает свой синхронный Redis клиент (будет переделан на async в Фазе 5)
+app.add_middleware(RateLimitMiddleware)
 logger.info("Rate limiting middleware enabled")
 
 # Audit Logging middleware для security compliance

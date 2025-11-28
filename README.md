@@ -84,7 +84,7 @@
 - **SQLAlchemy** (async mode) для работы с PostgreSQL
 - **Asyncpg** для высокопроизводительного доступа к БД
 - **Alembic** для миграций схемы БД
-- **Redis-py** (синхронный режим) для Service Discovery
+- **Redis.asyncio** (асинхронный режим) для Service Discovery и кеширования
 - **Pydantic** для валидации данных и конфигурации
 
 ### Frontend

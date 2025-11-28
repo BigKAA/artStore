@@ -10,7 +10,7 @@ asyncpg==0.30.0
 SQLAlchemy==2.0.36
 alembic==1.14.0
 
-# Redis для кеширования (SYNC режим согласно архитектуре)
+# Redis для кеширования (ASYNC режим - redis.asyncio)
 redis==5.2.1
 
 # JWT authentication (RS256)

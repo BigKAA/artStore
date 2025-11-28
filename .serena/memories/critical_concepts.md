@@ -58,27 +58,43 @@ docker-compose up -d  # НЕ ДЕЛАТЬ ТАК!
 
 **Никогда не использовать HS256 (симметричная)!**
 
-### 4. Redis SYNC Mode для Service Discovery
+### 4. Redis ASYNC Mode для Service Discovery и кеширования
 
-**ВАЖНО: Redis используется СИНХРОННО для Service Discovery**
+**🔴 КРИТИЧЕСКИ ВАЖНО: Redis используется АСИНХРОННО (redis.asyncio)**
 
 ```python
-# ✅ Правильно - синхронный redis-py
-import redis
-
-redis_client = redis.Redis(host='redis', port=6379)
-redis_client.set('key', 'value')
-
-# ❌ Неправильно - asyncio для Service Discovery
+# ✅ Правильно - асинхронный redis.asyncio
 import redis.asyncio as aioredis
+from redis.asyncio import Redis
 
-redis_client = await aioredis.from_url('redis://redis:6379')
+async def get_redis() -> Redis:
+    client = await aioredis.from_url(
+        settings.redis.url,
+        max_connections=settings.redis.pool_size,
+        decode_responses=True
+    )
+    return client
+
+# Использование в FastAPI endpoints
+@app.get("/cache")
+async def get_cache():
+    redis_client = await get_redis()
+    value = await redis_client.get("key")  # await обязателен!
+    return {"value": value}
+
+# ❌ Неправильно - синхронный redis-py
+import redis
+redis_client = redis.Redis(host='redis', port=6379)
+redis_client.set('key', 'value')  # Блокирует event loop!
 ```
 
-**Почему:**
-- Service Discovery требует синхронной надежности
-- Simplicity > Performance для конфигурации
-- Async используется для PostgreSQL (asyncpg), не Redis
+**Почему ASYNC:**
+- Неблокирующая работа с event loop FastAPI
+- Высокая производительность при concurrent requests
+- Корректная интеграция с asyncpg и другими async компонентами
+- Избежание blocking I/O в async контексте
+
+**Эталонная реализация:** `admin-module/app/core/redis.py`
 
 ### 5. PostgreSQL ASYNC через asyncpg
 
@@ -157,23 +173,24 @@ async def fetch_from_storage(file_id: str):
 
 ### 9. Service Discovery Protocol
 
-**Publish-Subscribe через Redis:**
+**Publish-Subscribe через Redis (ASYNC):**
 
 ```python
-# Admin Module публикует конфигурацию
-redis_client.publish(
+# Admin Module публикует конфигурацию (async)
+redis_client = await get_redis()
+await redis_client.publish(
     'storage-elements:config',
     json.dumps(storage_elements_list)
 )
 
-# Ingester/Query подписываются на обновления
+# Ingester/Query подписываются на обновления (async)
 pubsub = redis_client.pubsub()
-pubsub.subscribe('storage-elements:config')
+await pubsub.subscribe('storage-elements:config')
 
-for message in pubsub.listen():
+async for message in pubsub.listen():
     if message['type'] == 'message':
         config = json.loads(message['data'])
-        update_local_config(config)
+        await update_local_config(config)
 ```
 
 **Fallback:** Локальная конфигурация при недоступности Redis
@@ -313,7 +330,7 @@ GET /metrics
 
 **Query Module:**
 1. Local in-memory cache (TTL 5 min)
-2. Redis cache (TTL 1 hour)
+2. Redis cache (TTL 1 hour) - **ASYNC**
 3. PostgreSQL cache table (TTL 24 hours)
 4. attr.json файлы (источник истины)
 
@@ -355,3 +372,4 @@ async def upload_file(file: UploadFile):
 - [ ] ⚠️ Database backups настроены
 - [ ] ⚠️ Circuit breakers протестированы
 - [ ] ⚠️ CORS политики настроены корректно
+- [ ] ⚠️ Redis ASYNC mode используется везде (не sync)

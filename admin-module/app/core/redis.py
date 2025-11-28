@@ -1,14 +1,14 @@
 """
-Подключение к Redis для кеширования и Service Discovery.
-Использует синхронный redis-py с connection pooling.
+Асинхронное подключение к Redis для кеширования и Service Discovery.
+Использует redis.asyncio с async connection pooling.
 
-ВАЖНО: Redis работает в СИНХРОННОМ режиме для всех модулей ArtStore.
-Это архитектурное решение для упрощения координации и Service Discovery.
+ВАЖНО: Redis работает в АСИНХРОННОМ режиме для всех операций Admin Module.
+Это обеспечивает неблокирующую работу с event loop FastAPI.
 """
 
-import redis
-from redis import Redis, ConnectionPool
-from redis.client import PubSub
+import redis.asyncio as aioredis
+from redis.asyncio import Redis
+from redis.asyncio.client import PubSub
 from typing import Optional
 import logging
 import json
@@ -18,122 +18,110 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-# Global Redis connection pool
-_redis_pool: Optional[ConnectionPool] = None
+# Global async Redis client
 _redis_client: Optional[Redis] = None
 
 
-def get_redis_pool() -> ConnectionPool:
+async def get_redis() -> Redis:
     """
-    Получение Redis connection pool.
-    Создается только один раз при первом вызове.
+    Получение асинхронного Redis клиента.
+    Создается один раз при первом вызове (lazy initialization).
 
     Returns:
-        ConnectionPool: Redis connection pool
-    """
-    global _redis_pool
+        Redis: Async Redis клиент
 
-    if _redis_pool is None:
-        _redis_pool = ConnectionPool.from_url(
+    Example:
+        @app.get("/cache")
+        async def get_cache():
+            redis_client = await get_redis()
+            value = await redis_client.get("key")
+            return {"value": value}
+    """
+    global _redis_client
+
+    if _redis_client is None:
+        _redis_client = await aioredis.from_url(
             settings.redis.url,
             max_connections=settings.redis.pool_size,
             socket_timeout=settings.redis.socket_timeout,
             socket_connect_timeout=settings.redis.socket_connect_timeout,
             decode_responses=True,  # Автоматическая декодировка bytes в str
         )
-        logger.info("Redis connection pool created (sync mode)")
-
-    return _redis_pool
-
-
-def get_redis() -> Redis:
-    """
-    Получение Redis client.
-    Используется в FastAPI endpoints.
-
-    Returns:
-        Redis: Redis sync client
-
-    Example:
-        @app.get("/cache")
-        def get_cache():
-            redis_client = get_redis()
-            value = redis_client.get("key")
-            return {"value": value}
-    """
-    global _redis_client
-
-    if _redis_client is None:
-        pool = get_redis_pool()
-        _redis_client = Redis(connection_pool=pool)
-        logger.info("Redis client created (sync mode)")
+        logger.info("Async Redis client created")
 
     return _redis_client
 
 
-def check_redis_connection() -> bool:
+async def check_redis_connection() -> bool:
     """
-    Проверка подключения к Redis.
+    Проверка подключения к Redis (async).
     Используется в health checks.
 
     Returns:
         bool: True если подключение работает, False иначе
     """
     try:
-        client = get_redis()
-        client.ping()
+        client = await get_redis()
+        await client.ping()
         return True
     except Exception as e:
         logger.error(f"Redis connection check failed: {e}")
         return False
 
 
-def close_redis() -> None:
+async def close_redis() -> None:
     """
-    Закрытие Redis подключений.
+    Закрытие Redis подключений (async).
     Вызывается при shutdown приложения.
     """
-    global _redis_client, _redis_pool
+    global _redis_client
 
     if _redis_client:
-        _redis_client.close()
+        await _redis_client.close()
         _redis_client = None
-        logger.info("Redis client closed")
-
-    if _redis_pool:
-        _redis_pool.disconnect()
-        _redis_pool = None
-        logger.info("Redis connection pool closed")
+        logger.info("Async Redis client closed")
 
 
 class ServiceDiscovery:
     """
-    Service Discovery через Redis Pub/Sub (синхронный режим).
+    Service Discovery через Redis Pub/Sub (АСИНХРОННЫЙ режим).
     Admin Module публикует конфигурацию storage elements.
     Ingester/Query модули подписываются на обновления.
 
-    ВАЖНО: Работает в синхронном режиме для упрощения координации.
+    ВАЖНО: Все методы асинхронные для неблокирующей работы с event loop.
     """
 
     def __init__(self):
         self.redis: Optional[Redis] = None
         self.pubsub: Optional[PubSub] = None
 
-    def initialize(self):
-        """Инициализация Service Discovery."""
+    async def initialize(self) -> None:
+        """
+        Асинхронная инициализация Service Discovery.
+        Вызывается при startup приложения.
+        """
         if not settings.service_discovery.enabled:
             logger.info("Service Discovery disabled")
             return
 
-        self.redis = get_redis()
-        logger.info("Service Discovery initialized (sync mode)")
+        self.redis = await get_redis()
+        logger.info("Service Discovery initialized (async mode)")
 
-    def publish_storage_element_config(self, config: dict) -> int:
+    async def publish_storage_element_config(
+        self,
+        config: dict,
+        action: str = "manual",
+        storage_element_id: Optional[int] = None,
+        storage_element_name: Optional[str] = None
+    ) -> int:
         """
-        Публикация конфигурации storage element.
+        Асинхронная публикация конфигурации storage element.
 
         Args:
-            config: Конфигурация storage element в формате dict
+            config: Конфигурация storage elements в формате dict
+            action: Тип действия (created/updated/deleted/synced/scheduled/startup)
+            storage_element_id: ID измененного storage element (для событийных операций)
+            storage_element_name: Имя измененного storage element
 
         Returns:
             int: Количество подписчиков, получивших сообщение
@@ -144,31 +132,45 @@ class ServiceDiscovery:
 
         try:
             # Сохраняем конфигурацию в Redis
-            self.redis.set(
+            await self.redis.set(
                 settings.service_discovery.storage_element_config_key,
                 json.dumps(config),
                 ex=3600  # TTL 1 час
             )
 
+            # Формируем событие для Pub/Sub
+            event = {
+                "event": "storage_element_config_updated",
+                "timestamp": datetime.utcnow().isoformat(),
+                "action": action,
+                "version": config.get("version", 1),
+                "count": config.get("count", 0)
+            }
+
+            if storage_element_id:
+                event["storage_element_id"] = storage_element_id
+            if storage_element_name:
+                event["storage_element_name"] = storage_element_name
+
             # Публикуем событие об обновлении
-            subscribers = self.redis.publish(
+            subscribers = await self.redis.publish(
                 settings.service_discovery.redis_channel,
-                json.dumps({
-                    "event": "storage_element_config_updated",
-                    "timestamp": datetime.utcnow().isoformat()
-                })
+                json.dumps(event)
             )
 
-            logger.info(f"Published storage element config to {subscribers} subscribers")
+            logger.info(
+                f"Published storage element config: action={action}, "
+                f"count={config.get('count', 0)}, subscribers={subscribers}"
+            )
             return subscribers
 
         except Exception as e:
             logger.error(f"Failed to publish storage element config: {e}")
             return 0
 
-    def get_storage_element_config(self) -> Optional[dict]:
+    async def get_storage_element_config(self) -> Optional[dict]:
         """
-        Получение текущей конфигурации storage elements.
+        Асинхронное получение текущей конфигурации storage elements.
 
         Returns:
             Optional[dict]: Конфигурация или None если не найдена
@@ -178,7 +180,7 @@ class ServiceDiscovery:
             return None
 
         try:
-            config_json = self.redis.get(
+            config_json = await self.redis.get(
                 settings.service_discovery.storage_element_config_key
             )
 
@@ -191,13 +193,17 @@ class ServiceDiscovery:
             logger.error(f"Failed to get storage element config: {e}")
             return None
 
-    def subscribe_to_updates(self):
+    async def subscribe_to_updates(self):
         """
-        Подписка на обновления конфигурации (генератор).
+        Асинхронная подписка на обновления конфигурации (async generator).
         Используется Ingester/Query модулями.
 
         Yields:
             dict: Сообщения о обновлениях
+
+        Example:
+            async for update in service_discovery.subscribe_to_updates():
+                await handle_config_update(update)
         """
         if not self.redis:
             logger.warning("Service Discovery not initialized")
@@ -205,11 +211,11 @@ class ServiceDiscovery:
 
         try:
             self.pubsub = self.redis.pubsub()
-            self.pubsub.subscribe(settings.service_discovery.redis_channel)
+            await self.pubsub.subscribe(settings.service_discovery.redis_channel)
 
             logger.info(f"Subscribed to {settings.service_discovery.redis_channel}")
 
-            for message in self.pubsub.listen():
+            async for message in self.pubsub.listen():
                 if message["type"] == "message":
                     try:
                         data = json.loads(message["data"])
@@ -223,18 +229,93 @@ class ServiceDiscovery:
 
         finally:
             if self.pubsub:
-                self.pubsub.unsubscribe(settings.service_discovery.redis_channel)
-                self.pubsub.close()
+                await self.pubsub.unsubscribe(settings.service_discovery.redis_channel)
+                await self.pubsub.close()
 
-    def close(self):
-        """Закрытие Service Discovery."""
+    async def close(self) -> None:
+        """
+        Асинхронное закрытие Service Discovery.
+        Вызывается при shutdown приложения.
+        """
         if self.pubsub:
-            self.pubsub.close()
+            await self.pubsub.close()
         logger.info("Service Discovery closed")
 
 
 # Глобальный экземпляр Service Discovery
 service_discovery = ServiceDiscovery()
 
-# Глобальный Redis client для использования в middleware и других компонентах
-redis_client = get_redis()
+
+async def publish_storage_element_config_standalone(
+    config: dict,
+    action: str = "manual",
+    storage_element_id: Optional[int] = None,
+    storage_element_name: Optional[str] = None
+) -> int:
+    """
+    Standalone функция публикации конфигурации для background jobs.
+
+    Создает собственный Redis client для использования в отдельном event loop
+    (например, в APScheduler background jobs).
+
+    ВАЖНО: НЕ ИСПОЛЬЗОВАТЬ в FastAPI endpoints - там используйте service_discovery.
+
+    Args:
+        config: Конфигурация storage elements
+        action: Тип действия (created/updated/deleted/synced/scheduled/startup)
+        storage_element_id: ID storage element (опционально)
+        storage_element_name: Имя storage element (опционально)
+
+    Returns:
+        int: Количество подписчиков, получивших обновление
+    """
+    try:
+        # Создаем standalone Redis client для этого event loop
+        standalone_redis = await aioredis.from_url(
+            settings.redis.url,
+            max_connections=2,
+            socket_timeout=settings.redis.socket_timeout,
+            socket_connect_timeout=settings.redis.socket_connect_timeout,
+            decode_responses=True,
+        )
+
+        try:
+            # Сохраняем конфигурацию в Redis
+            await standalone_redis.set(
+                settings.service_discovery.storage_element_config_key,
+                json.dumps(config),
+                ex=3600  # TTL 1 час
+            )
+
+            # Формируем событие для Pub/Sub
+            event = {
+                "event": "storage_element_config_updated",
+                "timestamp": datetime.utcnow().isoformat(),
+                "action": action,
+                "version": config.get("version", 1),
+                "count": config.get("count", 0)
+            }
+
+            if storage_element_id:
+                event["storage_element_id"] = storage_element_id
+            if storage_element_name:
+                event["storage_element_name"] = storage_element_name
+
+            # Публикуем событие об обновлении
+            subscribers = await standalone_redis.publish(
+                settings.service_discovery.redis_channel,
+                json.dumps(event)
+            )
+
+            logger.info(
+                f"Published storage element config (standalone): action={action}, "
+                f"count={config.get('count', 0)}, subscribers={subscribers}"
+            )
+            return subscribers
+
+        finally:
+            await standalone_redis.close()
+
+    except Exception as e:
+        logger.error(f"Failed to publish storage element config (standalone): {e}")
+        return 0
