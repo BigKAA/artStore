@@ -72,10 +72,11 @@ class AppSettings(BaseSettings):
     name: str = "artstore-ingester"
     version: str = "0.1.0"
     debug: bool = False
+    swagger_enabled: bool = False  # Production-first: Swagger отключен по умолчанию
     host: str = "0.0.0.0"
     port: int = 8020
 
-    @field_validator("debug", mode="before")
+    @field_validator("debug", "swagger_enabled", mode="before")
     @classmethod
     def parse_bool_fields(cls, v):
         """Парсинг boolean полей из environment variables."""

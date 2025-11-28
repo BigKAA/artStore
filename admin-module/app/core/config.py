@@ -1013,6 +1013,7 @@ class Settings(BaseSettings):
     app_name: str = Field(default="ArtStore Admin Module", alias="APP_NAME")
     app_version: str = Field(default="0.1.0", alias="APP_VERSION")
     debug: bool = Field(default=False, alias="APP_DEBUG")
+    swagger_enabled: bool = Field(default=False, alias="APP_SWAGGER_ENABLED", description="Production-first: Swagger отключен по умолчанию")
     host: str = Field(default="0.0.0.0", alias="APP_HOST")
     port: int = Field(default=8000, alias="APP_PORT")
 
@@ -1040,7 +1041,7 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    @field_validator("debug", mode="before")
+    @field_validator("debug", "swagger_enabled", mode="before")
     @classmethod
     def parse_bool_fields(cls, v):
         """Парсинг boolean полей из environment variables."""
