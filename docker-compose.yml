@@ -548,7 +548,11 @@ services:
       LOG_FORMAT: json
 
       # Database
-      DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: ${DB_USERNAME:-artstore}
+      DATABASE_PASSWORD: ${DB_PASSWORD:-password}
+      DATABASE_DATABASE: artstore
 
       # PostgreSQL SSL (optional)
       DATABASE_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
