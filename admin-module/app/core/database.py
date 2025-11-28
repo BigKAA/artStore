@@ -152,3 +152,46 @@ async def close_db() -> None:
     """
     await engine.dispose()
     logger.info("Database connections closed")
+
+
+async def create_standalone_async_session() -> AsyncSession:
+    """
+    Создание standalone async session для background задач.
+
+    ВАЖНО: Эта функция создает новый engine и session для использования
+    в отдельном event loop (например, в APScheduler background jobs).
+
+    НЕ ИСПОЛЬЗОВАТЬ в FastAPI endpoints - там используйте get_db().
+
+    Returns:
+        AsyncSession: Новая async session с собственным engine
+
+    Example:
+        async def background_task():
+            session = await create_standalone_async_session()
+            try:
+                # Работа с сессией
+                result = await session.execute(select(Model))
+            finally:
+                await session.close()
+    """
+    # Создаем отдельный engine для этого event loop
+    standalone_engine = create_async_engine(
+        settings.database.url,
+        echo=False,  # Отключаем echo для background jobs
+        pool_pre_ping=True,
+        pool_size=2,  # Маленький пул для background jobs
+        max_overflow=1,
+        connect_args={"ssl": False},
+    )
+
+    # Создаем session maker
+    standalone_session_maker = async_sessionmaker(
+        standalone_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+
+    return standalone_session_maker()

@@ -154,6 +154,10 @@ class DatabaseSettings(BaseSettings):
 class RedisSettings(BaseSettings):
     """Настройки подключения к Redis."""
 
+    # Прямой URL (высший приоритет)
+    url_override: Optional[str] = Field(default=None, alias="REDIS_URL")
+
+    # Компоненты URL (используются если url_override не задан)
     host: str = Field(default="localhost", alias="REDIS_HOST")
     port: int = Field(default=6379, alias="REDIS_PORT")
     password: Optional[str] = Field(default=None, alias="REDIS_PASSWORD")
@@ -166,7 +170,16 @@ class RedisSettings(BaseSettings):
 
     @property
     def url(self) -> str:
-        """Построение Redis URL."""
+        """
+        Построение Redis URL.
+
+        Приоритет: REDIS_URL > построение из компонентов (host/port/db)
+        """
+        # Если задан прямой URL - используем его
+        if self.url_override:
+            return self.url_override
+
+        # Иначе строим из компонентов
         if self.password:
             return f"redis://:{self.password}@{self.host}:{self.port}/{self.db}"
         return f"redis://{self.host}:{self.port}/{self.db}"

@@ -11,8 +11,9 @@ alembic==1.13.1
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
 
-# Redis (синхронный режим - архитектурное требование)
-# ВАЖНО: Используется redis-py (НЕ redis.asyncio) для всех модулей ArtStore
+# Redis (АСИНХРОННЫЙ режим - архитектурное требование)
+# ВАЖНО: Используется redis.asyncio для всех модулей ArtStore
+# Эталонная реализация: app/core/redis.py
 redis==5.0.1
 hiredis==2.3.2
 
