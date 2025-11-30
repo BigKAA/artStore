@@ -16,6 +16,7 @@ import {
   ServiceAccountCreateResponse,
   ServiceAccountRotateSecretResponse
 } from '../../services/service-accounts/service-accounts.service';
+import { NotificationService } from '../../services/notification.service';
 
 /**
  * Service Accounts Management Component
@@ -39,6 +40,7 @@ import {
 })
 export class ServiceAccountsComponent implements OnInit {
   private readonly serviceAccountsService = inject(ServiceAccountsService);
+  private readonly notification = inject(NotificationService);
 
   // Data properties
   serviceAccounts: ServiceAccount[] = [];
@@ -113,7 +115,7 @@ export class ServiceAccountsComponent implements OnInit {
         this.isLoading = false;
       },
       error: (error) => {
-        console.error('Failed to load Service Accounts:', error);
+        this.notification.error('Ошибка загрузки Service Accounts: ' + (error.error?.detail || error.message));
         this.isLoading = false;
       }
     });
@@ -194,11 +196,11 @@ export class ServiceAccountsComponent implements OnInit {
         // Переключаемся на credentials modal
         this.showCreateModal = false;
         this.showCredentialsModal = true;
+        this.notification.success('Service Account успешно создан');
         this.loadServiceAccounts();
       },
       error: (error) => {
-        console.error('Failed to create Service Account:', error);
-        alert(`Failed to create Service Account: ${error.error?.detail || 'Unknown error'}`);
+        this.notification.error('Ошибка создания Service Account: ' + (error.error?.detail || 'Неизвестная ошибка'));
       }
     });
   }
@@ -236,11 +238,11 @@ export class ServiceAccountsComponent implements OnInit {
       next: () => {
         this.showEditModal = false;
         this.selectedAccount = null;
+        this.notification.success('Service Account успешно обновлён');
         this.loadServiceAccounts();
       },
       error: (error) => {
-        console.error('Failed to update Service Account:', error);
-        alert(`Failed to update Service Account: ${error.error?.detail || 'Unknown error'}`);
+        this.notification.error('Ошибка обновления Service Account: ' + (error.error?.detail || 'Неизвестная ошибка'));
       }
     });
   }
@@ -263,11 +265,11 @@ export class ServiceAccountsComponent implements OnInit {
       next: () => {
         this.showDeleteModal = false;
         this.selectedAccount = null;
+        this.notification.success('Service Account успешно удалён');
         this.loadServiceAccounts();
       },
       error: (error) => {
-        console.error('Failed to delete Service Account:', error);
-        alert(`Failed to delete Service Account: ${error.error?.detail || 'Unknown error'}`);
+        this.notification.error('Ошибка удаления Service Account: ' + (error.error?.detail || 'Неизвестная ошибка'));
       }
     });
   }
@@ -294,11 +296,11 @@ export class ServiceAccountsComponent implements OnInit {
         // Переключаемся на credentials modal
         this.showRotateModal = false;
         this.showCredentialsModal = true;
+        this.notification.success('Secret успешно обновлён');
         this.loadServiceAccounts();
       },
       error: (error) => {
-        console.error('Failed to rotate secret:', error);
-        alert(`Failed to rotate secret: ${error.error?.detail || 'Unknown error'}`);
+        this.notification.error('Ошибка ротации secret: ' + (error.error?.detail || 'Неизвестная ошибка'));
       }
     });
   }
@@ -318,7 +320,9 @@ export class ServiceAccountsComponent implements OnInit {
    */
   copyToClipboard(text: string): void {
     navigator.clipboard.writeText(text).then(() => {
-      alert('Copied to clipboard!');
+      this.notification.success('Скопировано в буфер обмена');
+    }).catch(() => {
+      this.notification.error('Не удалось скопировать в буфер обмена');
     });
   }
 

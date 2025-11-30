@@ -12,6 +12,7 @@ import {
   SearchRequest,
   SearchResponse
 } from './models';
+import { NotificationService } from '../../services/notification.service';
 
 @Component({
   selector: 'app-files',
@@ -39,8 +40,6 @@ export class FilesComponent implements OnInit {
   loading: boolean = false;
   showUploadModal: boolean = false;
   uploadProgress: number = 0;
-  error: string | null = null;
-  successMessage: string | null = null;
 
   // Upload modal fields
   selectedFile: File | null = null;
@@ -49,7 +48,10 @@ export class FilesComponent implements OnInit {
   // Math для template
   Math = Math;
 
-  constructor(private filesService: FilesService) {}
+  constructor(
+    private filesService: FilesService,
+    private notification: NotificationService
+  ) {}
 
   ngOnInit(): void {
     this.loadFiles();
@@ -60,7 +62,6 @@ export class FilesComponent implements OnInit {
    */
   loadFiles(): void {
     this.loading = true;
-    this.error = null;
 
     const request: SearchRequest = {
       query: this.searchQuery || '',  // Empty string returns all files
@@ -81,9 +82,8 @@ export class FilesComponent implements OnInit {
         this.loading = false;
       },
       error: (err) => {
-        this.error = 'Ошибка при загрузке файлов';
+        this.notification.error('Ошибка при загрузке файлов: ' + (err.error?.detail || err.message));
         this.loading = false;
-        console.error('Search error:', err);
       }
     });
   }
@@ -135,7 +135,6 @@ export class FilesComponent implements OnInit {
     this.uploadProgress = 0;
     this.selectedFile = null;
     this.uploadDescription = '';
-    this.error = null;
   }
 
   /**
@@ -163,7 +162,7 @@ export class FilesComponent implements OnInit {
    */
   onFileUpload(): void {
     if (!this.selectedFile) {
-      this.error = 'Выберите файл для загрузки';
+      this.notification.error('Выберите файл для загрузки');
       return;
     }
 
@@ -175,7 +174,6 @@ export class FilesComponent implements OnInit {
       compression_algorithm: 'gzip' as const
     };
 
-    this.error = null;
     this.filesService.uploadFile(uploadRequest).subscribe({
       next: (event) => {
         if (event.type === HttpEventType.UploadProgress) {
@@ -185,20 +183,14 @@ export class FilesComponent implements OnInit {
           );
         } else if (event.type === HttpEventType.Response) {
           // Загрузка завершена
-          this.successMessage = `Файл "${this.selectedFile?.name}" успешно загружен`;
+          this.notification.success(`Файл "${this.selectedFile?.name}" успешно загружен`);
           this.closeUploadModal();
           this.loadFiles(); // Обновить список файлов
-
-          // Скрыть success message через 5 секунд
-          setTimeout(() => {
-            this.successMessage = null;
-          }, 5000);
         }
       },
       error: (err) => {
-        this.error = 'Ошибка при загрузке файла';
+        this.notification.error('Ошибка при загрузке файла: ' + (err.error?.detail || err.message));
         this.uploadProgress = 0;
-        console.error('Upload error:', err);
       }
     });
   }
@@ -207,20 +199,13 @@ export class FilesComponent implements OnInit {
    * Скачивание файла
    */
   onDownloadFile(file: FileMetadata): void {
-    this.error = null;
     this.filesService.downloadFile(file.id).subscribe({
       next: (blob: Blob) => {
         this.filesService.triggerBrowserDownload(blob, file.filename);
-        this.successMessage = `Файл "${file.filename}" скачивается...`;
-
-        // Скрыть success message через 3 секунды
-        setTimeout(() => {
-          this.successMessage = null;
-        }, 3000);
+        this.notification.success(`Файл "${file.filename}" успешно загружен`);
       },
       error: (err) => {
-        this.error = `Ошибка при скачивании файла: ${file.filename}`;
-        console.error('Download error:', err);
+        this.notification.error(`Ошибка при скачивании файла "${file.filename}": ` + (err.error?.detail || err.message));
       }
     });
   }
@@ -242,17 +227,6 @@ export class FilesComponent implements OnInit {
   formatDate(date: Date): string {
     const d = new Date(date);
     return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU');
-  }
-
-  /**
-   * Закрытие алертов
-   */
-  closeError(): void {
-    this.error = null;
-  }
-
-  closeSuccess(): void {
-    this.successMessage = null;
   }
 
   /**

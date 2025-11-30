@@ -8,6 +8,7 @@ import { Store } from '@ngrx/store';
 
 import { AppState } from './store/app.state';
 import { AuthActions } from './store/auth/auth.actions';
+import { ToastContainerComponent } from './components/toast/toast-container.component';
 
 /**
  * Root App Component
@@ -19,7 +20,7 @@ import { AuthActions } from './store/auth/auth.actions';
  */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, ToastContainerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
   standalone: true,

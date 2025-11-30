@@ -6,6 +6,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AdminUsersService, AdminUser, AdminRole, AdminUserListResponse } from '../../services/admin-users';
+import { NotificationService } from '../../services/notification.service';
 
 @Component({
   selector: 'app-admin-users',
@@ -16,6 +17,7 @@ import { AdminUsersService, AdminUser, AdminRole, AdminUserListResponse } from '
 })
 export class AdminUsersComponent implements OnInit {
   private readonly adminUsersService = inject(AdminUsersService);
+  private readonly notification = inject(NotificationService);
 
   // Data
   adminUsers: AdminUser[] = [];
@@ -31,7 +33,6 @@ export class AdminUsersComponent implements OnInit {
 
   // UI State
   loading = false;
-  error: string | null = null;
 
   // Modals
   showCreateModal = false;
@@ -86,7 +87,6 @@ export class AdminUsersComponent implements OnInit {
    */
   loadAdminUsers(): void {
     this.loading = true;
-    this.error = null;
 
     this.adminUsersService.getAdminUsers(
       this.page,
@@ -102,7 +102,7 @@ export class AdminUsersComponent implements OnInit {
         this.loading = false;
       },
       error: (err) => {
-        this.error = 'Ошибка загрузки администраторов: ' + (err.error?.detail || err.message);
+        this.notification.error('Ошибка загрузки администраторов: ' + (err.error?.detail || err.message));
         this.loading = false;
       }
     });
@@ -164,22 +164,22 @@ export class AdminUsersComponent implements OnInit {
    */
   createAdminUser(): void {
     this.loading = true;
-    this.error = null;
 
     this.adminUsersService.createAdminUser(this.createForm).subscribe({
       next: () => {
         this.showCreateModal = false;
+        this.notification.success('Администратор успешно создан');
         this.loadAdminUsers();
       },
       error: (err) => {
         // Handle Pydantic validation errors (422)
         if (err.status === 422 && Array.isArray(err.error?.detail)) {
           const validationErrors = err.error.detail.map((e: any) => e.msg).join('; ');
-          this.error = 'Ошибка валидации: ' + validationErrors;
+          this.notification.error('Ошибка валидации: ' + validationErrors);
         } else if (typeof err.error?.detail === 'string') {
-          this.error = 'Ошибка создания администратора: ' + err.error.detail;
+          this.notification.error('Ошибка создания администратора: ' + err.error.detail);
         } else {
-          this.error = 'Ошибка создания администратора: ' + (err.message || 'Неизвестная ошибка');
+          this.notification.error('Ошибка создания администратора: ' + (err.message || 'Неизвестная ошибка'));
         }
         this.loading = false;
       }
@@ -206,16 +206,16 @@ export class AdminUsersComponent implements OnInit {
     if (!this.selectedUser) return;
 
     this.loading = true;
-    this.error = null;
 
     this.adminUsersService.updateAdminUser(this.selectedUser.id, this.editForm).subscribe({
       next: () => {
         this.showEditModal = false;
         this.selectedUser = null;
+        this.notification.success('Администратор успешно обновлён');
         this.loadAdminUsers();
       },
       error: (err) => {
-        this.error = 'Ошибка обновления администратора: ' + (err.error?.detail || err.message);
+        this.notification.error('Ошибка обновления администратора: ' + (err.error?.detail || err.message));
         this.loading = false;
       }
     });
@@ -236,16 +236,16 @@ export class AdminUsersComponent implements OnInit {
     if (!this.selectedUser) return;
 
     this.loading = true;
-    this.error = null;
 
     this.adminUsersService.deleteAdminUser(this.selectedUser.id).subscribe({
       next: () => {
         this.showDeleteModal = false;
         this.selectedUser = null;
+        this.notification.success('Администратор успешно удалён');
         this.loadAdminUsers();
       },
       error: (err) => {
-        this.error = 'Ошибка удаления администратора: ' + (err.error?.detail || err.message);
+        this.notification.error('Ошибка удаления администратора: ' + (err.error?.detail || err.message));
         this.loading = false;
       }
     });
@@ -277,17 +277,16 @@ export class AdminUsersComponent implements OnInit {
     if (!this.selectedUser) return;
 
     this.loading = true;
-    this.error = null;
 
     this.adminUsersService.resetPassword(this.selectedUser.id, { new_password: this.passwordForm.newPassword }).subscribe({
       next: () => {
         this.showPasswordModal = false;
         this.selectedUser = null;
         this.loading = false;
-        alert('Пароль успешно сброшен');
+        this.notification.success('Пароль успешно сброшен');
       },
       error: (err) => {
-        this.error = 'Ошибка сброса пароля: ' + (err.error?.detail || err.message);
+        this.notification.error('Ошибка сброса пароля: ' + (err.error?.detail || err.message));
         this.loading = false;
       }
     });

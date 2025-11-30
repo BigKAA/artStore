@@ -26,22 +26,6 @@
     </div>
   </div>
 
-  <!-- Success Message -->
-  @if (successMessage) {
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
-      <i class="bi bi-check-circle me-2"></i>{{ successMessage }}
-      <button type="button" class="btn-close" (click)="successMessage = null"></button>
-    </div>
-  }
-
-  <!-- Error Message -->
-  @if (error && !isSubmitting) {
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-      <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
-      <button type="button" class="btn-close" (click)="error = null"></button>
-    </div>
-  }
-
   <!-- Summary Statistics Card (if available) -->
   @if (summary) {
     <div class="row g-3 mb-4">
@@ -178,14 +162,6 @@
       </div>
     </div>
   </div>
-
-  <!-- Error Alert -->
-  @if (error) {
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-      <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}
-      <button type="button" class="btn-close" (click)="error = null"></button>
-    </div>
-  }
 
   <!-- Loading State -->
   @if (isLoading) {
@@ -596,12 +572,6 @@
           <button type="button" class="btn-close" (click)="closeCreateModal()"></button>
         </div>
         <div class="modal-body">
-          @if (error) {
-            <div class="alert alert-danger" role="alert">
-              <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
-            </div>
-          }
-
           <!-- Step 1: Enter URL and Discover -->
           <div class="card mb-4">
             <div class="card-header bg-primary text-white">
@@ -851,12 +821,6 @@
           <button type="button" class="btn-close" (click)="closeEditModal()"></button>
         </div>
         <div class="modal-body">
-          @if (error) {
-            <div class="alert alert-danger" role="alert">
-              <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
-            </div>
-          }
-
           <form>
             <!-- Name -->
             <div class="mb-3">
@@ -1022,12 +986,6 @@
           <button type="button" class="btn-close btn-close-white" (click)="closeDeleteModal()"></button>
         </div>
         <div class="modal-body">
-          @if (error) {
-            <div class="alert alert-danger" role="alert">
-              <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
-            </div>
-          }
-
           <div class="alert alert-warning" role="alert">
             <i class="bi bi-exclamation-triangle me-2"></i>
             <strong>Warning:</strong> This action cannot be undone!

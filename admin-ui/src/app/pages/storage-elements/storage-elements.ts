@@ -36,6 +36,7 @@ import {
   StorageElementSyncResponse,
   StorageElementCreateRequest
 } from '../../services/storage-elements/storage-elements.service';
+import { NotificationService } from '../../services/notification.service';
 
 @Component({
   selector: 'app-storage-elements',
@@ -74,7 +75,6 @@ export class StorageElementsComponent implements OnInit {
 
   // UI State
   isLoading: boolean = false;
-  error: string | null = null;
   showDetailsModal: boolean = false;
   showCreateModal: boolean = false;
   showEditModal: boolean = false;
@@ -85,7 +85,6 @@ export class StorageElementsComponent implements OnInit {
   formData: any = {};
   formErrors: any = {};
   isSubmitting: boolean = false;
-  successMessage: string | null = null;
 
   // Enums для template
   StorageMode = StorageMode;
@@ -100,7 +99,10 @@ export class StorageElementsComponent implements OnInit {
   // Math для template
   Math = Math;
 
-  constructor(public storageElementsService: StorageElementsService) {}
+  constructor(
+    public storageElementsService: StorageElementsService,
+    private notification: NotificationService
+  ) {}
 
   ngOnInit(): void {
     this.loadStorageElements();
@@ -112,7 +114,6 @@ export class StorageElementsComponent implements OnInit {
    */
   loadStorageElements(): void {
     this.isLoading = true;
-    this.error = null;
 
     const skip = (this.page - 1) * this.pageSize;
 
@@ -130,8 +131,7 @@ export class StorageElementsComponent implements OnInit {
         this.isLoading = false;
       },
       error: (err) => {
-        console.error('Failed to load Storage Elements:', err);
-        this.error = 'Failed to load Storage Elements. Please try again.';
+        this.notification.error('Ошибка загрузки Storage Elements: ' + (err.error?.detail || err.message));
         this.isLoading = false;
       }
     });
@@ -146,7 +146,7 @@ export class StorageElementsComponent implements OnInit {
         this.summary = summary;
       },
       error: (err) => {
-        console.error('Failed to load summary:', err);
+        this.notification.error('Ошибка загрузки сводки: ' + (err.error?.detail || err.message));
       }
     });
   }
@@ -309,7 +309,7 @@ export class StorageElementsComponent implements OnInit {
         }
       },
       error: (err) => {
-        console.error('Discovery failed:', err);
+        this.notification.error('Ошибка discovery: ' + (err.error?.detail || 'Проверьте URL и попробуйте снова'));
         this.discoveryError = err.error?.detail || 'Failed to discover Storage Element. Check URL and try again.';
         this.isDiscovering = false;
       }
@@ -332,7 +332,6 @@ export class StorageElementsComponent implements OnInit {
   syncSingleStorageElement(storageElement: StorageElement): void {
     this.isSyncing = true;
     this.syncingElementId = storageElement.id;
-    this.error = null;
 
     this.storageElementsService.syncStorageElement(storageElement.id).subscribe({
       next: (result) => {
@@ -342,23 +341,18 @@ export class StorageElementsComponent implements OnInit {
 
         if (result.success) {
           if (result.changes.length > 0) {
-            this.successMessage = `Synced "${result.name}": ${result.changes.length} changes`;
+            this.notification.success(`Синхронизировано "${result.name}": ${result.changes.length} изменений`);
           } else {
-            this.successMessage = `"${result.name}" is already up to date`;
+            this.notification.success(`"${result.name}" уже актуален`);
           }
           this.loadStorageElements();
           this.loadSummary();
         } else {
-          this.error = `Sync failed: ${result.error_message}`;
+          this.notification.error(`Ошибка синхронизации: ${result.error_message}`);
         }
-
-        setTimeout(() => {
-          this.successMessage = null;
-        }, 5000);
       },
       error: (err) => {
-        console.error('Sync failed:', err);
-        this.error = err.error?.detail || 'Failed to sync Storage Element';
+        this.notification.error('Ошибка синхронизации: ' + (err.error?.detail || err.message));
         this.isSyncing = false;
         this.syncingElementId = null;
       }
@@ -370,31 +364,26 @@ export class StorageElementsComponent implements OnInit {
    */
   syncAllStorageElements(): void {
     this.isSyncingAll = true;
-    this.error = null;
 
     this.storageElementsService.syncAllStorageElements(true).subscribe({
       next: (result) => {
         this.isSyncingAll = false;
-        this.successMessage = `Sync completed: ${result.synced} synced, ${result.failed} failed`;
         this.loadStorageElements();
         this.loadSummary();
 
-        // Показать детальный результат если есть ошибки
+        // Показать детальный результат
         if (result.failed > 0) {
           const failedNames = result.results
             .filter(r => !r.success)
             .map(r => r.name)
             .join(', ');
-          this.error = `Failed to sync: ${failedNames}`;
+          this.notification.warning(`Синхронизация завершена: ${result.synced} успешно, ${result.failed} ошибок. Не удалось: ${failedNames}`);
+        } else {
+          this.notification.success(`Синхронизация завершена: ${result.synced} элементов`);
         }
-
-        setTimeout(() => {
-          this.successMessage = null;
-        }, 5000);
       },
       error: (err) => {
-        console.error('Sync all failed:', err);
-        this.error = err.error?.detail || 'Failed to sync Storage Elements';
+        this.notification.error('Ошибка синхронизации всех элементов: ' + (err.error?.detail || err.message));
         this.isSyncingAll = false;
       }
     });
@@ -419,7 +408,6 @@ export class StorageElementsComponent implements OnInit {
     this.formErrors = {};
     this.discoveryResult = null;
     this.discoveryError = null;
-    this.successMessage = null;
     this.showCreateModal = true;
   }
 
@@ -443,7 +431,6 @@ export class StorageElementsComponent implements OnInit {
     }
 
     this.isSubmitting = true;
-    this.error = null;
 
     // Формируем request для создания с auto-discovery
     const requestData: StorageElementCreateRequest = {
@@ -473,18 +460,13 @@ export class StorageElementsComponent implements OnInit {
     this.storageElementsService.createStorageElement(requestData).subscribe({
       next: (created) => {
         this.isSubmitting = false;
-        this.successMessage = `Storage Element "${created.name}" created successfully`;
+        this.notification.success(`Storage Element "${created.name}" успешно создан`);
         this.closeCreateModal();
         this.loadStorageElements();
         this.loadSummary();
-
-        setTimeout(() => {
-          this.successMessage = null;
-        }, 5000);
       },
       error: (err) => {
-        console.error('Failed to create Storage Element:', err);
-        this.error = err.error?.detail || 'Failed to create Storage Element';
+        this.notification.error('Ошибка создания Storage Element: ' + (err.error?.detail || err.message));
         this.isSubmitting = false;
       }
     });
@@ -507,7 +489,6 @@ export class StorageElementsComponent implements OnInit {
       // mode НЕ включен - редактирование через конфигурацию storage element
     };
     this.formErrors = {};
-    this.successMessage = null;
     this.showEditModal = true;
   }
 
@@ -531,7 +512,6 @@ export class StorageElementsComponent implements OnInit {
     }
 
     this.isSubmitting = true;
-    this.error = null;
 
     // Подготовка данных для обновления (только измененные поля, БЕЗ mode)
     const updateData: any = {};
@@ -562,18 +542,13 @@ export class StorageElementsComponent implements OnInit {
     this.storageElementsService.updateStorageElement(this.selectedStorageElement.id, updateData).subscribe({
       next: (updated) => {
         this.isSubmitting = false;
-        this.successMessage = `Storage Element "${updated.name}" updated successfully`;
+        this.notification.success(`Storage Element "${updated.name}" успешно обновлён`);
         this.closeEditModal();
         this.loadStorageElements();
         this.loadSummary();
-
-        setTimeout(() => {
-          this.successMessage = null;
-        }, 5000);
       },
       error: (err) => {
-        console.error('Failed to update Storage Element:', err);
-        this.error = err.error?.detail || 'Failed to update Storage Element';
+        this.notification.error('Ошибка обновления Storage Element: ' + (err.error?.detail || err.message));
         this.isSubmitting = false;
       }
     });
@@ -584,7 +559,6 @@ export class StorageElementsComponent implements OnInit {
    */
   openDeleteModal(storageElement: StorageElement): void {
     this.selectedStorageElement = storageElement;
-    this.successMessage = null;
     this.showDeleteModal = true;
   }
 
@@ -605,23 +579,17 @@ export class StorageElementsComponent implements OnInit {
     }
 
     this.isSubmitting = true;
-    this.error = null;
 
     this.storageElementsService.deleteStorageElement(this.selectedStorageElement.id).subscribe({
       next: () => {
         this.isSubmitting = false;
-        this.successMessage = `Storage Element "${this.selectedStorageElement!.name}" deleted successfully`;
+        this.notification.success(`Storage Element "${this.selectedStorageElement!.name}" успешно удалён`);
         this.closeDeleteModal();
         this.loadStorageElements();
         this.loadSummary();
-
-        setTimeout(() => {
-          this.successMessage = null;
-        }, 5000);
       },
       error: (err) => {
-        console.error('Failed to delete Storage Element:', err);
-        this.error = err.error?.detail || 'Failed to delete Storage Element';
+        this.notification.error('Ошибка удаления Storage Element: ' + (err.error?.detail || err.message));
         this.isSubmitting = false;
       }
     });

@@ -18,20 +18,6 @@
     </div>
   </div>
 
-  <!-- Success Alert -->
-  <div class="alert alert-success alert-dismissible fade show" *ngIf="successMessage" role="alert">
-    <i class="bi bi-check-circle-fill me-2"></i>
-    {{ successMessage }}
-    <button type="button" class="btn-close" (click)="closeSuccess()"></button>
-  </div>
-
-  <!-- Error Alert -->
-  <div class="alert alert-danger alert-dismissible fade show" *ngIf="error" role="alert">
-    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-    {{ error }}
-    <button type="button" class="btn-close" (click)="closeError()"></button>
-  </div>
-
   <!-- Search Bar -->
   <div class="row mb-3">
     <div class="col-md-6">
