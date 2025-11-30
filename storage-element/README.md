@@ -462,6 +462,109 @@ AR_RESTORE_STORAGE_ELEMENT_ID=  # UUID Restore Storage Element
 AR_RESTORE_TTL_DAYS=30
 ```
 
+## S3 Storage Requirements
+
+При использовании S3-совместимого хранилища (MinIO, AWS S3) требуется выполнение следующих условий:
+
+### Bucket Configuration
+
+1. **Bucket должен существовать**: Сервис **НЕ создает** bucket автоматически
+   - Имя задается через `STORAGE_S3_BUCKET_NAME` (по умолчанию: `artstore-files`)
+   - Администратор должен создать bucket **перед запуском** сервиса
+
+2. **App Folder**: Директория внутри bucket для данного Storage Element
+   - Имя задается через `STORAGE_S3_APP_FOLDER` (по умолчанию: `storage_element_01`)
+   - Сервис **попытается создать** директорию при старте (placeholder `.keep`)
+   - Если создание не удалось - логируется ошибка, readiness возвращает 503
+
+### Health Check поведение
+
+**При старте приложения (lifespan)**:
+- Проверяется существование bucket
+- Проверяется/создается app_folder
+- Ошибки логируются, но **НЕ блокируют запуск** (graceful degradation)
+- Readiness probe будет возвращать 503 до исправления проблемы
+
+**Readiness Probe (`/health/ready`)**:
+
+| Состояние | HTTP Code | Response |
+|-----------|-----------|----------|
+| Bucket недоступен | 503 | `{"status": "not_ready", "s3_error": "S3 bucket 'X' is not accessible at 'Y'"}` |
+| App folder недоступен | 503 | `{"status": "not_ready", "s3_error": "Directory 'X' in bucket 'Y' is not accessible..."}` |
+| Всё OK | 200 | `{"status": "ready", "s3_bucket": "accessible", "s3_app_folder": "accessible"}` |
+
+### Пример успешного ответа Readiness
+
+```json
+{
+  "status": "ready",
+  "timestamp": "2025-11-30T12:00:00.000000+00:00",
+  "checks": {
+    "s3_bucket": "accessible",
+    "s3_app_folder": "accessible",
+    "s3_endpoint": "http://localhost:9000",
+    "s3_bucket_name": "artstore-files",
+    "s3_app_folder_name": "storage_element_01",
+    "storage_type": "s3",
+    "storage_mode": "rw"
+  }
+}
+```
+
+### Пример ответа при недоступном bucket
+
+```json
+{
+  "status": "not_ready",
+  "timestamp": "2025-11-30T12:00:00.000000+00:00",
+  "checks": {
+    "s3_bucket": "not_accessible",
+    "s3_app_folder": "not_accessible",
+    "s3_error": "S3 bucket 'artstore-files' is not accessible at 'http://localhost:9000'",
+    "s3_endpoint": "http://localhost:9000",
+    "s3_bucket_name": "artstore-files",
+    "s3_app_folder_name": "storage_element_01",
+    "storage_type": "s3",
+    "storage_mode": "rw"
+  }
+}
+```
+
+### Troubleshooting S3
+
+**Bucket недоступен**:
+```bash
+# Создать bucket в MinIO CLI (mc)
+mc mb myminio/artstore-files
+
+# Или через AWS CLI
+aws --endpoint-url http://localhost:9000 s3 mb s3://artstore-files
+
+# Проверить доступность
+aws --endpoint-url http://localhost:9000 s3 ls
+```
+
+**App folder недоступен**:
+```bash
+# Создать директорию через MinIO CLI
+mc cp /dev/null myminio/artstore-files/storage_element_01/.keep
+
+# Или через AWS CLI
+aws --endpoint-url http://localhost:9000 s3api put-object \
+    --bucket artstore-files \
+    --key storage_element_01/.keep \
+    --body /dev/null
+```
+
+**Проверка прав доступа**:
+```bash
+# Убедиться что access key имеет права на bucket
+mc admin user info myminio minioadmin
+
+# Или проверить policy
+mc admin policy info myminio readwrite
+```
+
 ## Тестирование
 
 ### Unit Tests

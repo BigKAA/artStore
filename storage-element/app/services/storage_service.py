@@ -992,6 +992,267 @@ class S3StorageService(StorageService):
                 details={"relative_path": relative_path, "error": str(e)}
             )
 
+    # ========================================
+    # Методы проверки здоровья S3 хранилища
+    # ========================================
+
+    async def check_bucket_exists(self) -> bool:
+        """
+        Проверить существование и доступность бакета в S3.
+
+        Использует head_bucket для проверки доступа к бакету.
+        Не требует прав на листинг объектов.
+
+        Returns:
+            bool: True если бакет существует и доступен
+
+        Note:
+            Метод НЕ выбрасывает исключения, только логирует ошибки.
+            Это позволяет использовать его в health checks без прерывания.
+        """
+        try:
+            session = aioboto3.Session()
+
+            async with session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key
+            ) as s3_client:
+                await s3_client.head_bucket(Bucket=self.bucket_name)
+
+                logger.debug(
+                    "S3 bucket check successful",
+                    extra={
+                        "bucket": self.bucket_name,
+                        "endpoint": self.endpoint_url
+                    }
+                )
+                return True
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+
+            if error_code in ('404', 'NoSuchBucket'):
+                logger.warning(
+                    "S3 bucket does not exist",
+                    extra={
+                        "bucket": self.bucket_name,
+                        "endpoint": self.endpoint_url,
+                        "error_code": error_code
+                    }
+                )
+            elif error_code in ('403', 'AccessDenied'):
+                logger.warning(
+                    "S3 bucket access denied",
+                    extra={
+                        "bucket": self.bucket_name,
+                        "endpoint": self.endpoint_url,
+                        "error_code": error_code
+                    }
+                )
+            else:
+                logger.error(
+                    f"S3 bucket check failed: {e}",
+                    extra={
+                        "bucket": self.bucket_name,
+                        "endpoint": self.endpoint_url,
+                        "error_code": error_code,
+                        "error": str(e)
+                    }
+                )
+            return False
+
+        except Exception as e:
+            logger.error(
+                f"S3 connection error during bucket check: {e}",
+                extra={
+                    "bucket": self.bucket_name,
+                    "endpoint": self.endpoint_url,
+                    "error": str(e)
+                }
+            )
+            return False
+
+    async def check_app_folder_exists(self) -> bool:
+        """
+        Проверить существование app_folder и попытаться создать при отсутствии.
+
+        В S3 директории виртуальные (это просто prefix в key).
+        Проверяем наличие объектов с данным prefix.
+        Если объектов нет - создаем placeholder файл .keep.
+
+        Returns:
+            bool: True если директория доступна или успешно создана
+
+        Note:
+            Требует предварительной проверки бакета через check_bucket_exists().
+            Метод НЕ выбрасывает исключения, только логирует ошибки.
+        """
+        app_folder = settings.storage.s3.app_folder
+
+        try:
+            session = aioboto3.Session()
+
+            async with session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key
+            ) as s3_client:
+                # Проверяем наличие объектов с prefix app_folder/
+                prefix = f"{app_folder}/"
+                response = await s3_client.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=prefix,
+                    MaxKeys=1
+                )
+
+                if response.get('KeyCount', 0) > 0:
+                    logger.debug(
+                        "S3 app_folder exists and has content",
+                        extra={
+                            "bucket": self.bucket_name,
+                            "app_folder": app_folder
+                        }
+                    )
+                    return True
+
+                # Директория пуста или не существует - создаем placeholder
+                placeholder_key = f"{app_folder}/.keep"
+
+                logger.info(
+                    "S3 app_folder is empty, creating placeholder",
+                    extra={
+                        "bucket": self.bucket_name,
+                        "app_folder": app_folder,
+                        "placeholder_key": placeholder_key
+                    }
+                )
+
+                await s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=placeholder_key,
+                    Body=b'',
+                    ContentType='application/octet-stream'
+                )
+
+                logger.info(
+                    "S3 app_folder placeholder created successfully",
+                    extra={
+                        "bucket": self.bucket_name,
+                        "app_folder": app_folder
+                    }
+                )
+                return True
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+
+            logger.error(
+                f"S3 app_folder check/create failed: {e}",
+                extra={
+                    "bucket": self.bucket_name,
+                    "app_folder": app_folder,
+                    "error_code": error_code,
+                    "error": str(e)
+                }
+            )
+            return False
+
+        except Exception as e:
+            logger.error(
+                f"S3 app_folder check error: {e}",
+                extra={
+                    "bucket": self.bucket_name,
+                    "app_folder": app_folder,
+                    "error": str(e)
+                }
+            )
+            return False
+
+    async def get_health_status(self) -> dict:
+        """
+        Получить полный статус здоровья S3 хранилища.
+
+        Выполняет последовательные проверки:
+        1. Доступность бакета
+        2. Доступность/создание app_folder (только если бакет доступен)
+
+        Returns:
+            dict: Словарь с результатами проверок:
+                - bucket_accessible (bool): Бакет доступен
+                - app_folder_accessible (bool): App folder доступен
+                - error_message (Optional[str]): Сообщение об ошибке для пользователя
+                - endpoint_url (str): URL S3 endpoint
+                - bucket_name (str): Имя бакета
+                - app_folder (str): Имя app folder
+
+        Example:
+            >>> s3_service = S3StorageService()
+            >>> status = await s3_service.get_health_status()
+            >>> if status["bucket_accessible"] and status["app_folder_accessible"]:
+            ...     print("S3 storage is healthy")
+            ... else:
+            ...     print(f"S3 error: {status['error_message']}")
+        """
+        app_folder = settings.storage.s3.app_folder
+
+        result = {
+            "bucket_accessible": False,
+            "app_folder_accessible": False,
+            "error_message": None,
+            "endpoint_url": self.endpoint_url,
+            "bucket_name": self.bucket_name,
+            "app_folder": app_folder
+        }
+
+        # Шаг 1: Проверка бакета
+        bucket_ok = await self.check_bucket_exists()
+        result["bucket_accessible"] = bucket_ok
+
+        if not bucket_ok:
+            result["error_message"] = (
+                f"S3 bucket '{self.bucket_name}' is not accessible "
+                f"at '{self.endpoint_url}'"
+            )
+            logger.warning(
+                "S3 health check failed: bucket not accessible",
+                extra={
+                    "bucket": self.bucket_name,
+                    "endpoint": self.endpoint_url
+                }
+            )
+            return result
+
+        # Шаг 2: Проверка app_folder (только если бакет доступен)
+        folder_ok = await self.check_app_folder_exists()
+        result["app_folder_accessible"] = folder_ok
+
+        if not folder_ok:
+            result["error_message"] = (
+                f"Directory '{app_folder}' in bucket '{self.bucket_name}' "
+                f"is not accessible. Administrator should create it manually."
+            )
+            logger.warning(
+                "S3 health check failed: app_folder not accessible",
+                extra={
+                    "bucket": self.bucket_name,
+                    "app_folder": app_folder
+                }
+            )
+            return result
+
+        logger.debug(
+            "S3 health check passed",
+            extra={
+                "bucket": self.bucket_name,
+                "app_folder": app_folder
+            }
+        )
+
+        return result
+
 
 def get_storage_service() -> StorageService:
     """

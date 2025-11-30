@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import HTTPException
 from prometheus_client import make_asgi_app
 
-from app.core.config import settings
+from app.core.config import settings, StorageType
 from app.core.logging import setup_logging, get_logger
 from app.core.observability import setup_observability
 from app.db.session import init_db, close_db
@@ -52,9 +52,11 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Проверка доступности хранилища при старте (graceful degradation)
+    await _check_storage_on_startup()
+
     # TODO: Проверка storage mode из БД vs config
     # TODO: Инициализация master election если edit/rw режим
-    # TODO: Проверка доступности хранилища
 
     yield
 
@@ -62,6 +64,114 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Storage Element")
     await close_db()
     logger.info("Database connections closed")
+
+
+async def _check_storage_on_startup():
+    """
+    Проверка доступности хранилища при старте приложения.
+
+    Graceful degradation - логирует ошибки, но НЕ блокирует запуск.
+    Readiness probe будет возвращать 503 до исправления проблемы.
+    """
+    if settings.storage.type == StorageType.S3:
+        await _check_s3_storage_on_startup()
+    else:
+        await _check_local_storage_on_startup()
+
+
+async def _check_s3_storage_on_startup():
+    """
+    Проверка доступности S3 хранилища при старте.
+
+    Проверяет:
+    1. Существование и доступность бакета
+    2. Доступность app_folder (попытка создать если не существует)
+
+    При ошибках логирует warning/error, но не прерывает запуск.
+    """
+    from app.services.storage_service import S3StorageService
+
+    s3_service = S3StorageService()
+
+    # Проверка бакета
+    bucket_exists = await s3_service.check_bucket_exists()
+
+    if not bucket_exists:
+        logger.error(
+            "S3 bucket not accessible on startup - service will be unhealthy",
+            extra={
+                "bucket_name": settings.storage.s3.bucket_name,
+                "endpoint_url": settings.storage.s3.endpoint_url,
+                "action": "Readiness probe will return 503 until bucket is available"
+            }
+        )
+        return
+
+    logger.info(
+        "S3 bucket accessible",
+        extra={"bucket_name": settings.storage.s3.bucket_name}
+    )
+
+    # Проверка/создание app_folder
+    folder_ok = await s3_service.check_app_folder_exists()
+
+    if not folder_ok:
+        logger.error(
+            "Failed to access/create app_folder in S3 - service will be unhealthy",
+            extra={
+                "bucket_name": settings.storage.s3.bucket_name,
+                "app_folder": settings.storage.s3.app_folder,
+                "action": "Administrator should create directory manually"
+            }
+        )
+        return
+
+    logger.info(
+        "S3 storage check passed",
+        extra={
+            "bucket_name": settings.storage.s3.bucket_name,
+            "app_folder": settings.storage.s3.app_folder
+        }
+    )
+
+
+async def _check_local_storage_on_startup():
+    """
+    Проверка доступности локального хранилища при старте.
+
+    Проверяет:
+    1. Существование директории хранилища
+    2. Возможность записи в директорию
+
+    При ошибках логирует warning/error, но не прерывает запуск.
+    """
+    from pathlib import Path
+
+    storage_path = Path(settings.storage.local.base_path)
+
+    try:
+        # Создаем директорию если не существует
+        storage_path.mkdir(parents=True, exist_ok=True)
+
+        # Проверяем возможность записи
+        test_file = storage_path / ".startup_check"
+        test_file.write_text("ok")
+        test_file.unlink()
+
+        logger.info(
+            "Local storage check passed",
+            extra={"path": str(storage_path)}
+        )
+
+    except Exception as e:
+        logger.error(
+            "Local storage not accessible on startup - service will be unhealthy",
+            extra={
+                "path": str(storage_path),
+                "error": str(e),
+                "action": "Readiness probe will return 503 until storage is available"
+            }
+        )
 
 
 # Создание FastAPI application
@@ -189,14 +299,110 @@ async def health_ready():
     Readiness probe.
 
     Возвращает HTTP 200 OK если сервис готов принимать запросы.
-    Проверяет подключение к базе данных.
+    Проверяет:
+    - Доступность хранилища (S3 bucket + app_folder или Local filesystem)
 
     Returns:
-        dict: Статус readiness
+        dict: Статус readiness с деталями проверок
+        HTTP 200 если всё OK
+        HTTP 503 если сервис не готов
     """
-    # TODO: Проверить подключение к БД
-    # TODO: Проверить доступность хранилища
-    return {"status": "ready"}
+    from datetime import datetime, timezone
+    from fastapi.responses import JSONResponse
+
+    checks = {}
+    all_ok = True
+
+    # Проверка хранилища в зависимости от типа
+    if settings.storage.type == StorageType.S3:
+        storage_ok, storage_checks = await _check_s3_storage_readiness()
+    else:
+        storage_ok, storage_checks = await _check_local_storage_readiness()
+
+    checks.update(storage_checks)
+    if not storage_ok:
+        all_ok = False
+
+    # Метаданные о конфигурации
+    checks["storage_type"] = settings.storage.type.value
+    checks["storage_mode"] = settings.app.mode.value
+
+    response_data = {
+        "status": "ready" if all_ok else "not_ready",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": checks
+    }
+
+    if all_ok:
+        return response_data
+    else:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=response_data
+        )
+
+
+async def _check_s3_storage_readiness() -> tuple[bool, dict]:
+    """
+    Проверка доступности S3 хранилища для readiness probe.
+
+    Returns:
+        tuple[bool, dict]: (успех, детали проверок)
+    """
+    from app.services.storage_service import S3StorageService
+
+    s3_service = S3StorageService()
+    health_status = await s3_service.get_health_status()
+
+    checks = {
+        "s3_bucket": "accessible" if health_status["bucket_accessible"] else "not_accessible",
+        "s3_app_folder": "accessible" if health_status["app_folder_accessible"] else "not_accessible",
+        "s3_endpoint": health_status["endpoint_url"],
+        "s3_bucket_name": health_status["bucket_name"],
+        "s3_app_folder_name": health_status["app_folder"]
+    }
+
+    if health_status["error_message"]:
+        checks["s3_error"] = health_status["error_message"]
+
+    is_ok = health_status["bucket_accessible"] and health_status["app_folder_accessible"]
+
+    return is_ok, checks
+
+
+async def _check_local_storage_readiness() -> tuple[bool, dict]:
+    """
+    Проверка доступности локального хранилища для readiness probe.
+
+    Returns:
+        tuple[bool, dict]: (успех, детали проверок)
+    """
+    from pathlib import Path
+
+    checks = {}
+    storage_path = Path(settings.storage.local.base_path)
+
+    try:
+        # Проверяем существование и возможность записи
+        storage_path.mkdir(parents=True, exist_ok=True)
+
+        test_file = storage_path / ".health_check"
+        test_file.write_text("ok")
+        test_file.unlink()
+
+        checks["storage_directory"] = "accessible"
+        checks["storage_path"] = str(storage_path)
+        return True, checks
+
+    except Exception as e:
+        logger.warning(
+            "Local storage readiness check failed",
+            extra={"path": str(storage_path), "error": str(e)}
+        )
+        checks["storage_directory"] = "not_accessible"
+        checks["storage_path"] = str(storage_path)
+        checks["storage_error"] = str(e)
+        return False, checks
 
 
 # Подключение API v1 router
