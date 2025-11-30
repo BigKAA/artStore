@@ -254,6 +254,14 @@ services:
       INITIAL_ACCOUNT_NAME: admin-service
       INITIAL_ACCOUNT_ROLE: ADMIN
       INITIAL_ACCOUNT_PASSWORD: TestPassword123!
+
+      # Scheduler (Background Jobs)
+      SCHEDULER_ENABLED: "on"
+      SCHEDULER_TIMEZONE: "UTC"
+      SCHEDULER_JWT_ROTATION_ENABLED: "on"
+      SCHEDULER_JWT_ROTATION_INTERVAL_HOURS: 24
+      SCHEDULER_STORAGE_HEALTH_CHECK_ENABLED: "on"
+      SCHEDULER_STORAGE_HEALTH_CHECK_INTERVAL_SECONDS: 60
     volumes:
       # JWT keys (persist для всех узлов кластера)
       - admin_jwt_keys:/app/secrets

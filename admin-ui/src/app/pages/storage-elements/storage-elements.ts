@@ -22,9 +22,10 @@
  * Sprint 19 Phase 2: Auto-discovery implementation
  */
 
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Subject, Subscription, interval, takeUntil } from 'rxjs';
 import {
   StorageElementsService,
   StorageElement,
@@ -45,7 +46,13 @@ import { NotificationService } from '../../services/notification.service';
   templateUrl: './storage-elements.html',
   styleUrl: './storage-elements.scss'
 })
-export class StorageElementsComponent implements OnInit {
+export class StorageElementsComponent implements OnInit, OnDestroy {
+  // Auto-refresh
+  private destroy$ = new Subject<void>();
+  private refreshSubscription: Subscription | null = null;
+  private readonly REFRESH_INTERVAL = 60000; // 60 секунд (конфигурируемый)
+  autoRefreshEnabled = true;
+
   // Data
   storageElements: StorageElement[] = [];
   summary: StorageElementsSummary | null = null;
@@ -107,6 +114,53 @@ export class StorageElementsComponent implements OnInit {
   ngOnInit(): void {
     this.loadStorageElements();
     this.loadSummary();
+    this.startPolling();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+    this.stopPolling();
+  }
+
+  /**
+   * Запуск периодического обновления данных
+   */
+  private startPolling(): void {
+    if (this.refreshSubscription) {
+      return; // Уже запущен
+    }
+
+    this.refreshSubscription = interval(this.REFRESH_INTERVAL)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        if (this.autoRefreshEnabled && !this.isLoading) {
+          this.loadStorageElements();
+          this.loadSummary();
+        }
+      });
+  }
+
+  /**
+   * Остановка периодического обновления
+   */
+  private stopPolling(): void {
+    if (this.refreshSubscription) {
+      this.refreshSubscription.unsubscribe();
+      this.refreshSubscription = null;
+    }
+  }
+
+  /**
+   * Переключение auto-refresh
+   */
+  toggleAutoRefresh(): void {
+    this.autoRefreshEnabled = !this.autoRefreshEnabled;
+    if (this.autoRefreshEnabled) {
+      this.notification.info('Auto-refresh включен');
+    } else {
+      this.notification.info('Auto-refresh выключен');
+    }
   }
 
   /**

@@ -665,6 +665,97 @@ docker-compose -f docker-compose.test.yml up --abort-on-container-exit storage-e
 4. **Reconciliation**: Запускайте регулярно для обнаружения drift
 5. **Mode transitions**: Тестируйте на staging перед production
 
+## Интеграция с Admin Module
+
+### Автоматическая синхронизация состояния
+
+Admin Module периодически опрашивает все зарегистрированные Storage Elements для синхронизации информации о текущем состоянии. Это обеспечивает актуальность данных в системе без необходимости ручного обновления.
+
+#### Механизм синхронизации
+
+1. **Periodic Health Check**: Admin Module выполняет запрос к `/api/v1/info` каждого Storage Element
+2. **Сравнение состояния**: Полученные данные сравниваются с информацией в базе данных
+3. **Автоматическое обновление**: При обнаружении изменений данные обновляются в PostgreSQL
+4. **Service Discovery**: Изменения публикуются в Redis для уведомления других модулей (Ingester, Query)
+
+#### Синхронизируемые поля
+
+| Поле | Описание | Источник |
+|------|----------|----------|
+| `mode` | Текущий режим работы (edit/rw/ro/ar) | `/api/v1/info` → `mode` |
+| `status` | Статус (operational/degraded/offline) | `/api/v1/info` → `status` |
+| `capacity_bytes` | Общая емкость хранилища | `/api/v1/info` → `capacity_bytes` |
+| `used_bytes` | Использованное пространство | `/api/v1/info` → `used_bytes` |
+| `file_count` | Количество файлов | `/api/v1/info` → `file_count` |
+
+#### Конфигурация в Admin Module
+
+```bash
+# Включить/выключить периодическую проверку
+SCHEDULER_STORAGE_HEALTH_CHECK_ENABLED=true
+
+# Интервал проверки в секундах (10-3600, по умолчанию 60)
+SCHEDULER_STORAGE_HEALTH_CHECK_INTERVAL_SECONDS=60
+```
+
+#### Поведение при изменении режима
+
+**Важно**: Режим Storage Element (`mode`) определяется **ТОЛЬКО** конфигурацией при запуске модуля (переменная `STORAGE_MODE` или `APP_MODE`).
+
+Admin Module **НЕ МОЖЕТ** изменить режим через API, но отслеживает его изменение:
+
+```
+Сценарий: Администратор переводит Storage Element из RW в RO
+
+1. Администратор изменяет конфигурацию: APP_MODE=ro
+2. Администратор перезапускает контейнер Storage Element
+3. Storage Element стартует в режиме RO
+4. Admin Module при очередном health check обнаруживает mode=ro
+5. Admin Module обновляет информацию в БД
+6. Admin Module публикует изменения в Redis
+7. Ingester получает уведомление и перестает направлять uploads на этот элемент
+8. Query получает уведомление и продолжает использовать элемент для downloads
+```
+
+#### Обнаружение недоступных элементов
+
+Если Storage Element недоступен (сеть, рестарт, сбой):
+
+1. Health check завершается с ошибкой (timeout/connection refused)
+2. Admin Module устанавливает `status = offline`
+3. Изменение публикуется в Redis
+4. Ingester/Query прекращают использование этого элемента
+5. При восстановлении доступности статус автоматически обновляется на `operational`
+
+#### Логирование событий синхронизации
+
+Admin Module логирует важные события:
+
+```
+INFO  - Storage health check completed: 5 synced, 0 failed, 2 changes detected
+INFO  - Storage element 'storage-01' mode changed: rw -> ro
+WARN  - Storage element 'storage-02' is offline (connection refused)
+INFO  - Storage element 'storage-02' is back online
+```
+
+### Удаление Storage Element
+
+Storage Element можно удалить из Admin Module при соблюдении условий:
+
+1. **Требование**: `file_count == 0` (элемент пуст)
+2. **Требование роли**: SUPER_ADMIN
+3. **Режим**: Любой (edit, rw, ro, ar) - ограничение по режиму отсутствует
+
+**Важно**: Удаление из Admin Module не удаляет сам сервис Storage Element, а только его регистрацию в системе. Физически сервис продолжит работу до остановки администратором.
+
+### Admin UI Auto-Refresh
+
+Веб-интерфейс Admin UI автоматически обновляет список Storage Elements:
+
+- **Интервал**: 60 секунд (по умолчанию)
+- **Управление**: Переключатель "Auto-refresh" в заголовке страницы
+- **Поведение**: При отключении обновление происходит только при ручном нажатии "Sync All"
+
 ## Ссылки на документацию
 
 - [Главная документация проекта](../README.md)

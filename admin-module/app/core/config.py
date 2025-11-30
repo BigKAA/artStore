@@ -628,9 +628,23 @@ class SchedulerSettings(BaseSettings):
     jwt_rotation_interval_hours: int = Field(default=24, alias="SCHEDULER_JWT_ROTATION_INTERVAL_HOURS")
     timezone: str = Field(default="UTC", alias="SCHEDULER_TIMEZONE")
 
+    # Storage Health Check - периодический опрос состояния storage elements
+    storage_health_check_enabled: bool = Field(
+        default=True,
+        alias="SCHEDULER_STORAGE_HEALTH_CHECK_ENABLED",
+        description="Включить периодическую проверку состояния storage elements"
+    )
+    storage_health_check_interval_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        alias="SCHEDULER_STORAGE_HEALTH_CHECK_INTERVAL_SECONDS",
+        description="Интервал проверки storage elements в секундах (10-3600)"
+    )
+
     model_config = SettingsConfigDict(env_prefix="SCHEDULER_", case_sensitive=False, extra="allow")
 
-    @field_validator("enabled", "jwt_rotation_enabled", mode="before")
+    @field_validator("enabled", "jwt_rotation_enabled", "storage_health_check_enabled", mode="before")
     @classmethod
     def parse_bool_fields(cls, v):
         """Парсинг boolean полей из environment variables."""

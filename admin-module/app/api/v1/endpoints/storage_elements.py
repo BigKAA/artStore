@@ -941,8 +941,6 @@ async def delete_storage_element(
 
     **Ограничения:**
     - Нельзя удалить storage element с файлами (file_count > 0)
-    - Нельзя удалить storage element в режиме edit (должен быть переведен в другой режим)
-    - Перед удалением рекомендуется перевести в режим maintenance
 
     **Warning:** Удаление storage element не удаляет физические файлы!
     Необходимо выполнить очистку файловой системы вручную.
@@ -966,16 +964,6 @@ async def delete_storage_element(
                 detail=(
                     f"Cannot delete Storage Element with {storage_element.file_count} files. "
                     "Please migrate or delete all files first."
-                )
-            )
-
-        # Проверка: нельзя удалить storage element в режиме edit
-        if storage_element.mode == StorageMode.EDIT:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Cannot delete Storage Element in EDIT mode. "
-                    "Please change mode to RW, RO, or AR first."
                 )
             )
 

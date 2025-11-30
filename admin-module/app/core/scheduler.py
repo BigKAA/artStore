@@ -4,6 +4,7 @@ APScheduler background задачи для Admin Module.
 Функции:
 - Автоматическая ротация JWT ключей каждые 24 часа
 - Периодическая публикация конфигурации Storage Elements в Redis
+- Периодическая проверка состояния Storage Elements (health check)
 - Background job scheduling с error handling
 - Graceful shutdown при остановке приложения
 """
@@ -20,6 +21,7 @@ from app.core.config import settings
 from app.core.database import get_sync_session, create_standalone_async_session
 from app.services.jwt_key_rotation_service import get_rotation_service
 from app.services.storage_element_publish_service import storage_element_publish_service
+from app.services.storage_sync_service import storage_sync_service
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +123,68 @@ def storage_element_publish_job() -> None:
         asyncio.run(_publish())
     except Exception as e:
         logger.error(f"Storage element publish job failed with exception: {e}", exc_info=True)
+
+
+def storage_health_check_job() -> None:
+    """
+    Background задача для периодической проверки состояния Storage Elements.
+
+    Выполняется периодически согласно настройкам scheduler.storage_health_check_interval_seconds.
+    Опрашивает /api/v1/info каждого Storage Element и синхронизирует данные в БД.
+
+    Процесс:
+    1. Получение всех Storage Elements из БД
+    2. Опрос /api/v1/info для каждого элемента
+    3. Обновление mode, status, capacity, used_bytes, file_count при изменении
+    4. Публикация изменений в Redis для Service Discovery
+
+    Note:
+        При изменении режима (mode) Storage Element логируется событие.
+        Режим может измениться только если администратор перезапустил
+        Storage Element с новой конфигурацией APP_MODE.
+    """
+    logger.debug("Storage health check job started")
+
+    async def _health_check():
+        """Внутренняя async функция для health check."""
+        session = await create_standalone_async_session()
+        try:
+            # Синхронизируем все storage elements (включая offline для обновления статуса)
+            results = await storage_sync_service.sync_all_storage_elements(
+                session,
+                only_online=False  # Проверяем все элементы
+            )
+
+            # Подсчитываем статистику
+            success_count = sum(1 for r in results if r.success)
+            failed_count = len(results) - success_count
+            changes_count = sum(len(r.changes) for r in results)
+
+            # Логируем только если есть изменения или ошибки
+            if changes_count > 0 or failed_count > 0:
+                logger.info(
+                    f"Storage health check completed: "
+                    f"{success_count} synced, {failed_count} failed, "
+                    f"{changes_count} changes detected"
+                )
+            else:
+                logger.debug(
+                    f"Storage health check completed: "
+                    f"{success_count} synced, no changes"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"Storage health check job failed: {e}",
+                exc_info=True
+            )
+        finally:
+            await session.close()
+
+    try:
+        asyncio.run(_health_check())
+    except Exception as e:
+        logger.error(f"Storage health check job failed with exception: {e}", exc_info=True)
 
 
 def job_listener(event) -> None:
@@ -227,6 +291,28 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             logger.info(
                 f"Storage element publish job scheduled: "
                 f"interval={settings.service_discovery.publish_interval_seconds}s, "
+                f"timezone={settings.scheduler.timezone}"
+            )
+
+        # Storage Health Check job - периодическая проверка состояния storage elements
+        if settings.scheduler.storage_health_check_enabled:
+            _scheduler.add_job(
+                func=storage_health_check_job,
+                trigger=IntervalTrigger(
+                    seconds=settings.scheduler.storage_health_check_interval_seconds,
+                    timezone=tz
+                ),
+                id="storage_health_check",
+                name="Storage Element Health Check",
+                replace_existing=True,
+                max_instances=1,  # Только одна инстанция job может выполняться одновременно
+                coalesce=True,  # Если пропущено несколько запусков, выполнить только один
+                misfire_grace_time=120  # 2 минуты grace period для missed jobs
+            )
+
+            logger.info(
+                f"Storage health check job scheduled: "
+                f"interval={settings.scheduler.storage_health_check_interval_seconds}s, "
                 f"timezone={settings.scheduler.timezone}"
             )
 
