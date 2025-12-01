@@ -393,7 +393,7 @@ services:
     environment:
       # Application
       APP_NAME: artstore-storage-element-02
-      APP_MODE: edit  # edit, rw, ro, ar
+      APP_MODE: rw  # edit, rw, ro, ar
       APP__SWAGGER_ENABLED: "on"  # Двойное подчеркивание для вложенных настроек
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: json
