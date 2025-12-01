@@ -117,7 +117,11 @@ class StorageElementSettings(BaseSettings):
 
 
 class RedisSettings(BaseSettings):
-    """Настройки Redis для Service Discovery."""
+    """
+    Настройки Redis для Service Discovery и Storage Registry.
+
+    Sprint 14: Async Redis клиент для получения списка доступных SE.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="REDIS_",
@@ -128,7 +132,26 @@ class RedisSettings(BaseSettings):
     port: int = 6379
     db: int = 0
     password: Optional[str] = None
-    max_connections: int = 50
+    pool_size: int = Field(default=10, alias="REDIS_POOL_SIZE")
+    socket_timeout: float = Field(default=5.0, alias="REDIS_SOCKET_TIMEOUT")
+    socket_connect_timeout: float = Field(default=5.0, alias="REDIS_SOCKET_CONNECT_TIMEOUT")
+
+    # Circuit breaker настройки
+    failure_threshold: int = Field(default=5, alias="REDIS_FAILURE_THRESHOLD")
+    recovery_timeout: int = Field(default=60, alias="REDIS_RECOVERY_TIMEOUT")
+    half_open_max_calls: int = Field(default=3, alias="REDIS_HALF_OPEN_MAX_CALLS")
+
+    @property
+    def url(self) -> str:
+        """
+        Формирование Redis URL.
+
+        Returns:
+            str: Redis URL в формате redis://[:password@]host:port/db
+        """
+        if self.password:
+            return f"redis://:{self.password}@{self.host}:{self.port}/{self.db}"
+        return f"redis://{self.host}:{self.port}/{self.db}"
 
 
 class CompressionSettings(BaseSettings):

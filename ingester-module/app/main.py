@@ -17,6 +17,9 @@ from app.core.observability import setup_observability
 from app.api.v1.router import api_router
 from app.services.auth_service import AuthService
 from app.services.upload_service import UploadService
+from app.services.storage_selector import init_storage_selector, close_storage_selector
+from app.services.admin_client import init_admin_client, close_admin_client
+from app.core.redis import get_redis_client, close_redis_client
 
 # Import metrics modules to register with Prometheus (Sprint 23)
 from app.services import auth_metrics  # noqa: F401
@@ -44,6 +47,9 @@ async def lifespan(app: FastAPI):
 
     Startup:
     - Инициализация HTTP клиента для Storage Element
+    - Инициализация Redis client для Storage Registry
+    - Инициализация Admin Client для fallback
+    - Инициализация StorageSelector
     - Проверка конфигурации
     - Загрузка публичного ключа для JWT
 
@@ -61,17 +67,60 @@ async def lifespan(app: FastAPI):
         }
     )
 
-    # TODO: Инициализация Redis client для Service Discovery
-    # TODO: Инициализация Circuit Breaker
-    # TODO: Проверка доступности Storage Element
+    # Sprint 14: Инициализация Redis и StorageSelector
+    redis_client = None
+    admin_client = None
+
+    try:
+        # Инициализация Redis client для Storage Registry
+        redis_client = await get_redis_client()
+        logger.info(
+            "Redis client connected",
+            extra={
+                "host": settings.redis.host,
+                "port": settings.redis.port,
+            }
+        )
+    except Exception as e:
+        # Graceful degradation - продолжаем работу без Redis
+        logger.warning(
+            "Failed to initialize Redis - running in fallback mode",
+            extra={"error": str(e)}
+        )
+
+    try:
+        # Инициализация Admin Client для fallback
+        admin_client = await init_admin_client()
+        logger.info("Admin Module client initialized")
+    except Exception as e:
+        # Graceful degradation - продолжаем без Admin fallback
+        logger.warning(
+            "Failed to initialize Admin client - fallback disabled",
+            extra={"error": str(e)}
+        )
+
+    # Инициализация StorageSelector с Redis и Admin clients
+    storage_selector = await init_storage_selector(
+        redis_client=redis_client,
+        admin_client=admin_client
+    )
+    logger.info("StorageSelector initialized")
+
+    # Передаём storage_selector в upload_service
+    upload_service.set_storage_selector(storage_selector)
 
     yield
 
     # Shutdown
     logger.info("Shutting down Ingester Module")
+
+    # Закрытие в обратном порядке
+    await close_storage_selector()
+    await close_admin_client()
+    await close_redis_client()
     await upload_service.close()
     await auth_service.close()
-    logger.info("HTTP connections closed")
+    logger.info("All connections closed")
 
 
 # Создание FastAPI application

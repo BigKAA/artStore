@@ -202,7 +202,7 @@ class DatabaseSettings(BaseSettings):
 
 
 class RedisSettings(BaseSettings):
-    """Настройки Redis для Service Discovery и Master Election"""
+    """Настройки Redis для Service Discovery, Master Election и Health Reporting"""
     model_config = SettingsConfigDict(
         env_prefix="REDIS_",
         case_sensitive=False
@@ -214,6 +214,11 @@ class RedisSettings(BaseSettings):
     db: int = 0
     password: Optional[str] = None
 
+    # Connection pool
+    pool_size: int = 10
+    socket_timeout: float = 5.0
+    socket_connect_timeout: float = 5.0
+
     # Master Election настройки
     master_key_prefix: str = "storage_master"
     master_ttl: int = 30  # Время жизни ключа мастера в секундах
@@ -223,6 +228,13 @@ class RedisSettings(BaseSettings):
     failure_threshold: int = 5
     recovery_timeout: int = 60
     half_open_max_calls: int = 3
+
+    @property
+    def url(self) -> str:
+        """Формирование Redis URL для aioredis"""
+        if self.password:
+            return f"redis://:{self.password}@{self.host}:{self.port}/{self.db}"
+        return f"redis://{self.host}:{self.port}/{self.db}"
 
 
 class LocalStorageSettings(BaseSettings):
@@ -272,10 +284,56 @@ class StorageSettings(BaseSettings):
     local: LocalStorageSettings = Field(default_factory=LocalStorageSettings)
     s3: S3StorageSettings = Field(default_factory=S3StorageSettings)
 
+    # Health Reporting Settings (Sprint 14)
+    # Уникальный идентификатор Storage Element для Redis registry
+    element_id: str = Field(
+        default="se-local-01",
+        alias="STORAGE_ELEMENT_ID",
+        description="Уникальный ID Storage Element для Redis registry"
+    )
+    # Приоритет для Sequential Fill алгоритма (меньше = выше приоритет)
+    priority: int = Field(
+        default=100,
+        alias="STORAGE_PRIORITY",
+        description="Приоритет SE для выбора (меньше = выше приоритет)"
+    )
+    # Внешний URL для доступа к этому SE из других сервисов
+    external_endpoint: str = Field(
+        default="http://localhost:8010",
+        alias="STORAGE_EXTERNAL_ENDPOINT",
+        description="Внешний URL этого SE для доступа из Ingester/Query"
+    )
+    # Интервал публикации статуса в Redis (секунды)
+    health_report_interval: int = Field(
+        default=30,
+        alias="HEALTH_REPORT_INTERVAL",
+        ge=5,
+        le=300,
+        description="Интервал публикации health status в Redis (5-300 секунд)"
+    )
+    # Множитель TTL для Redis ключей (TTL = interval * multiplier)
+    health_report_ttl_multiplier: int = Field(
+        default=3,
+        alias="HEALTH_REPORT_TTL_MULTIPLIER",
+        ge=2,
+        le=10,
+        description="Множитель для TTL Redis ключей (TTL = interval * multiplier)"
+    )
+
     @property
     def max_size_bytes(self) -> int:
         """Максимальный размер в байтах"""
         return self.max_size_gb * 1024 * 1024 * 1024
+
+    @property
+    def health_report_ttl(self) -> int:
+        """TTL для Redis ключей в секундах"""
+        return self.health_report_interval * self.health_report_ttl_multiplier
+
+    @property
+    def local_storage_path(self) -> Path:
+        """Путь к локальному хранилищу (для совместимости)"""
+        return self.local.base_path
 
 
 class JWTSettings(BaseSettings):
