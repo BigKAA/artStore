@@ -265,10 +265,10 @@ async def sync_storage_element(
 
         return StorageElementSyncResponse(
             storage_element_id=sync_result.storage_element_id,
-            name=sync_result.name,
+            name=sync_result.storage_element_name,
             success=sync_result.success,
             changes=changes_list,
-            error_message=sync_result.error_message,
+            error_message=sync_result.error,
             synced_at=sync_result.synced_at
         )
 
@@ -327,10 +327,10 @@ async def sync_all_storage_elements(
 
             response_results.append(StorageElementSyncResponse(
                 storage_element_id=result.storage_element_id,
-                name=result.name,
+                name=result.storage_element_name,
                 success=result.success,
                 changes=changes_list,
-                error_message=result.error_message,
+                error_message=result.error,
                 synced_at=result.synced_at
             ))
 
