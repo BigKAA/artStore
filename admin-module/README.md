@@ -150,199 +150,195 @@ Admin Module поддерживает **два типа** учетных зап�
 
 ### API Endpoints
 
-#### Admin Authentication (`/api/admin-auth/*`)
+#### Admin Authentication (`/api/v1/admin-auth/*`)
 ```
-POST /api/admin-auth/login
+POST /api/v1/admin-auth/login
   - Admin User login через username/password
   - Input: {"username": "admin", "password": "..."}
   - Output: {"access_token": "eyJ...", "refresh_token": "...", "token_type": "Bearer", "expires_in": 1800}
 
-POST /api/admin-auth/refresh
+POST /api/v1/admin-auth/refresh
   - Обновление access token по refresh token
   - Input: {"refresh_token": "..."}
-  - Output: {"access_token": "eyJ...", "token_type": "Bearer", "expires_in": 1800}
+  - Output: {"access_token": "eyJ...", "refresh_token": "...", "token_type": "Bearer", "expires_in": 1800}
 
-POST /api/admin-auth/logout
-  - Logout текущего Admin User
+POST /api/v1/admin-auth/logout
+  - Logout текущего Admin User (requires JWT)
+  - Output: {"success": true, "message": "Successfully logged out"}
 
-POST /api/admin-auth/change-password
-  - Смена пароля (requires current password)
-  - Input: {"old_password": "...", "new_password": "..."}
+GET /api/v1/admin-auth/me
+  - Получение информации о текущем Admin User (requires JWT)
+  - Output: AdminUserResponse с id, username, email, role, enabled, last_login_at, created_at
+
+POST /api/v1/admin-auth/change-password
+  - Смена пароля (requires JWT и current password)
+  - Input: {"current_password": "...", "new_password": "...", "confirm_password": "..."}
+  - Output: {"success": true, "message": "Password changed successfully", "password_changed_at": "..."}
 ```
 
-#### Service Account Authentication (`/api/auth/*`)
+#### Service Account Authentication (`/api/v1/auth/*`)
 ```
-POST /api/auth/token
-  - OAuth 2.0 Client Credentials authentication для Service Accounts
+POST /api/v1/auth/token
+  - OAuth 2.0 Client Credentials authentication для Service Accounts (RFC 6749 Section 4.4)
   - Input: {"client_id": "...", "client_secret": "..."}
-  - Output: {"access_token": "eyJ...", "token_type": "Bearer", "expires_in": 1800}
-
-GET /api/auth/public-key
-  - Получение публичного ключа для валидации JWT
-  - Output: PEM-formatted public key
-
-POST /api/auth/rotate-keys
-  - Ручная ротация JWT ключей (admin only)
-  - Автоматическая ротация каждые 24 часа
+  - Output: {"access_token": "eyJ...", "refresh_token": "...", "token_type": "Bearer", "expires_in": 1800, "issued_at": "..."}
+  - Errors: invalid_client (401), access_denied (403)
 ```
 
-#### Admin Users Management (`/api/admin-users/*`)
+#### Admin Users Management (`/api/v1/admin-users/*`)
 ```
-GET /api/admin-users
-  - Список всех Admin Users (с пагинацией)
-  - Фильтры: role, enabled
+POST /api/v1/admin-users/
+  - Создание нового Admin User (SUPER_ADMIN only)
+  - Input: {"username": "...", "email": "...", "password": "...", "role": "admin", "enabled": true}
+  - Output: AdminUserResponse
 
-POST /api/admin-users
-  - Создание нового Admin User (admin only)
+GET /api/v1/admin-users/
+  - Список Admin Users с пагинацией и фильтрацией
+  - Query: page, page_size, role, enabled, search
+  - Output: {"items": [...], "total": N, "page": N, "page_size": N}
 
-GET /api/admin-users/{id}
-  - Детали конкретного Admin User
+GET /api/v1/admin-users/{admin_id}
+  - Детали конкретного Admin User по UUID
+  - Output: AdminUserResponse
 
-PATCH /api/admin-users/{id}
-  - Обновление Admin User (имя, email, организация, роль)
+PUT /api/v1/admin-users/{admin_id}
+  - Обновление Admin User (SUPER_ADMIN only)
+  - Input: {"email": "...", "role": "...", "enabled": true/false}
+  - Ограничения: системный админ (is_system=true) не может быть изменен
 
-DELETE /api/admin-users/{id}
-  - Удаление Admin User (запрещено для is_system=True)
+DELETE /api/v1/admin-users/{admin_id}
+  - Удаление Admin User (SUPER_ADMIN only)
+  - Ограничения: системный админ не может быть удален, нельзя удалить себя
 
-POST /api/admin-users/{id}/disable
-  - Отключение Admin User
-
-POST /api/admin-users/{id}/enable
-  - Включение Admin User
-
-GET /api/admin-users/me
-  - Получение информации текущего Admin User
-```
-
-#### Service Accounts (`/api/service-accounts/*`)
-```
-GET /api/service-accounts
-  - Список всех Service Accounts (с пагинацией)
-  - Фильтры: role, status, created_after
-
-POST /api/service-accounts
-  - Создание нового Service Account
-  - Auto-generated client_id и client_secret
-
-GET /api/service-accounts/{id}
-  - Детали конкретного Service Account
-
-PATCH /api/service-accounts/{id}
-  - Обновление Service Account (role, rate_limit, description)
-
-DELETE /api/service-accounts/{id}
-  - Удаление Service Account (запрещено для is_system=True)
-
-POST /api/service-accounts/{id}/rotate-secret
-  - Ручная ротация client secret
-  - Возвращает новый secret (показывается один раз)
-
-POST /api/service-accounts/{id}/suspend
-  - Приостановка Service Account (status → SUSPENDED)
-
-POST /api/service-accounts/{id}/activate
-  - Активация Service Account (status → ACTIVE)
+POST /api/v1/admin-users/{admin_id}/reset-password
+  - Сброс пароля Admin User (SUPER_ADMIN only)
+  - Input: {"new_password": "..."}
+  - Эффекты: сбрасывает блокировку, обнуляет failed login attempts
 ```
 
-#### Storage Elements (`/api/storage-elements/*`)
+#### Service Accounts (`/api/v1/service-accounts/*`)
+```
+POST /api/v1/service-accounts/
+  - Создание нового Service Account (SUPER_ADMIN only)
+  - Input: {"name": "...", "role": "USER", "description": "...", "rate_limit": 100, "environment": "prod"}
+  - Output: ServiceAccountCreateResponse с client_id и client_secret (secret показывается ТОЛЬКО при создании!)
+
+GET /api/v1/service-accounts/
+  - Список Service Accounts с пагинацией и фильтрацией
+  - Query: skip, limit, role, status, search
+  - Output: {"items": [...], "total": N, "skip": N, "limit": N}
+
+GET /api/v1/service-accounts/{service_account_id}
+  - Детали Service Account по UUID (без client_secret)
+  - Output: ServiceAccountResponse
+
+PUT /api/v1/service-accounts/{service_account_id}
+  - Обновление Service Account (SUPER_ADMIN only)
+  - Input: {"name": "...", "description": "...", "role": "...", "rate_limit": N, "status": "ACTIVE/SUSPENDED"}
+  - Ограничения: системные аккаунты (is_system=true) не могут быть изменены
+
+DELETE /api/v1/service-accounts/{service_account_id}
+  - Удаление Service Account (SUPER_ADMIN only, soft delete → status=DELETED)
+  - Ограничения: системные аккаунты не могут быть удалены
+
+POST /api/v1/service-accounts/{service_account_id}/rotate-secret
+  - Ротация client_secret (SUPER_ADMIN only)
+  - Output: {"id": "...", "name": "...", "client_id": "...", "new_client_secret": "...", "secret_expires_at": "..."}
+  - ВАЖНО: new_client_secret показывается ТОЛЬКО при ротации!
+```
+
+#### Storage Elements (`/api/v1/storage-elements/*`)
 
 **ВАЖНО**: Mode Storage Element определяется ТОЛЬКО его конфигурацией при запуске.
 Изменить mode можно только через изменение конфигурации и перезапуск storage element.
 Admin Module НЕ МОЖЕТ изменять mode через API.
 
 ```
-GET /api/storage-elements
-  - Список всех Storage Elements
-  - Фильтры: mode, status, storage_type, search
-  - Пагинация: skip, limit
-
-GET /api/storage-elements/stats/summary
-  - Сводная статистика по всем Storage Elements
-  - Output: total_count, by_status, by_mode, by_type, total_capacity_gb, total_used_gb, total_files
-
-POST /api/storage-elements/discover
-  - Auto-discovery Storage Element по URL
+POST /api/v1/storage-elements/discover
+  - Auto-discovery Storage Element по URL (preview без регистрации)
   - Input: {"api_url": "http://storage:8010"}
-  - Output: Информация о storage element без регистрации
-  - Используется для preview перед добавлением
+  - Output: Информация о storage element + флаг already_registered
 
-POST /api/storage-elements
-  - Регистрация нового Storage Element с auto-discovery
-  - Input: {"api_url": "http://storage:8010", "name": "optional", "description": "optional"}
-  - mode, storage_type, base_path, capacity_bytes получаются автоматически от storage element
-
-POST /api/storage-elements/sync/{id}
+POST /api/v1/storage-elements/sync/{storage_element_id}
   - Синхронизация данных одного Storage Element
   - Обновляет: mode, capacity_bytes, used_bytes, file_count, status
-  - Output: Результат синхронизации с списком изменений
+  - Публикует изменения в Redis для Service Discovery
+  - Output: {"storage_element_id": N, "name": "...", "success": true, "changes": [...], "synced_at": "..."}
 
-POST /api/storage-elements/sync-all
-  - Массовая синхронизация всех Storage Elements
-  - Query: only_online=true (default) - синхронизировать только ONLINE
-  - Output: Сводка синхронизации (total, synced, failed, results)
+POST /api/v1/storage-elements/sync-all
+  - Массовая синхронизация всех Storage Elements (SUPER_ADMIN only)
+  - Query: only_online=true (default)
+  - Output: {"total": N, "synced": N, "failed": N, "results": [...]}
 
-GET /api/storage-elements/{id}
-  - Детали конкретного Storage Element
+GET /api/v1/storage-elements/stats/summary
+  - Сводная статистика по всем Storage Elements
+  - Output: {total_count, by_status, by_mode, by_type, total_capacity_gb, total_used_gb, total_files, average_usage_percent}
 
-PUT /api/storage-elements/{id}
-  - Обновление конфигурации Storage Element
+POST /api/v1/storage-elements/
+  - Регистрация нового Storage Element с auto-discovery (SUPER_ADMIN only)
+  - Input: {"api_url": "http://storage:8010", "name": "optional", "description": "optional", "api_key": "optional"}
+  - mode, storage_type, base_path, capacity_bytes получаются автоматически от storage element
+  - Публикует в Redis для Service Discovery
+
+GET /api/v1/storage-elements/
+  - Список Storage Elements с пагинацией и фильтрацией
+  - Query: skip, limit, mode, status, storage_type, search
+  - Output: {"items": [...], "total": N, "skip": N, "limit": N}
+
+GET /api/v1/storage-elements/{storage_element_id}
+  - Детали Storage Element по ID
+  - Включает computed fields: capacity_gb, used_gb, usage_percent, is_available, is_writable
+
+PUT /api/v1/storage-elements/{storage_element_id}
+  - Обновление Storage Element (SUPER_ADMIN only)
   - ВАЖНО: mode НЕ может быть изменен через API
   - Доступные поля: name, description, api_url, api_key, status, retention_days, replica_count
 
-DELETE /api/storage-elements/{id}
-  - Удаление Storage Element
-  - Проверка: file_count == 0 и mode != EDIT
+DELETE /api/v1/storage-elements/{storage_element_id}
+  - Удаление Storage Element (SUPER_ADMIN only)
+  - Ограничения: нельзя удалить storage element с файлами (file_count > 0)
 ```
 
-#### Webhooks (`/api/webhooks/*`)
+#### JWT Keys Management (`/api/v1/jwt-keys/*`)
 ```
-GET /api/webhooks
-  - Список зарегистрированных webhooks
+GET /api/v1/jwt-keys/status
+  - Получение статуса JWT key rotation (ADMIN only)
+  - Output: {rotation_enabled, rotation_interval_hours, active_keys_count, latest_key, next_rotation_at, last_rotation_at}
 
-POST /api/webhooks
-  - Регистрация нового webhook
-  - Events: file_restored, restore_failed, file_expiring, security_alert
+GET /api/v1/jwt-keys/active
+  - Список активных JWT ключей (ADMIN only)
+  - Output: {"total": N, "keys": [{version, algorithm, created_at, expires_at, is_active}, ...]}
 
-GET /api/webhooks/{id}
-  - Детали webhook
+POST /api/v1/jwt-keys/rotate
+  - Ручная ротация JWT ключей (ADMIN only)
+  - Input: {"force": false} - если true, игнорирует недавние ротации
+  - Output: {"success": true, "message": "...", "new_key_version": "...", "deactivated_keys": N}
 
-PATCH /api/webhooks/{id}
-  - Обновление webhook
-
-DELETE /api/webhooks/{id}
-  - Удаление webhook
-
-POST /api/webhooks/{id}/test
-  - Тестовая отправка webhook
-```
-
-#### Transactions (Saga Orchestrator) (`/api/transactions/*`)
-```
-GET /api/transactions
-  - Список всех транзакций (с фильтрацией по status)
-
-GET /api/transactions/{id}
-  - Детали конкретной транзакции
-  - Показывает все шаги и их статусы
-
-POST /api/transactions/{id}/compensate
-  - Запуск compensating actions для отката транзакции
-
-GET /api/transactions/{id}/audit
-  - Полный audit trail транзакции
+GET /api/v1/jwt-keys/history
+  - История ротаций JWT ключей (ADMIN only)
+  - Query: limit (default: 50, max: 100)
+  - Output: {"total": N, "entries": [...], "oldest_active_key": "...", "newest_key": "..."}
 ```
 
 #### Health & Monitoring
 ```
 GET /health/live
   - Liveness probe (is service running?)
+  - Output: {"status": "alive", "timestamp": "...", "service": "...", "version": "..."}
 
 GET /health/ready
   - Readiness probe (can handle traffic?)
-  - Проверяет: PostgreSQL, Redis connectivity
+  - Проверяет: PostgreSQL (critical), Redis (non-critical)
+  - Output: {"status": "ready/not_ready", "dependencies": {"database": {...}, "redis": {...}}}
 
-GET /metrics
+GET /health/startup
+  - Startup probe (has service started?)
+  - Проверяет: PostgreSQL connection
+  - Output: {"status": "started/starting", ...}
+
+GET /health/metrics
   - Prometheus metrics endpoint
+  - Requires PROMETHEUS_METRICS_ENABLED=true
 ```
 
 ### Внутренняя архитектура
@@ -350,67 +346,109 @@ GET /metrics
 ```
 admin-module/
 ├── app/
+│   ├── __init__.py
 │   ├── main.py                      # FastAPI application entry point
-│   ├── core/
+│   │
+│   ├── core/                        # Ядро приложения
+│   │   ├── __init__.py
 │   │   ├── config.py                # Pydantic Settings configuration
-│   │   ├── security.py              # JWT generation, validation
-│   │   ├── raft.py                  # Raft consensus implementation
-│   │   └── exceptions.py            # Custom exceptions
-│   ├── api/
-│   │   ├── deps.py                  # FastAPI dependencies (get_db, get_current_user)
+│   │   ├── database.py              # PostgreSQL async/sync session management
+│   │   ├── redis.py                 # Redis connection и health checks
+│   │   ├── exceptions.py            # Custom exceptions
+│   │   ├── logging_config.py        # Structured logging (JSON format)
+│   │   ├── metrics.py               # Prometheus metrics helpers
+│   │   ├── observability.py         # OpenTelemetry tracing
+│   │   ├── password_policy.py       # Password strength validation
+│   │   ├── scheduler.py             # APScheduler для JWT key rotation
+│   │   └── secrets.py               # Cryptographic utilities (JWT keys, hashing)
+│   │
+│   ├── api/                         # REST API layer
+│   │   ├── __init__.py
+│   │   ├── dependencies/            # FastAPI dependencies
+│   │   │   ├── __init__.py
+│   │   │   ├── auth.py              # Service Account JWT validation
+│   │   │   └── admin_auth.py        # Admin User JWT validation, require_role
 │   │   └── v1/
-│   │       ├── router.py            # Main API router
+│   │       ├── __init__.py
 │   │       └── endpoints/
-│   │           ├── auth.py          # Authentication endpoints
-│   │           ├── service_accounts.py
-│   │           ├── storage_elements.py
-│   │           ├── webhooks.py
-│   │           ├── transactions.py
-│   │           └── health.py
-│   ├── models/
-│   │   ├── service_account.py       # ServiceAccount ORM model
-│   │   ├── storage_element.py       # StorageElement ORM model
-│   │   ├── webhook.py               # Webhook ORM model
-│   │   ├── transaction.py           # Transaction ORM model
-│   │   └── audit_log.py             # AuditLog ORM model
-│   ├── schemas/
-│   │   ├── auth.py                  # Auth request/response schemas
-│   │   ├── service_account.py       # Service account schemas
-│   │   ├── storage_element.py       # Storage element schemas
-│   │   └── webhook.py               # Webhook schemas
-│   ├── services/
-│   │   ├── auth_service.py          # Authentication business logic
-│   │   ├── account_service.py       # Service account management
-│   │   ├── storage_service.py       # Storage element management
-│   │   ├── storage_discovery_service.py  # Auto-discovery storage elements
-│   │   ├── storage_sync_service.py  # Synchronization storage elements
-│   │   ├── webhook_service.py       # Webhook management
-│   │   ├── saga_orchestrator.py     # Saga pattern coordinator
-│   │   ├── service_discovery.py     # Redis pub/sub for config
-│   │   └── key_rotation.py          # Automated JWT key rotation
-│   ├── db/
-│   │   ├── session.py               # Database session management
-│   │   └── base.py                  # SQLAlchemy declarative base
-│   └── utils/
-│       ├── crypto.py                # Cryptographic utilities
-│       ├── redis_utils.py           # Redis helpers
-│       └── metrics.py               # Prometheus metrics helpers
-├── alembic/
-│   └── versions/                    # Database migrations
-├── tests/
+│   │           ├── __init__.py
+│   │           ├── auth.py              # OAuth 2.0 token endpoint для Service Accounts
+│   │           ├── admin_auth.py        # Admin User authentication (login, refresh, logout)
+│   │           ├── admin_users.py       # Admin Users CRUD API
+│   │           ├── service_accounts.py  # Service Accounts CRUD API
+│   │           ├── storage_elements.py  # Storage Elements CRUD + discovery + sync
+│   │           ├── jwt_keys.py          # JWT key rotation management
+│   │           └── health.py            # Health probes (live, ready, startup, metrics)
+│   │
+│   ├── models/                      # SQLAlchemy ORM models
+│   │   ├── __init__.py
+│   │   ├── base.py                  # SQLAlchemy declarative base
+│   │   ├── admin_user.py            # AdminUser model (system administrators)
+│   │   ├── service_account.py       # ServiceAccount model (API clients)
+│   │   ├── storage_element.py       # StorageElement model
+│   │   ├── jwt_key.py               # JWTKey model (key rotation storage)
+│   │   └── audit_log.py             # AuditLog model
+│   │
+│   ├── schemas/                     # Pydantic request/response schemas
+│   │   ├── __init__.py
+│   │   ├── auth.py                  # Legacy auth schemas
+│   │   ├── admin_auth.py            # Admin authentication schemas
+│   │   ├── admin_user.py            # Admin user CRUD schemas
+│   │   ├── service_account.py       # Service account schemas (OAuth2, CRUD)
+│   │   ├── storage_element.py       # Storage element schemas (discovery, sync)
+│   │   └── jwt_key.py               # JWT key rotation schemas
+│   │
+│   ├── services/                    # Business logic layer
+│   │   ├── __init__.py
+│   │   ├── admin_auth_service.py        # Admin authentication business logic
+│   │   ├── admin_user_service.py        # Admin user management
+│   │   ├── service_account_service.py   # Service account management
+│   │   ├── token_service.py             # JWT token generation (access + refresh)
+│   │   ├── storage_discovery_service.py # Auto-discovery storage elements
+│   │   ├── storage_sync_service.py      # Storage element synchronization
+│   │   ├── storage_element_publish_service.py # Redis Service Discovery publishing
+│   │   ├── jwt_key_rotation_service.py  # Automated JWT key rotation
+│   │   └── audit_service.py             # Audit logging service
+│   │
+│   ├── middleware/                  # HTTP middleware
+│   │   ├── __init__.py
+│   │   ├── audit_middleware.py      # Audit logging middleware
+│   │   └── rate_limit.py            # Rate limiting middleware
+│   │
+│   ├── db/                          # Database utilities
+│   │   ├── __init__.py
+│   │   └── init_db.py               # Database initialization (initial admin/SA)
+│   │
+│   └── utils/                       # Utility modules
+│       └── __init__.py
+│
+├── alembic/                         # Database migrations
+│   ├── env.py                       # Alembic environment configuration
+│   ├── script.py.mako               # Migration script template
+│   └── versions/                    # Migration files
+│
+├── tests/                           # Test suite
+│   ├── __init__.py
+│   ├── conftest.py                  # Pytest fixtures
+│   ├── test_logging.py              # Logging tests
 │   ├── unit/                        # Unit tests
-│   │   ├── test_auth_service.py
-│   │   ├── test_account_service.py
-│   │   └── test_saga_orchestrator.py
+│   │   ├── __init__.py
+│   │   ├── test_health.py           # Health endpoint tests
+│   │   └── test_service_account.py  # Service account logic tests
 │   └── integration/                 # Integration tests
-│       ├── test_auth_api.py
-│       ├── test_accounts_api.py
-│       └── test_transactions_api.py
+│       ├── __init__.py
+│       ├── test_oauth2_flow.py      # OAuth 2.0 flow tests
+│       ├── test_oauth2_simple.py    # Simple OAuth2 tests
+│       └── test_service_accounts_api.py  # Service accounts API tests
+│
 ├── Dockerfile                       # Production Docker image
 ├── Dockerfile.dev                   # Development Docker image
 ├── requirements.txt                 # Python dependencies
 ├── pytest.ini                       # Pytest configuration
-└── .env.example                     # Example environment variables
+├── alembic.ini                      # Alembic configuration
+├── config.yaml                      # Application configuration
+├── .env.example                     # Example environment variables
+└── AUTH-MECHANICS.md                # Detailed authentication documentation
 ```
 
 ## Принципы разработки
@@ -475,99 +513,318 @@ docker-compose run --rm admin-module pytest tests/ -v
 
 ### Environment Variables
 
+**ВАЖНО**: Boolean значения используют формат `on/off` (не `true/false`).
+
 ```bash
-# Application Settings
-APP_NAME=artstore-admin-module
-APP_VERSION=1.0.0
-LOG_LEVEL=INFO
-LOG_FORMAT=json  # json для production, text для development
+# ═══════════════════════════════════════════════════════════════════════════
+# APPLICATION SETTINGS
+# ═══════════════════════════════════════════════════════════════════════════
+APP_NAME=ArtStore Admin Module
+APP_VERSION=0.1.0
+APP_DEBUG=off                           # Режим отладки (on/off)
+APP_SWAGGER_ENABLED=off                 # Swagger UI (production: off)
+APP_HOST=0.0.0.0
+APP_PORT=8000
 
-# Database
-DATABASE_URL=postgresql+asyncpg://artstore:password@localhost:5432/artstore
-DB_POOL_SIZE=20
-DB_MAX_OVERFLOW=10
+# ═══════════════════════════════════════════════════════════════════════════
+# DATABASE (PostgreSQL)
+# ═══════════════════════════════════════════════════════════════════════════
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=artstore
+DB_PASSWORD=password
+DB_DATABASE=artstore_admin
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+DB_ECHO=off                             # SQL запросы в логи (development only)
 
-# PostgreSQL SSL (опционально, для production)
-DB_SSL_ENABLED=false                    # Включить SSL для PostgreSQL
-DB_SSL_MODE=require                     # SSL режим: disable, require, verify-ca, verify-full
-# DB_SSL_CA_CERT=/app/ssl-certs/ca-cert.pem      # CA certificate (для verify-ca/verify-full)
-# DB_SSL_CLIENT_CERT=/app/ssl-certs/client-cert.pem  # Client certificate (опционально)
-# DB_SSL_CLIENT_KEY=/app/ssl-certs/client-key.pem    # Client key (опционально)
+# PostgreSQL SSL Configuration (опционально, для production)
+DB_SSL_ENABLED=off                      # Включить SSL для PostgreSQL
+DB_SSL_MODE=require                     # Режимы: disable, allow, prefer, require, verify-ca, verify-full
+# DB_SSL_CA_CERT=/path/to/ca-cert.pem         # CA certificate (для verify-ca/verify-full)
+# DB_SSL_CLIENT_CERT=/path/to/client-cert.pem # Client certificate (опционально)
+# DB_SSL_CLIENT_KEY=/path/to/client-key.pem   # Client key (опционально)
 
-# Redis
+# ═══════════════════════════════════════════════════════════════════════════
+# REDIS (Service Discovery, Pub/Sub, Caching)
+# ═══════════════════════════════════════════════════════════════════════════
+# Вариант 1: Прямой URL (высший приоритет)
 REDIS_URL=redis://localhost:6379/0
-REDIS_SENTINEL_ENABLED=false
-REDIS_SENTINEL_HOSTS=sentinel1:26379,sentinel2:26379,sentinel3:26379
-REDIS_MASTER_NAME=mymaster
 
-# JWT Configuration
-JWT_ALGORITHM=RS256
+# Вариант 2: Компоненты (если REDIS_URL не задан)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=                         # Опционально
+REDIS_DB=0
+REDIS_POOL_SIZE=10
+REDIS_SOCKET_TIMEOUT=5
+REDIS_SOCKET_CONNECT_TIMEOUT=5
+
+# ═══════════════════════════════════════════════════════════════════════════
+# JWT AUTHENTICATION (RS256)
+# ═══════════════════════════════════════════════════════════════════════════
+JWT_ALGORITHM=RS256                     # Только RS256 поддерживается
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-JWT_PRIVATE_KEY_PATH=/secrets/jwt_private_key.pem
-JWT_PUBLIC_KEY_PATH=/secrets/jwt_public_key.pem
-JWT_KEY_ROTATION_HOURS=24
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+JWT_PRIVATE_KEY_PATH=.keys/private_key.pem
+JWT_PUBLIC_KEY_PATH=.keys/public_key.pem
+JWT_KEY_ROTATION_HOURS=24               # Интервал автоматической ротации ключей
 
-# Raft Consensus (для кластера)
-RAFT_NODE_ID=node1
-RAFT_CLUSTER_NODES=node1:8000,node2:8001,node3:8002
-RAFT_ELECTION_TIMEOUT_MS=150
-RAFT_HEARTBEAT_INTERVAL_MS=50
+# Platform-Agnostic Secret Management для JWT ключей:
+# 1. Kubernetes Secret: JWT_PRIVATE_KEY / JWT_PUBLIC_KEY (полное PEM содержимое)
+# 2. Environment Variables: JWT_PRIVATE_KEY_PATH / JWT_PUBLIC_KEY_PATH
+# 3. File-based secrets: ./secrets/ directory
 
-# Security
-CLIENT_SECRET_ROTATION_DAYS=90
-RATE_LIMIT_PER_MINUTE=100
-WEBHOOK_TIMEOUT_SECONDS=10
+# ═══════════════════════════════════════════════════════════════════════════
+# CORS (Cross-Origin Resource Sharing)
+# ═══════════════════════════════════════════════════════════════════════════
+CORS_ENABLED=on
+CORS_ALLOW_ORIGINS=http://localhost:4200  # Production: explicit domains only!
+CORS_ALLOW_CREDENTIALS=on
+CORS_ALLOW_METHODS=GET,POST,PUT,DELETE,PATCH,OPTIONS
+CORS_ALLOW_HEADERS=Content-Type,Authorization,X-Request-ID,X-Trace-ID
+CORS_MAX_AGE=600                        # Preflight cache duration (seconds)
 
-# Monitoring
-PROMETHEUS_METRICS_ENABLED=true
-OPENTELEMETRY_ENABLED=true
-OPENTELEMETRY_ENDPOINT=http://localhost:4317
+# ═══════════════════════════════════════════════════════════════════════════
+# RATE LIMITING
+# ═══════════════════════════════════════════════════════════════════════════
+RATE_LIMIT_ENABLED=on
+RATE_LIMIT_REQUESTS_PER_MINUTE=60
+RATE_LIMIT_BURST=10
 
-# Initial System Account (автосоздание при первом запуске)
-INITIAL_ACCOUNT_ENABLED=true
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGGING
+# ═══════════════════════════════════════════════════════════════════════════
+LOG_LEVEL=INFO                          # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FORMAT=json                         # json (production) / text (development)
+# LOG_FILE=/path/to/logfile.log         # Опционально
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MONITORING
+# ═══════════════════════════════════════════════════════════════════════════
+PROMETHEUS_ENABLED=on
+OPENTELEMETRY_ENABLED=on
+OPENTELEMETRY_SERVICE_NAME=artstore-admin-module
+# OPENTELEMETRY_EXPORTER_ENDPOINT=http://localhost:4317
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SERVICE DISCOVERY (Redis Pub/Sub)
+# ═══════════════════════════════════════════════════════════════════════════
+SERVICE_DISCOVERY_ENABLED=on
+SERVICE_DISCOVERY_REDIS_CHANNEL=artstore:service_discovery
+SERVICE_DISCOVERY_PUBLISH_INTERVAL=30   # Интервал публикации в секундах
+SERVICE_DISCOVERY_STORAGE_ELEMENT_CONFIG_KEY=artstore:storage_elements
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SAGA ORCHESTRATION
+# ═══════════════════════════════════════════════════════════════════════════
+SAGA_ENABLED=on
+SAGA_TIMEOUT_SECONDS=300
+SAGA_RETRY_ATTEMPTS=3
+SAGA_RETRY_BACKOFF_SECONDS=5
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HEALTH CHECKS
+# ═══════════════════════════════════════════════════════════════════════════
+HEALTH_STARTUP_TIMEOUT=30
+HEALTH_LIVENESS_TIMEOUT=5
+HEALTH_READINESS_TIMEOUT=10
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCHEDULER (APScheduler Background Jobs)
+# ═══════════════════════════════════════════════════════════════════════════
+SCHEDULER_ENABLED=on
+SCHEDULER_TIMEZONE=UTC
+SCHEDULER_JWT_ROTATION_ENABLED=on
+SCHEDULER_JWT_ROTATION_INTERVAL_HOURS=24
+SCHEDULER_STORAGE_HEALTH_CHECK_ENABLED=on
+SCHEDULER_STORAGE_HEALTH_CHECK_INTERVAL_SECONDS=60  # 10-3600
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INITIAL ADMINISTRATOR (создается при первом запуске)
+# ═══════════════════════════════════════════════════════════════════════════
+INITIAL_ADMIN_ENABLED=on
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=ChangeMe123!     # ОБЯЗАТЕЛЬНО сменить в production!
+INITIAL_ADMIN_EMAIL=admin@artstore.local
+INITIAL_ADMIN_FIRSTNAME=System
+INITIAL_ADMIN_LASTNAME=Administrator
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INITIAL SERVICE ACCOUNT (OAuth 2.0 Client Credentials)
+# ═══════════════════════════════════════════════════════════════════════════
+INITIAL_ACCOUNT_ENABLED=on
 INITIAL_ACCOUNT_NAME=admin-service
-INITIAL_CLIENT_ID=  # Auto-generated если не указан
-INITIAL_CLIENT_SECRET=  # Auto-generated, ИЗМЕНИТЬ В PRODUCTION!
-INITIAL_ACCOUNT_ROLE=ADMIN
+INITIAL_ACCOUNT_PASSWORD=               # Пустой = автогенерация (выводится в логи)
+INITIAL_ACCOUNT_ROLE=ADMIN              # ADMIN, USER, AUDITOR, READONLY
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PASSWORD POLICY
+# ═══════════════════════════════════════════════════════════════════════════
+PASSWORD_MIN_LENGTH=12                  # Минимальная длина (8-128)
+PASSWORD_REQUIRE_UPPERCASE=on
+PASSWORD_REQUIRE_LOWERCASE=on
+PASSWORD_REQUIRE_DIGITS=on
+PASSWORD_REQUIRE_SPECIAL=on             # Требовать !@#$%^&* и т.д.
+PASSWORD_MAX_AGE_DAYS=90               # Срок действия (30-365)
+PASSWORD_HISTORY_SIZE=5                 # Количество запрещенных старых паролей (0-24)
+PASSWORD_EXPIRATION_WARNING_DAYS=14     # За сколько дней предупреждать
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECURITY (HMAC, Audit)
+# ═══════════════════════════════════════════════════════════════════════════
+SECURITY_AUDIT_HMAC_SECRET=change-me-in-production-to-secure-random-value  # Минимум 32 символа!
+SECURITY_AUDIT_RETENTION_DAYS=2555      # ~7 лет (compliance requirement)
 ```
 
 ### config.yaml (опционально, переопределяется через ENV)
 
 ```yaml
 app:
-  name: artstore-admin-module
-  version: "1.0.0"
+  name: "ArtStore Admin Module"
+  version: "0.1.0"
   debug: false
+  swagger_enabled: false
+  host: "0.0.0.0"
+  port: 8000
 
 database:
-  url: "postgresql+asyncpg://artstore:password@localhost:5432/artstore"
-  pool_size: 20
-  max_overflow: 10
+  host: "localhost"
+  port: 5432
+  username: "artstore"
+  password: "password"
+  database: "artstore_admin"
+  pool_size: 10
+  max_overflow: 20
   echo: false
-  # PostgreSQL SSL (опционально)
   ssl_enabled: false
   ssl_mode: "require"
-  ssl_ca_cert: null  # /app/ssl-certs/ca-cert.pem
-  ssl_client_cert: null
-  ssl_client_key: null
+  # ssl_ca_cert: "/path/to/ca-cert.pem"
+  # ssl_client_cert: "/path/to/client-cert.pem"
+  # ssl_client_key: "/path/to/client-key.pem"
 
 redis:
-  url: "redis://localhost:6379/0"
-  sentinel_enabled: false
+  host: "localhost"
+  port: 6379
+  password: null
+  db: 0
+  pool_size: 10
 
 jwt:
   algorithm: "RS256"
   access_token_expire_minutes: 30
+  refresh_token_expire_days: 7
+  private_key_path: ".keys/private_key.pem"
+  public_key_path: ".keys/public_key.pem"
   key_rotation_hours: 24
 
-security:
-  client_secret_rotation_days: 90
-  rate_limit_per_minute: 100
+cors:
+  enabled: true
+  allow_origins:
+    - "http://localhost:4200"
+  allow_credentials: true
+  allow_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "PATCH"
+    - "OPTIONS"
+  allow_headers:
+    - "Content-Type"
+    - "Authorization"
+    - "X-Request-ID"
+    - "X-Trace-ID"
+  max_age: 600
+
+rate_limit:
+  enabled: true
+  requests_per_minute: 60
+  burst: 10
 
 logging:
   level: "INFO"
   format: "json"
+
+monitoring:
+  prometheus:
+    enabled: true
+  opentelemetry:
+    enabled: true
+    service_name: "artstore-admin-module"
+    exporter_endpoint: null
+
+service_discovery:
+  enabled: true
+  redis_channel: "artstore:service_discovery"
+  publish_interval_seconds: 30
+  storage_element_config_key: "artstore:storage_elements"
+
+saga:
+  enabled: true
+  timeout_seconds: 300
+  retry_attempts: 3
+  retry_backoff_seconds: 5
+
+health:
+  startup_timeout_seconds: 30
+  liveness_timeout_seconds: 5
+  readiness_timeout_seconds: 10
+
+scheduler:
+  enabled: true
+  timezone: "UTC"
+  jwt_rotation_enabled: true
+  jwt_rotation_interval_hours: 24
+  storage_health_check_enabled: true
+  storage_health_check_interval_seconds: 60
+
+initial_admin:
+  enabled: true
+  username: "admin"
+  password: "ChangeMe123!"  # ОБЯЗАТЕЛЬНО сменить в production!
+  email: "admin@artstore.local"
+  firstname: "System"
+  lastname: "Administrator"
+
+security:
+  audit_hmac_secret: "change-me-in-production-to-secure-random-value"
+  audit_retention_days: 2555
+
+password:
+  min_length: 12
+  require_uppercase: true
+  require_lowercase: true
+  require_digits: true
+  require_special: true
+  max_age_days: 90
+  history_size: 5
+  expiration_warning_days: 14
 ```
+
+### Platform-Agnostic Secret Management
+
+JWT ключи и другие секреты могут быть загружены из нескольких источников (в порядке приоритета):
+
+1. **Kubernetes Secrets** (автоматически в k8s/k3s):
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: artstore-jwt-keys
+   stringData:
+     JWT_PRIVATE_KEY: |
+       -----BEGIN RSA PRIVATE KEY-----
+       ...
+       -----END RSA PRIVATE KEY-----
+     JWT_PUBLIC_KEY: |
+       -----BEGIN PUBLIC KEY-----
+       ...
+       -----END PUBLIC KEY-----
+   ```
+
+2. **Environment Variables** (docker-compose, development)
+3. **File-based secrets** (./secrets/ directory)
 
 ## Мониторинг и метрики
 
@@ -584,10 +841,8 @@ logging:
 - `artstore_auth_token_validation_duration_seconds`: Время валидации токенов
 - `artstore_service_accounts_total`: Количество Service Accounts по статусу
 - `artstore_jwt_key_rotations_total`: Количество ротаций JWT ключей
-- `artstore_saga_transactions_total`: Количество Saga транзакций по типу
-- `artstore_saga_compensations_total`: Количество compensating actions
 - `artstore_storage_elements_total`: Количество Storage Elements по режиму
-- `artstore_webhook_deliveries_total`: Webhook доставки (success/failure)
+- `artstore_storage_health_check_duration_seconds`: Время выполнения health check storage elements
 
 ### OpenTelemetry Tracing
 
@@ -627,8 +882,13 @@ docker build -t artstore-admin-module:latest -f Dockerfile .
 docker run -d \
   --name admin-module \
   -p 8000:8000 \
-  -e DATABASE_URL=postgresql+asyncpg://... \
-  -e REDIS_URL=redis://... \
+  -e DB_HOST=postgres \
+  -e DB_PORT=5432 \
+  -e DB_USERNAME=artstore \
+  -e DB_PASSWORD=password \
+  -e DB_DATABASE=artstore_admin \
+  -e REDIS_HOST=redis \
+  -e REDIS_PORT=6379 \
   artstore-admin-module:latest
 
 # Docker Compose (рекомендуется для разработки)
@@ -638,28 +898,21 @@ docker-compose build admin-module
 docker-compose up -d admin-module
 ```
 
-### High Availability Cluster (Production)
+### Production Deployment
 
 ```bash
-# 3-узловой кластер с Raft consensus
-docker-compose -f docker-compose.prod.yml up -d \
-  admin-module-node1 \
-  admin-module-node2 \
-  admin-module-node3
-
-# Load balancer (HAProxy/Nginx)
-docker-compose -f docker-compose.prod.yml up -d load-balancer
-
-# Проверка статуса кластера
-curl http://localhost:8000/api/cluster/status
-{
-  "leader": "node1",
-  "nodes": [
-    {"id": "node1", "state": "leader", "healthy": true},
-    {"id": "node2", "state": "follower", "healthy": true},
-    {"id": "node3", "state": "follower", "healthy": true}
-  ]
-}
+# Production с отключенным debug и swagger
+docker run -d \
+  --name admin-module \
+  -p 8000:8000 \
+  -e APP_DEBUG=off \
+  -e APP_SWAGGER_ENABLED=off \
+  -e DB_HOST=postgres-prod \
+  -e DB_SSL_ENABLED=on \
+  -e DB_SSL_MODE=verify-full \
+  -e INITIAL_ADMIN_PASSWORD=SecurePassword123! \
+  -e SECURITY_AUDIT_HMAC_SECRET=your-32-character-production-secret \
+  artstore-admin-module:latest
 ```
 
 ## Troubleshooting
