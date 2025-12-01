@@ -47,10 +47,12 @@ class StorageElement(Base, TimestampMixin):
     Модель Storage Element - физическое хранилище файлов.
 
     Attributes:
-        id: Уникальный идентификатор
+        id: Уникальный идентификатор (auto-increment)
+        element_id: Строковый ID для Redis Registry (например: se-01) - Sprint 14
         name: Человекочитаемое имя (уникальное)
         description: Описание хранилища
         mode: Режим работы (edit/rw/ro/ar)
+        priority: Приоритет для Sequential Fill (меньше = выше приоритет) - Sprint 14
         storage_type: Тип физического хранилища (local/s3)
         base_path: Базовый путь для local или bucket name для s3
         api_url: URL для API доступа к storage element
@@ -71,6 +73,15 @@ class StorageElement(Base, TimestampMixin):
 
     # Primary key
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # Unique identifier for Redis Registry (Sprint 14)
+    element_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=True,
+        index=True,
+        comment="Уникальный строковый ID для Redis Registry (например: se-01)"
+    )
 
     # Basic information
     name: Mapped[str] = mapped_column(
@@ -94,6 +105,15 @@ class StorageElement(Base, TimestampMixin):
         default=StorageMode.EDIT,
         index=True,
         comment="Режим работы storage element"
+    )
+
+    # Priority for Sequential Fill algorithm (Sprint 14)
+    # Меньше значение = выше приоритет (100 = default, 1-99 = high priority, 101+ = low priority)
+    priority: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=100,
+        comment="Приоритет для Sequential Fill алгоритма (меньше = выше приоритет)"
     )
 
     # Storage configuration
@@ -182,11 +202,12 @@ class StorageElement(Base, TimestampMixin):
     __table_args__ = (
         Index("idx_storage_mode_status", "mode", "status"),
         Index("idx_storage_status", "status"),
+        Index("idx_storage_mode_priority", "mode", "priority"),  # Sprint 14: Sequential Fill
     )
 
     def __repr__(self) -> str:
         """Строковое представление storage element."""
-        return f"<StorageElement(id={self.id}, name='{self.name}', mode={self.mode}, status={self.status})>"
+        return f"<StorageElement(id={self.id}, element_id='{self.element_id}', name='{self.name}', mode={self.mode}, priority={self.priority}, status={self.status})>"
 
     @property
     def is_available(self) -> bool:

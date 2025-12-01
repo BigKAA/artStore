@@ -53,6 +53,16 @@ class StorageElementUnavailableException(UploadException):
     pass
 
 
+class NoAvailableStorageException(UploadException):
+    """
+    Нет доступного Storage Element для загрузки.
+
+    Sprint 14: Возникает когда StorageSelector не может найти подходящий SE
+    (все SE недоступны, переполнены или не соответствуют требуемому режиму).
+    """
+    pass
+
+
 class InvalidFileTypeException(UploadException):
     """Недопустимый тип файла."""
     pass

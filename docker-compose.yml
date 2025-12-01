@@ -308,6 +308,13 @@ services:
       STORAGE_TYPE: s3  # local или s3
       STORAGE_MAX_SIZE_GB: 100
 
+      # Health Reporting Settings (Sprint 14)
+      STORAGE_ELEMENT_ID: se-01
+      STORAGE_PRIORITY: 100
+      STORAGE_EXTERNAL_ENDPOINT: http://storage-element-01:8000
+      HEALTH_REPORT_INTERVAL: 30
+      HEALTH_REPORT_TTL_MULTIPLIER: 3
+
       # Local Filesystem
       STORAGE_LOCAL_BASE_PATH: /app/.data/storage
 
@@ -345,7 +352,10 @@ services:
       DB_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
 
       # Redis
-      REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_POOL_SIZE: 10
 
       # WAL
       WAL_ENABLED: "on"
@@ -381,7 +391,7 @@ services:
       retries: 3
       start_period: 60s
 
-  # Storage Element 02 - Physical File Storage (EDIT mode)
+  # Storage Element 02 - Physical File Storage (RW mode - secondary)
   storage-element-02:
     build:
       context: ./storage-element
@@ -401,6 +411,13 @@ services:
       # Storage Configuration
       STORAGE_TYPE: s3  # local или s3
       STORAGE_MAX_SIZE_GB: 100
+
+      # Health Reporting Settings (Sprint 14)
+      STORAGE_ELEMENT_ID: se-02
+      STORAGE_PRIORITY: 200
+      STORAGE_EXTERNAL_ENDPOINT: http://storage-element-02:8000
+      HEALTH_REPORT_INTERVAL: 30
+      HEALTH_REPORT_TTL_MULTIPLIER: 3
 
       # Local Filesystem
       STORAGE_LOCAL_BASE_PATH: /app/.data/storage
@@ -439,7 +456,10 @@ services:
       DB_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
 
       # Redis
-      REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_POOL_SIZE: 10
 
       # WAL
       WAL_ENABLED: "on"

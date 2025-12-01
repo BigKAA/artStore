@@ -2,6 +2,12 @@
 Ingester Module - Upload Service.
 
 Сервис для загрузки файлов в Storage Element.
+
+Sprint 14: Интеграция с StorageSelector для динамического выбора SE.
+- Sequential Fill алгоритм через Redis Registry
+- Fallback на Admin Module API при недоступности Redis
+- Fallback на локальную конфигурацию как последний resort
+
 MVP реализация без Saga и Circuit Breaker (будет добавлено позже).
 """
 
@@ -9,7 +15,7 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
@@ -18,7 +24,8 @@ from fastapi import UploadFile
 from app.core.config import settings
 from app.core.exceptions import (
     StorageElementUnavailableException,
-    FileSizeLimitExceededException
+    FileSizeLimitExceededException,
+    NoAvailableStorageException
 )
 from app.schemas.upload import (
     UploadRequest,
@@ -27,6 +34,10 @@ from app.schemas.upload import (
     CompressionAlgorithm
 )
 from app.services.auth_service import AuthService
+
+# TYPE_CHECKING для избежания circular imports
+if TYPE_CHECKING:
+    from app.services.storage_selector import StorageSelector, RetentionPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +49,11 @@ class UploadService:
     Отвечает за:
     - Валидацию файлов
     - OAuth 2.0 аутентификацию через Service Account
+    - Динамический выбор Storage Element через StorageSelector (Sprint 14)
     - Коммуникацию со Storage Element
     - Обработку ошибок загрузки
+
+    Sprint 14: Интеграция с StorageSelector для Sequential Fill алгоритма.
     """
 
     def __init__(self, auth_service: AuthService):
@@ -53,9 +67,29 @@ class UploadService:
         self._client: Optional[httpx.AsyncClient] = None
         self._max_file_size = 1024 * 1024 * 1024  # 1GB по умолчанию
 
+        # Sprint 14: StorageSelector для динамического выбора SE
+        self._storage_selector: Optional["StorageSelector"] = None
+
+        # Кеш HTTP клиентов для разных SE endpoints
+        self._se_clients: dict[str, httpx.AsyncClient] = {}
+
+    def set_storage_selector(self, storage_selector: "StorageSelector") -> None:
+        """
+        Установка StorageSelector для динамического выбора SE.
+
+        Sprint 14: Вызывается из main.py lifespan после инициализации StorageSelector.
+
+        Args:
+            storage_selector: Инициализированный StorageSelector
+        """
+        self._storage_selector = storage_selector
+        logger.info("StorageSelector injected into UploadService")
+
     async def _get_client(self) -> httpx.AsyncClient:
         """
-        Получить HTTP клиент (создает если не существует).
+        Получить HTTP клиент для default SE (создает если не существует).
+
+        Используется как fallback когда StorageSelector не настроен.
 
         Sprint 16 Phase 4: Поддержка mTLS для inter-service authentication.
 
@@ -84,12 +118,65 @@ class UploadService:
 
         return self._client
 
+    async def _get_client_for_endpoint(self, endpoint: str) -> httpx.AsyncClient:
+        """
+        Получить HTTP клиент для указанного SE endpoint.
+
+        Sprint 14: Поддержка multiple Storage Elements через StorageSelector.
+        Кеширует клиенты для повторного использования.
+
+        Args:
+            endpoint: URL Storage Element (например: http://storage-element-01:8010)
+
+        Returns:
+            httpx.AsyncClient: Async HTTP клиент для указанного endpoint
+        """
+        # Проверяем кеш
+        if endpoint in self._se_clients:
+            return self._se_clients[endpoint]
+
+        # Создаём новый клиент для этого endpoint
+        client_config = {
+            "base_url": endpoint,
+            "timeout": settings.storage_element.timeout,
+            "limits": httpx.Limits(
+                max_connections=settings.storage_element.connection_pool_size
+            ),
+            "http2": True,
+        }
+
+        client = httpx.AsyncClient(**client_config)
+        self._se_clients[endpoint] = client
+
+        logger.info(
+            "HTTP client created for SE endpoint",
+            extra={"endpoint": endpoint}
+        )
+
+        return client
+
     async def close(self):
-        """Закрытие HTTP клиента."""
+        """
+        Закрытие всех HTTP клиентов.
+
+        Sprint 14: Закрывает как default client, так и все SE-specific клиенты.
+        """
+        # Закрываем default client
         if self._client:
             await self._client.aclose()
-            self._client = None  # Reset client after closing
-            logger.info("HTTP client closed")
+            self._client = None
+            logger.info("Default HTTP client closed")
+
+        # Sprint 14: Закрываем все SE-specific клиенты
+        for endpoint, client in self._se_clients.items():
+            try:
+                await client.aclose()
+                logger.debug(f"SE HTTP client closed", extra={"endpoint": endpoint})
+            except Exception as e:
+                logger.warning(f"Error closing SE client", extra={"endpoint": endpoint, "error": str(e)})
+
+        self._se_clients.clear()
+        logger.info("All HTTP clients closed")
 
     async def upload_file(
         self,
@@ -100,6 +187,11 @@ class UploadService:
     ) -> UploadResponse:
         """
         Загрузка файла в Storage Element.
+
+        Sprint 14: Динамический выбор SE через StorageSelector.
+        - Маппинг storage_mode → retention_policy
+        - Sequential Fill алгоритм для выбора оптимального SE
+        - Fallback на статическую конфигурацию если StorageSelector не настроен
 
         Args:
             file: Загружаемый файл
@@ -113,6 +205,7 @@ class UploadService:
         Raises:
             StorageElementUnavailableException: Storage Element недоступен
             FileSizeLimitExceededException: Превышен лимит размера
+            NoAvailableStorageException: Нет доступного SE для загрузки
         """
         logger.info(
             "Starting file upload",
@@ -137,6 +230,12 @@ class UploadService:
         # Расчет checksum
         checksum = hashlib.sha256(content).hexdigest()
 
+        # Sprint 14: Выбор Storage Element через StorageSelector
+        storage_element_url = await self._select_storage_element(
+            file_size=file_size,
+            storage_mode=request.storage_mode
+        )
+
         # Формирование данных для Storage Element
         files = {
             'file': (file.filename, content, file.content_type or 'application/octet-stream')
@@ -156,7 +255,8 @@ class UploadService:
             # Получить JWT access token для аутентификации
             access_token = await self.auth_service.get_access_token()
 
-            client = await self._get_client()
+            # Sprint 14: Используем клиент для выбранного SE endpoint
+            client = await self._get_client_for_endpoint(storage_element_url)
 
             # Отправка запроса в Storage Element с Authorization header
             response = await client.post(
@@ -175,7 +275,8 @@ class UploadService:
                     "file_id": result.get('file_id'),
                     "uploaded_filename": file.filename,
                     "file_size": file_size,
-                    "user_id": user_id
+                    "user_id": user_id,
+                    "storage_element_url": storage_element_url  # Sprint 14: логируем куда загрузили
                 }
             )
 
@@ -189,7 +290,7 @@ class UploadService:
                 compression_ratio=None,  # TODO: calculate if compressed
                 checksum=result.get('checksum', checksum),
                 uploaded_at=datetime.now(timezone.utc),
-                storage_element_url=settings.storage_element.base_url
+                storage_element_url=storage_element_url  # Sprint 14: URL выбранного SE
             )
 
         except httpx.HTTPStatusError as e:
@@ -197,7 +298,8 @@ class UploadService:
                 "Storage Element HTTP error",
                 extra={
                     "status_code": e.response.status_code,
-                    "error": str(e)
+                    "error": str(e),
+                    "storage_element_url": storage_element_url
                 }
             )
             raise StorageElementUnavailableException(
@@ -207,8 +309,90 @@ class UploadService:
         except httpx.RequestError as e:
             logger.error(
                 "Storage Element connection error",
-                extra={"error": str(e)}
+                extra={"error": str(e), "storage_element_url": storage_element_url}
             )
             raise StorageElementUnavailableException(
                 f"Cannot connect to Storage Element: {str(e)}"
             )
+
+    async def _select_storage_element(
+        self,
+        file_size: int,
+        storage_mode: StorageMode
+    ) -> str:
+        """
+        Выбор Storage Element для загрузки файла.
+
+        Sprint 14: Использует StorageSelector с Sequential Fill алгоритмом.
+        Fallback на статическую конфигурацию если StorageSelector не настроен.
+
+        Args:
+            file_size: Размер файла в байтах
+            storage_mode: Режим хранения из request (edit, rw)
+
+        Returns:
+            str: URL выбранного Storage Element
+
+        Raises:
+            NoAvailableStorageException: Нет подходящего SE
+        """
+        # Fallback на статическую конфигурацию если StorageSelector не настроен
+        if not self._storage_selector:
+            logger.warning(
+                "StorageSelector not configured, using static config",
+                extra={"base_url": settings.storage_element.base_url}
+            )
+            return settings.storage_element.base_url
+
+        # Маппинг storage_mode → retention_policy
+        # edit mode = temporary files (TEMPORARY policy)
+        # rw mode = permanent files (PERMANENT policy)
+        from app.services.storage_selector import RetentionPolicy
+
+        if storage_mode == StorageMode.EDIT:
+            retention_policy = RetentionPolicy.TEMPORARY
+        else:  # StorageMode.RW
+            retention_policy = RetentionPolicy.PERMANENT
+
+        logger.debug(
+            "Selecting SE via StorageSelector",
+            extra={
+                "file_size": file_size,
+                "storage_mode": storage_mode.value,
+                "retention_policy": retention_policy.value
+            }
+        )
+
+        # Выбор SE через StorageSelector (Sequential Fill)
+        se_info = await self._storage_selector.select_storage_element(
+            file_size=file_size,
+            retention_policy=retention_policy
+        )
+
+        if not se_info:
+            logger.error(
+                "No available Storage Element found",
+                extra={
+                    "file_size": file_size,
+                    "storage_mode": storage_mode.value,
+                    "retention_policy": retention_policy.value
+                }
+            )
+            raise NoAvailableStorageException(
+                f"No available Storage Element for mode={storage_mode.value}, "
+                f"file_size={file_size} bytes"
+            )
+
+        logger.info(
+            "Storage Element selected",
+            extra={
+                "se_id": se_info.element_id,
+                "endpoint": se_info.endpoint,
+                "mode": se_info.mode,
+                "priority": se_info.priority,
+                "capacity_free": se_info.capacity_free,
+                "capacity_status": se_info.capacity_status.value
+            }
+        )
+
+        return se_info.endpoint
