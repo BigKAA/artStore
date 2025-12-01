@@ -127,6 +127,45 @@ async def check_db_connection() -> bool:
         return False
 
 
+# Список таблиц, необходимых для работы Admin Module
+REQUIRED_TABLES = [
+    "admin_users",
+    "storage_elements",
+    "service_accounts",
+    "jwt_keys",
+    "audit_logs"
+]
+
+
+async def check_db_tables() -> tuple[bool, list[str]]:
+    """
+    Проверка наличия всех необходимых таблиц в базе данных.
+    Используется в readiness health checks для проверки версии схемы.
+
+    Returns:
+        tuple: (all_present, missing_tables)
+            - all_present: True если все таблицы существуют
+            - missing_tables: Список отсутствующих таблиц
+
+    Example:
+        ok, missing = await check_db_tables()
+        if not ok:
+            logger.error(f"Missing tables: {missing}")
+    """
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            ))
+            existing_tables = {row[0] for row in result.fetchall()}
+            missing_tables = [t for t in REQUIRED_TABLES if t not in existing_tables]
+            return len(missing_tables) == 0, missing_tables
+    except Exception as e:
+        logger.error(f"Failed to check database tables: {e}")
+        return False, REQUIRED_TABLES
+
+
 async def init_db() -> None:
     """
     Инициализация базы данных.
@@ -195,3 +234,76 @@ async def create_standalone_async_session() -> AsyncSession:
     )
 
     return standalone_session_maker()
+
+
+async def check_db_connection_standalone() -> bool:
+    """
+    Standalone версия проверки подключения к базе данных.
+
+    Создаёт собственный engine для использования в отдельном event loop
+    (например, в APScheduler background jobs с asyncio.run()).
+
+    ВАЖНО: НЕ ИСПОЛЬЗОВАТЬ в FastAPI endpoints - там используйте check_db_connection().
+
+    Returns:
+        bool: True если подключение работает, False иначе
+    """
+    standalone_engine = None
+    try:
+        standalone_engine = create_async_engine(
+            settings.database.url,
+            echo=False,
+            pool_pre_ping=True,
+            pool_size=1,
+            max_overflow=0,
+            connect_args={"ssl": False},
+        )
+        async with standalone_engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        logger.error(f"Standalone database connection check failed: {e}")
+        return False
+    finally:
+        if standalone_engine:
+            await standalone_engine.dispose()
+
+
+async def check_db_tables_standalone() -> tuple[bool, list[str]]:
+    """
+    Standalone версия проверки наличия всех необходимых таблиц.
+
+    Создаёт собственный engine для использования в отдельном event loop
+    (например, в APScheduler background jobs с asyncio.run()).
+
+    ВАЖНО: НЕ ИСПОЛЬЗОВАТЬ в FastAPI endpoints - там используйте check_db_tables().
+
+    Returns:
+        tuple: (all_present, missing_tables)
+            - all_present: True если все таблицы существуют
+            - missing_tables: Список отсутствующих таблиц
+    """
+    standalone_engine = None
+    try:
+        standalone_engine = create_async_engine(
+            settings.database.url,
+            echo=False,
+            pool_pre_ping=True,
+            pool_size=1,
+            max_overflow=0,
+            connect_args={"ssl": False},
+        )
+        async with standalone_engine.begin() as conn:
+            result = await conn.execute(text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            ))
+            existing_tables = {row[0] for row in result.fetchall()}
+            missing_tables = [t for t in REQUIRED_TABLES if t not in existing_tables]
+            return len(missing_tables) == 0, missing_tables
+    except Exception as e:
+        logger.error(f"Standalone failed to check database tables: {e}")
+        return False, REQUIRED_TABLES
+    finally:
+        if standalone_engine:
+            await standalone_engine.dispose()

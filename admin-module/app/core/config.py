@@ -642,9 +642,23 @@ class SchedulerSettings(BaseSettings):
         description="Интервал проверки storage elements в секундах (10-3600)"
     )
 
+    # Readiness Health Check - периодическая проверка состояния БД и Redis для /health/ready
+    readiness_check_enabled: bool = Field(
+        default=True,
+        alias="SCHEDULER_READINESS_CHECK_ENABLED",
+        description="Включить периодическую проверку готовности приложения (БД + Redis)"
+    )
+    readiness_check_interval_seconds: int = Field(
+        default=60,
+        ge=5,
+        le=300,
+        alias="SCHEDULER_READINESS_CHECK_INTERVAL_SECONDS",
+        description="Интервал проверки готовности в секундах (5-300)"
+    )
+
     model_config = SettingsConfigDict(env_prefix="SCHEDULER_", case_sensitive=False, extra="allow")
 
-    @field_validator("enabled", "jwt_rotation_enabled", "storage_health_check_enabled", mode="before")
+    @field_validator("enabled", "jwt_rotation_enabled", "storage_health_check_enabled", "readiness_check_enabled", mode="before")
     @classmethod
     def parse_bool_fields(cls, v):
         """Парсинг boolean полей из environment variables."""

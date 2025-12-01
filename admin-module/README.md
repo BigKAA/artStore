@@ -328,17 +328,242 @@ GET /health/live
 
 GET /health/ready
   - Readiness probe (can handle traffic?)
-  - Проверяет: PostgreSQL (critical), Redis (non-critical)
-  - Output: {"status": "ready/not_ready", "dependencies": {"database": {...}, "redis": {...}}}
+  - Подробное описание ниже в разделе "Readiness Probe Architecture"
 
 GET /health/startup
   - Startup probe (has service started?)
-  - Проверяет: PostgreSQL connection
+  - Проверяет: PostgreSQL connection (из кеша HealthStateService)
   - Output: {"status": "started/starting", ...}
 
 GET /health/metrics
   - Prometheus metrics endpoint
   - Requires PROMETHEUS_METRICS_ENABLED=true
+```
+
+### Readiness Probe Architecture
+
+#### Асинхронная архитектура
+
+Readiness probe (`/health/ready`) использует **асинхронную архитектуру** для обеспечения стабильного и быстрого ответа:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ APScheduler (background thread)                                     │
+│                                                                     │
+│  readiness_health_check_job() каждые 60 сек (конфигурируемо):       │
+│    └── check_db_connection_standalone()      # Standalone engine    │
+│    └── check_db_tables_standalone()          # Проверка таблиц      │
+│    └── check_redis_with_error_standalone()   # Standalone client    │
+│    └── health_state_service.update_state()   # Обновление кеша      │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ HealthStateService (thread-safe singleton)                          │
+│    └── Кеширует состояние между проверками                          │
+│    └── Доступен из любого потока через threading.Lock               │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ GET /health/ready (FastAPI endpoint)                                │
+│    └── health_state_service.get_state()  # Мгновенное чтение        │
+│    └── Return 200 OK / 503 + reason      # Без I/O операций         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Преимущества асинхронного подхода:**
+- Endpoint отвечает мгновенно (чтение из кеша, без I/O)
+- Нет нагрузки на БД/Redis при каждом запросе к probe
+- Стабильный response time независимо от состояния dependencies
+- Kubernetes/Docker получают быстрый ответ для принятия решений
+
+#### Критерии готовности
+
+| Компонент | Критичность | Влияние на статус |
+|-----------|-------------|-------------------|
+| PostgreSQL | **Critical** | Если недоступен → 503 not_ready |
+| Таблицы БД | **Critical** | Если отсутствуют → 503 not_ready |
+| Redis | Optional | Если недоступен → 200 ready + warning |
+
+#### Конфигурация
+
+```bash
+# Включить/выключить периодическую проверку
+SCHEDULER_READINESS_CHECK_ENABLED=on
+
+# Интервал проверки (5-300 секунд, default: 60)
+SCHEDULER_READINESS_CHECK_INTERVAL_SECONDS=60
+```
+
+#### Формат ответов
+
+**Успешный ответ (HTTP 200):**
+```json
+{
+  "status": "ready",
+  "timestamp": "2025-12-01T10:17:35.423220",
+  "service": "artstore-admin-module",
+  "version": "0.1.0",
+  "last_check": "2025-12-01T10:17:22.446062",
+  "dependencies": {
+    "database": {
+      "status": "up",
+      "critical": true
+    },
+    "redis": {
+      "status": "up",
+      "critical": false
+    }
+  }
+}
+```
+
+**Успешный ответ с предупреждением (HTTP 200, Redis недоступен):**
+```json
+{
+  "status": "ready",
+  "timestamp": "2025-12-01T10:19:05.147344",
+  "service": "artstore-admin-module",
+  "version": "0.1.0",
+  "last_check": "2025-12-01T10:18:22.530825",
+  "dependencies": {
+    "database": {
+      "status": "up",
+      "critical": true
+    },
+    "redis": {
+      "status": "down",
+      "critical": false,
+      "error": "Error -2 connecting to redis:6379. -2."
+    }
+  },
+  "warnings": ["Redis unavailable: Error -2 connecting to redis:6379. -2."]
+}
+```
+
+**Ошибка (HTTP 503, БД недоступна):**
+```json
+{
+  "status": "not_ready",
+  "timestamp": "2025-12-01T10:20:24.790436",
+  "service": "artstore-admin-module",
+  "version": "0.1.0",
+  "last_check": "2025-12-01T10:20:22.449046",
+  "dependencies": {
+    "database": {
+      "status": "down",
+      "critical": true,
+      "error": "Connection failed"
+    },
+    "redis": {
+      "status": "up",
+      "critical": false
+    }
+  },
+  "reason": "Database not ready: Connection failed"
+}
+```
+
+**Ошибка (HTTP 503, отсутствуют таблицы):**
+```json
+{
+  "status": "not_ready",
+  "timestamp": "2025-12-01T10:25:00.000000",
+  "service": "artstore-admin-module",
+  "version": "0.1.0",
+  "last_check": "2025-12-01T10:24:55.000000",
+  "dependencies": {
+    "database": {
+      "status": "down",
+      "critical": true,
+      "error": "Missing tables: ['audit_logs', 'jwt_keys']",
+      "missing_tables": ["audit_logs", "jwt_keys"]
+    },
+    "redis": {
+      "status": "up",
+      "critical": false
+    }
+  },
+  "reason": "Database not ready: Missing tables: ['audit_logs', 'jwt_keys']"
+}
+```
+
+#### Таблица сценариев
+
+| Сценарий | БД | Таблицы | Redis | HTTP | status | Дополнительно |
+|----------|-----|---------|-------|------|--------|---------------|
+| Всё работает | ✅ | ✅ | ✅ | 200 | ready | - |
+| Redis недоступен | ✅ | ✅ | ❌ | 200 | ready | warnings: [...] |
+| БД недоступна | ❌ | - | любой | 503 | not_ready | reason: "Database not ready: Connection failed" |
+| Таблицы отсутствуют | ✅ | ❌ | любой | 503 | not_ready | reason: "Database not ready: Missing tables: [...]" |
+
+#### Проверяемые таблицы
+
+При каждой проверке готовности система верифицирует наличие следующих таблиц в PostgreSQL:
+
+```python
+REQUIRED_TABLES = [
+    "admin_users",       # Администраторы системы
+    "storage_elements",  # Storage Elements конфигурация
+    "service_accounts",  # OAuth 2.0 Service Accounts
+    "jwt_keys",          # JWT ключи для ротации
+    "audit_logs"         # Audit logging
+]
+```
+
+#### Prometheus метрики
+
+Readiness probe экспортирует следующие метрики:
+
+```
+# Счётчик проверок по типу и результату
+admin_module_health_checks_total{type="readiness", status="success|failure"}
+
+# Статус БД (1=up, 0=down)
+admin_module_database_status
+
+# Статус Redis (1=up, 0=down)
+admin_module_redis_status
+
+# Информация о приложении
+admin_module_info{version="0.1.0", name="artstore-admin-module"}
+```
+
+#### Интеграция с Kubernetes
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: admin-module
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health/startup
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
 ```
 
 ### Внутренняя архитектура

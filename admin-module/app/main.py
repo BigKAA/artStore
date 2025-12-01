@@ -77,6 +77,12 @@ async def lifespan(app: FastAPI):
         init_scheduler()
         logger.info("APScheduler initialized")
 
+        # Запуск первичной проверки готовности сразу при старте
+        # Это наполняет HealthStateService начальным состоянием до первого запроса к /health/ready
+        # Используем async версию, т.к. мы уже внутри async event loop FastAPI
+        from app.core.scheduler import readiness_health_check_async
+        await readiness_health_check_async()
+
         logger.info("Application startup complete")
 
     except Exception as e:

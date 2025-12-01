@@ -187,6 +187,178 @@ def storage_health_check_job() -> None:
         logger.error(f"Storage health check job failed with exception: {e}", exc_info=True)
 
 
+def readiness_health_check_job() -> None:
+    """
+    Background задача для периодической проверки readiness состояния.
+
+    Проверяет подключение к БД, наличие необходимых таблиц, подключение к Redis.
+    Результат сохраняется в HealthStateService для мгновенного ответа /health/ready.
+
+    Важно: Эта задача обеспечивает асинхронную архитектуру readiness probe.
+    Endpoint /health/ready читает из кеша и отвечает мгновенно, без выполнения
+    реальных проверок при каждом запросе.
+
+    Процесс:
+    1. Проверка подключения к PostgreSQL
+    2. Проверка наличия всех необходимых таблиц
+    3. Проверка подключения к Redis
+    4. Сохранение результата в HealthStateService
+    """
+    logger.debug("Readiness health check job started")
+
+    async def _check():
+        """
+        Внутренняя async функция для проверки состояния.
+
+        ВАЖНО: Использует standalone функции для БД и Redis,
+        которые создают собственные подключения для этого event loop.
+        Это необходимо, т.к. asyncio.run() создаёт новый event loop,
+        и глобальные подключения asyncpg/redis не работают корректно.
+        """
+        from app.services.health_state_service import (
+            health_state_service,
+            HealthState,
+            DatabaseHealth,
+            RedisHealth
+        )
+        from app.core.database import check_db_connection_standalone, check_db_tables_standalone
+        from app.core.redis import check_redis_with_error_standalone
+        from datetime import datetime
+
+        # Проверка подключения к БД (standalone версия для background job)
+        db_ok = await check_db_connection_standalone()
+
+        # Проверка наличия таблиц (только если подключение успешно)
+        if db_ok:
+            tables_ok, missing_tables = await check_db_tables_standalone()
+        else:
+            tables_ok, missing_tables = False, []
+
+        # Проверка подключения к Redis (standalone версия для background job)
+        redis_ok, redis_error = await check_redis_with_error_standalone()
+
+        # Формируем состояние БД
+        if db_ok and tables_ok:
+            db_health = DatabaseHealth(ok=True, error=None, missing_tables=[])
+        elif not db_ok:
+            db_health = DatabaseHealth(
+                ok=False,
+                error="Connection failed",
+                missing_tables=[]
+            )
+        else:
+            db_health = DatabaseHealth(
+                ok=False,
+                error=f"Missing tables: {missing_tables}",
+                missing_tables=missing_tables
+            )
+
+        # Формируем состояние Redis
+        redis_health = RedisHealth(ok=redis_ok, error=redis_error)
+
+        # Определяем готовность (только БД критична)
+        is_ready = db_health.ok
+        reason = None if is_ready else f"Database not ready: {db_health.error}"
+        warnings = [f"Redis unavailable: {redis_error}"] if not redis_ok else []
+
+        # Создаем и сохраняем состояние
+        state = HealthState(
+            database=db_health,
+            redis=redis_health,
+            last_check=datetime.utcnow(),
+            is_ready=is_ready,
+            reason=reason,
+            warnings=warnings
+        )
+
+        health_state_service.update_state(state)
+
+        logger.debug(
+            f"Readiness health check completed: is_ready={is_ready}, "
+            f"db_ok={db_health.ok}, redis_ok={redis_ok}"
+        )
+
+    try:
+        asyncio.run(_check())
+    except Exception as e:
+        logger.error(f"Readiness health check job failed with exception: {e}", exc_info=True)
+
+
+async def readiness_health_check_async() -> None:
+    """
+    Асинхронная версия проверки готовности для вызова из async контекста.
+
+    Используется для первичной проверки при startup в lifespan FastAPI,
+    где уже есть работающий event loop.
+
+    ВАЖНО: НЕ ИСПОЛЬЗОВАТЬ в APScheduler jobs - там нужен readiness_health_check_job()
+    с asyncio.run() для создания отдельного event loop в другом потоке.
+    """
+    from datetime import datetime
+    from app.services.health_state_service import (
+        health_state_service, HealthState, DatabaseHealth, RedisHealth
+    )
+    from app.core.database import check_db_connection, check_db_tables
+    from app.core.redis import check_redis_with_error
+
+    try:
+        # Проверка подключения к БД
+        db_ok = await check_db_connection()
+
+        # Проверка наличия таблиц (только если подключение успешно)
+        if db_ok:
+            tables_ok, missing_tables = await check_db_tables()
+        else:
+            tables_ok, missing_tables = False, []
+
+        # Проверка подключения к Redis
+        redis_ok, redis_error = await check_redis_with_error()
+
+        # Формируем состояние БД
+        if db_ok and tables_ok:
+            db_health = DatabaseHealth(ok=True, error=None, missing_tables=[])
+        elif not db_ok:
+            db_health = DatabaseHealth(
+                ok=False,
+                error="Connection failed",
+                missing_tables=[]
+            )
+        else:
+            db_health = DatabaseHealth(
+                ok=False,
+                error=f"Missing tables: {missing_tables}",
+                missing_tables=missing_tables
+            )
+
+        # Формируем состояние Redis
+        redis_health = RedisHealth(ok=redis_ok, error=redis_error)
+
+        # Определяем готовность (только БД критична)
+        is_ready = db_health.ok
+        reason = None if is_ready else f"Database not ready: {db_health.error}"
+        warnings = [f"Redis unavailable: {redis_error}"] if not redis_ok else []
+
+        # Создаем и сохраняем состояние
+        state = HealthState(
+            database=db_health,
+            redis=redis_health,
+            last_check=datetime.utcnow(),
+            is_ready=is_ready,
+            reason=reason,
+            warnings=warnings
+        )
+
+        health_state_service.update_state(state)
+
+        logger.info(
+            f"Initial readiness check completed: is_ready={is_ready}, "
+            f"db_ok={db_health.ok}, redis_ok={redis_ok}"
+        )
+
+    except Exception as e:
+        logger.error(f"Initial readiness health check failed: {e}", exc_info=True)
+
+
 def job_listener(event) -> None:
     """
     Listener для событий APScheduler.
@@ -313,6 +485,28 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             logger.info(
                 f"Storage health check job scheduled: "
                 f"interval={settings.scheduler.storage_health_check_interval_seconds}s, "
+                f"timezone={settings.scheduler.timezone}"
+            )
+
+        # Readiness Health Check job - периодическая проверка состояния БД и Redis
+        if settings.scheduler.readiness_check_enabled:
+            _scheduler.add_job(
+                func=readiness_health_check_job,
+                trigger=IntervalTrigger(
+                    seconds=settings.scheduler.readiness_check_interval_seconds,
+                    timezone=tz
+                ),
+                id="readiness_health_check",
+                name="Readiness Health Check",
+                replace_existing=True,
+                max_instances=1,  # Только одна инстанция job может выполняться одновременно
+                coalesce=True,  # Если пропущено несколько запусков, выполнить только один
+                misfire_grace_time=30  # 30 секунд grace period для missed jobs
+            )
+
+            logger.info(
+                f"Readiness health check job scheduled: "
+                f"interval={settings.scheduler.readiness_check_interval_seconds}s, "
                 f"timezone={settings.scheduler.timezone}"
             )
 

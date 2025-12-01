@@ -69,6 +69,65 @@ async def check_redis_connection() -> bool:
         return False
 
 
+async def check_redis_with_error() -> tuple[bool, Optional[str]]:
+    """
+    Проверка подключения к Redis с возвратом текста ошибки.
+    Используется в readiness health checks для детальной диагностики.
+
+    Returns:
+        tuple: (is_ok, error_message)
+            - is_ok: True если подключение работает
+            - error_message: Текст ошибки или None если всё в порядке
+
+    Example:
+        ok, error = await check_redis_with_error()
+        if not ok:
+            logger.warning(f"Redis unavailable: {error}")
+    """
+    try:
+        client = await get_redis()
+        await client.ping()
+        return True, None
+    except Exception as e:
+        error_message = str(e)
+        logger.warning(f"Redis connection check failed: {error_message}")
+        return False, error_message
+
+
+async def check_redis_with_error_standalone() -> tuple[bool, Optional[str]]:
+    """
+    Standalone версия проверки подключения к Redis с возвратом текста ошибки.
+
+    Создаёт собственный Redis клиент для использования в отдельном event loop
+    (например, в APScheduler background jobs с asyncio.run()).
+
+    ВАЖНО: НЕ ИСПОЛЬЗОВАТЬ в FastAPI endpoints - там используйте check_redis_with_error().
+
+    Returns:
+        tuple: (is_ok, error_message)
+            - is_ok: True если подключение работает
+            - error_message: Текст ошибки или None если всё в порядке
+    """
+    standalone_client = None
+    try:
+        standalone_client = await aioredis.from_url(
+            settings.redis.url,
+            max_connections=1,
+            socket_timeout=settings.redis.socket_timeout,
+            socket_connect_timeout=settings.redis.socket_connect_timeout,
+            decode_responses=True,
+        )
+        await standalone_client.ping()
+        return True, None
+    except Exception as e:
+        error_message = str(e)
+        logger.warning(f"Standalone Redis connection check failed: {error_message}")
+        return False, error_message
+    finally:
+        if standalone_client:
+            await standalone_client.close()
+
+
 async def close_redis() -> None:
     """
     Закрытие Redis подключений (async).
