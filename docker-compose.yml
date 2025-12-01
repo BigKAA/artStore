@@ -4,6 +4,7 @@
 # Запускает полную систему ArtStore:
 # - Инфраструктура: PostgreSQL, Redis, MinIO, PgAdmin
 # - Backend: Admin Module, Storage Element, Ingester Module, Query Module
+# - Frontend: Admin UI (Angular)
 #
 # Использование:
 #   # Запуск всей системы
@@ -607,6 +608,41 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+# ==============================================================================
+# FRONTEND SERVICES
+# ==============================================================================
+
+  # Admin UI - Angular Frontend Application
+  admin-ui:
+    build:
+      context: ./admin-ui
+      dockerfile: Dockerfile
+    container_name: artstore_admin_ui
+    restart: unless-stopped
+    ports:
+      - "4200:80"
+    networks:
+      - artstore_network
+    depends_on:
+      admin-module:
+        condition: service_healthy
+      ingester-module:
+        condition: service_healthy
+      query-module:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
 
 # ==============================================================================
 # NETWORKS
