@@ -23,8 +23,9 @@ from app.core.redis import get_redis_client, close_redis_client
 # Sprint 15: FinalizeService для Two-Phase Commit
 from app.services.finalize_service import FinalizeService, set_finalize_service
 
-# Import metrics modules to register with Prometheus (Sprint 23)
+# Import metrics modules to register with Prometheus
 from app.services import auth_metrics  # noqa: F401
+from app.core import metrics as ingester_metrics  # noqa: F401  # Sprint 17: Storage Selection & Finalize metrics
 
 # Инициализация логирования
 setup_logging()

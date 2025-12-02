@@ -83,15 +83,18 @@ class TestUploadRequest:
 
     def test_upload_request_full(self):
         """Полный UploadRequest со всеми полями."""
+        # storage_mode автоопределяется из retention_policy через валидатор
+        # PERMANENT → RW, TEMPORARY → EDIT
         request = UploadRequest(
             description="Test file upload",
-            storage_mode=StorageMode.RW,
+            retention_policy=RetentionPolicy.PERMANENT,  # → RW mode
             compress=True,
             compression_algorithm=CompressionAlgorithm.BROTLI
         )
 
         assert request.description == "Test file upload"
-        assert request.storage_mode == StorageMode.RW
+        assert request.retention_policy == RetentionPolicy.PERMANENT
+        assert request.storage_mode == StorageMode.RW  # Автоопределено из retention_policy
         assert request.compress is True
         assert request.compression_algorithm == CompressionAlgorithm.BROTLI
 

@@ -2031,15 +2031,26 @@ storage_element_health_status = Gauge(
 ```
 
 **Acceptance Criteria**:
-- [ ] Все metrics экспортируются на `/metrics` endpoint
-- [ ] Metrics доступны в Prometheus
-- [ ] Grafana dashboard создан для визуализации
+- [x] Все metrics экспортируются на `/metrics` endpoint ✅
+- [x] Metrics доступны в Prometheus ✅
+- [ ] Grafana dashboard создан для визуализации (Task 4.2)
 
 **Estimated Effort**: 4 hours
 
+**Реализованные файлы** (Sprint 17):
+- `ingester-module/app/core/metrics.py` - **NEW** Storage Selection & Finalization metrics
+- `ingester-module/app/services/storage_selector.py` - **UPDATED** Интеграция метрик выбора SE
+- `ingester-module/app/services/finalize_service.py` - **UPDATED** Интеграция метрик финализации
+- `ingester-module/tests/unit/test_metrics.py` - **NEW** Unit тесты метрик (16 passed)
+- `admin-module/app/services/garbage_collector_service.py` - GC метрики (существующие)
+- `storage-element/app/core/capacity_metrics.py` - Storage capacity метрики (существующие)
+
 ---
 
-#### Task 4.2: Grafana Dashboard
+#### Task 4.2: Grafana Dashboard ⏸️ DEFERRED
+
+> **Status**: ОТЛОЖЕНА → Перенесена в TECH_DEBT.md
+> **Reason**: Приоритизация core функциональности
 
 **Цель**: Создать Grafana dashboard для monitoring storage lifecycle.
 

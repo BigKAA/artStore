@@ -17,6 +17,7 @@ Fallback Pattern:
 """
 
 import asyncio
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -24,6 +25,7 @@ from typing import Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import record_storage_selection
 
 logger = get_logger(__name__)
 
@@ -179,62 +181,86 @@ class StorageSelector:
 
         # Определяем требуемый mode на основе retention_policy
         required_mode = "edit" if retention_policy == RetentionPolicy.TEMPORARY else "rw"
+        start_time = time.perf_counter()
+        source = "unknown"
+        status = "failed"
 
-        # Попытка 1: Redis Registry
-        se = await self._select_from_redis(file_size, required_mode)
-        if se:
-            logger.info(
-                f"Selected SE from Redis",
+        try:
+            # Попытка 1: Redis Registry
+            se = await self._select_from_redis(file_size, required_mode)
+            if se:
+                source = "redis"
+                status = "success"
+                logger.info(
+                    f"Selected SE from Redis",
+                    extra={
+                        "se_id": se.element_id,
+                        "mode": se.mode,
+                        "file_size": file_size,
+                        "retention_policy": retention_policy.value,
+                        "source": "redis"
+                    }
+                )
+                return se
+
+            # Попытка 2: Admin Module Fallback API
+            se = await self._select_from_admin_module(file_size, required_mode)
+            if se:
+                source = "admin_module"
+                status = "fallback"
+                logger.info(
+                    f"Selected SE from Admin Module fallback",
+                    extra={
+                        "se_id": se.element_id,
+                        "mode": se.mode,
+                        "file_size": file_size,
+                        "retention_policy": retention_policy.value,
+                        "source": "admin_module"
+                    }
+                )
+                return se
+
+            # Попытка 3: Local config fallback
+            se = await self._select_from_local_config(file_size, required_mode)
+            if se:
+                source = "local_config"
+                status = "fallback"
+                logger.warning(
+                    f"Selected SE from local config fallback",
+                    extra={
+                        "se_id": se.element_id,
+                        "mode": se.mode,
+                        "file_size": file_size,
+                        "retention_policy": retention_policy.value,
+                        "source": "local_config"
+                    }
+                )
+                return se
+
+            # Нет подходящего SE
+            source = "none"
+            status = "failed"
+            logger.error(
+                f"No suitable Storage Element found",
                 extra={
-                    "se_id": se.element_id,
-                    "mode": se.mode,
                     "file_size": file_size,
                     "retention_policy": retention_policy.value,
-                    "source": "redis"
+                    "required_mode": required_mode
                 }
             )
-            return se
+            return None
 
-        # Попытка 2: Admin Module Fallback API
-        se = await self._select_from_admin_module(file_size, required_mode)
-        if se:
-            logger.info(
-                f"Selected SE from Admin Module fallback",
-                extra={
-                    "se_id": se.element_id,
-                    "mode": se.mode,
-                    "file_size": file_size,
-                    "retention_policy": retention_policy.value,
-                    "source": "admin_module"
-                }
+        finally:
+            # Записываем метрики
+            duration = time.perf_counter() - start_time
+            record_storage_selection(
+                retention_policy=retention_policy.value,
+                status=status,
+                source=source,
+                duration_seconds=duration,
+                storage_element_id=se.element_id if se else None,
+                mode=se.mode if se else None
             )
-            return se
-
-        # Попытка 3: Local config fallback
-        se = await self._select_from_local_config(file_size, required_mode)
-        if se:
-            logger.warning(
-                f"Selected SE from local config fallback",
-                extra={
-                    "se_id": se.element_id,
-                    "mode": se.mode,
-                    "file_size": file_size,
-                    "retention_policy": retention_policy.value,
-                    "source": "local_config"
-                }
-            )
-            return se
-
-        # Нет подходящего SE
-        logger.error(
-            f"No suitable Storage Element found",
-            extra={
-                "file_size": file_size,
-                "retention_policy": retention_policy.value,
-                "required_mode": required_mode
-            }
-        )
-        return None
 
     async def _select_from_redis(
         self,

@@ -18,6 +18,7 @@ Safety Features:
 """
 
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -28,6 +29,12 @@ from app.core.config import settings
 from app.core.exceptions import (
     StorageElementUnavailableException,
     NoAvailableStorageException
+)
+from app.core.metrics import (
+    record_file_finalization,
+    record_finalize_phase,
+    update_finalize_in_progress,
+    finalize_checksum_mismatch_total,
 )
 from app.schemas.upload import (
     FinalizeRequest,
@@ -164,6 +171,8 @@ class FinalizeService:
             NoAvailableStorageException: Нет доступного target SE
         """
         transaction_id = uuid4()
+        start_time = time.perf_counter()
+        checksum_mismatch = False
 
         logger.info(
             "Starting file finalization",
@@ -174,6 +183,9 @@ class FinalizeService:
                 "user_id": user_id
             }
         )
+
+        # Увеличиваем счётчик активных транзакций
+        update_finalize_in_progress(1)
 
         # Создаём запись транзакции
         self._transactions[transaction_id] = {
@@ -193,35 +205,42 @@ class FinalizeService:
 
         try:
             # Phase 1: Выбор target SE
+            phase_start = time.perf_counter()
             target_se_endpoint, target_se_id = await self._select_target_se(
                 file_size=file_size,
                 preferred_se_id=request.target_storage_element_id
             )
+            record_finalize_phase("select_target", time.perf_counter() - phase_start)
 
             self._transactions[transaction_id]["target_se"] = target_se_id
 
             # Phase 2: Копирование файла
+            phase_start = time.perf_counter()
             await self._copy_file(
                 transaction_id=transaction_id,
                 file_id=file_id,
                 source_endpoint=source_se_endpoint,
                 target_endpoint=target_se_endpoint
             )
+            record_finalize_phase("copy", time.perf_counter() - phase_start)
 
             self._transactions[transaction_id]["status"] = FinalizeTransactionStatus.COPIED
 
             # Phase 3: Verification
             self._transactions[transaction_id]["status"] = FinalizeTransactionStatus.VERIFYING
 
+            phase_start = time.perf_counter()
             target_checksum = await self._verify_checksum(
                 file_id=file_id,
                 target_endpoint=target_se_endpoint
             )
+            record_finalize_phase("verify", time.perf_counter() - phase_start)
 
             self._transactions[transaction_id]["checksum_target"] = target_checksum
 
             # Проверка checksum
             if checksum != target_checksum:
+                checksum_mismatch = True
                 raise ValueError(
                     f"Checksum mismatch: source={checksum}, target={target_checksum}"
                 )
@@ -242,6 +261,14 @@ class FinalizeService:
                     "target_se": target_se_id,
                     "checksum_verified": True
                 }
+            )
+
+            # Записываем успешные метрики
+            duration = time.perf_counter() - start_time
+            record_file_finalization(
+                status="success",
+                duration_seconds=duration,
+                checksum_mismatch=False
             )
 
             return FinalizeResponse(
@@ -275,6 +302,14 @@ class FinalizeService:
             # Attempt rollback
             await self._rollback_transaction(transaction_id)
 
+            # Записываем метрики ошибки
+            duration = time.perf_counter() - start_time
+            record_file_finalization(
+                status="failed",
+                duration_seconds=duration,
+                checksum_mismatch=checksum_mismatch
+            )
+
             return FinalizeResponse(
                 transaction_id=transaction_id,
                 file_id=file_id,
@@ -284,6 +319,10 @@ class FinalizeService:
                 checksum_verified=False,
                 error_message=error_message
             )
+
+        finally:
+            # Уменьшаем счётчик активных транзакций
+            update_finalize_in_progress(-1)
 
     async def _select_target_se(
         self,
