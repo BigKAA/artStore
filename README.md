@@ -201,6 +201,204 @@ ArtStore использует **два типа учетных записей**:
    - Certificate-based authentication для максимальной безопасности
    - По умолчанию SSL выключен (backward compatible)
 
+## Storage Element Selection Strategy
+
+### Sequential Fill Algorithm
+
+При загрузке файлов Ingester Module автоматически выбирает оптимальный Storage Element используя алгоритм Sequential Fill:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Sequential Fill Flow                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌──────────┐     ┌──────────┐     ┌──────────┐               │
+│   │ SE #1    │     │ SE #2    │     │ SE #3    │               │
+│   │ P:1      │ ──► │ P:2      │ ──► │ P:3      │               │
+│   │ ████████ │     │ ██████░░ │     │ ██░░░░░░ │               │
+│   │ 95% FULL │     │ 75% OK   │     │ 25% OK   │               │
+│   └──────────┘     └──────────┘     └──────────┘               │
+│        │                │                                        │
+│        ▼                │                                        │
+│   SKIP (FULL)          SELECT                                   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Логика выбора:**
+1. Storage Elements сортируются по `priority` (ascending)
+2. Для каждого SE в порядке priority проверяется:
+   - `capacity_status != FULL`
+   - `can_accept_file(file_size)` - достаточно свободного места
+3. Возвращается первый подходящий SE
+
+**Retention Policy → Storage Mode:**
+| Retention Policy | Target Mode | Description |
+|-----------------|-------------|-------------|
+| `TEMPORARY` | `edit` | Файлы с ограниченным TTL, автоудаление по истечении |
+| `PERMANENT` | `rw` | Файлы для долгосрочного архивного хранения |
+
+### Adaptive Capacity Thresholds
+
+Система использует адаптивные пороги ёмкости вместо фиксированных, что позволяет эффективнее использовать хранилище разного размера:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│               Adaptive Thresholds Formula                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   warning_free = max(total_gb × 15%, 150GB)                     │
+│   critical_free = max(total_gb × 8%, 80GB)                      │
+│   full_free = max(total_gb × 2%, 20GB)                          │
+│                                                                  │
+│   threshold% = (total - free_limit) / total × 100               │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Примеры для RW Storage:**
+| SE Size | Warning | Critical | Full | Waste |
+|---------|---------|----------|------|-------|
+| 1TB | 85% | 92% | 98% | 2% |
+| 10TB | 98.5% | 99.2% | 99.8% | 0.2% |
+| 100TB | 98.5% | 99.2% | 99.8% | 0.2% |
+
+**Capacity Status Levels:**
+- `OK` - Нормальная работа, приём файлов разрешён
+- `WARNING` - Предупреждение админам, приём продолжается
+- `CRITICAL` - Срочное предупреждение, приём продолжается
+- `FULL` - SE исключается из выбора, перенаправление на следующий SE
+
+### Fallback Pattern
+
+При недоступности основного источника информации о SE система автоматически переключается на резервные:
+
+```
+Redis Registry → Admin Module API → Local Config
+     │                  │                │
+     │ Sorted Sets      │ HTTP Fallback  │ Environment
+     │ Real-time        │ API            │ Variables
+     │ health data      │ Cached data    │ Static config
+     ▼                  ▼                ▼
+   Primary           Secondary        Emergency
+```
+
+## File Lifecycle Management
+
+### Two-Phase Commit Finalization
+
+Процесс финализации временных файлов в постоянное хранение реализован через Two-Phase Commit:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Two-Phase Commit: Finalization                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   Phase 1: PREPARE                                              │
+│   ┌─────────┐                    ┌─────────┐                    │
+│   │ Edit SE │ ────copy────────► │  RW SE  │                    │
+│   │ (temp)  │                    │ (perm)  │                    │
+│   └─────────┘                    └─────────┘                    │
+│       │                              │                          │
+│       │        Verify copy OK        │                          │
+│       │◄─────────────────────────────┤                          │
+│       │                                                          │
+│   Phase 2: COMMIT                                               │
+│       │        Update metadata       │                          │
+│       ├─────────────────────────────►│                          │
+│       │                              │                          │
+│       │        Schedule cleanup      │                          │
+│       ├─────────────────────────────►│ (24h safety margin)      │
+│       │                                                          │
+│   COMPLETED                                                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Этапы финализации:**
+1. **PREPARE**: Копирование файла с Edit SE на RW SE
+2. **VERIFY**: Проверка целостности копии (checksum validation)
+3. **COMMIT**: Обновление метаданных, смена `retention_policy` на PERMANENT
+4. **SCHEDULE_CLEANUP**: Добавление source файла в очередь удаления (+24h)
+
+### Garbage Collection
+
+Автоматическая очистка файлов выполняется фоновым GC Job каждые 6 часов:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  Garbage Collection Strategies                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. TTL-Based Cleanup                                          │
+│      ┌─────────────────────────────────────────────┐            │
+│      │ TEMPORARY files where ttl_expires_at <= now │            │
+│      │ → Add to cleanup queue (NORMAL priority)    │            │
+│      └─────────────────────────────────────────────┘            │
+│                                                                  │
+│   2. Finalized Files Cleanup                                    │
+│      ┌─────────────────────────────────────────────┐            │
+│      │ Files finalized > 24 hours ago              │            │
+│      │ → Delete from source (Edit) SE              │            │
+│      └─────────────────────────────────────────────┘            │
+│                                                                  │
+│   3. Orphaned Files Cleanup                                     │
+│      ┌─────────────────────────────────────────────┐            │
+│      │ Files on SE without DB records (age > 7d)   │            │
+│      │ → Add to cleanup queue (LOW priority)       │            │
+│      └─────────────────────────────────────────────┘            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Safety Features:**
+- 24-hour safety margin после финализации перед удалением
+- 7-day grace period для orphaned файлов
+- Retry logic (max 3 attempts) для transient failures
+- Batch processing для ограничения нагрузки
+
+**Cleanup Queue Priorities:**
+| Priority | Value | Use Case |
+|----------|-------|----------|
+| `HIGH` | 3 | Manual deletion requests |
+| `NORMAL` | 2 | TTL expiration, finalized files |
+| `LOW` | 1 | Orphaned files cleanup |
+
+### Health Reporting
+
+Storage Elements периодически публикуют статус в Redis Registry:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  Health Reporting Flow                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   Storage Element                     Redis Registry            │
+│   ┌─────────────┐                    ┌─────────────┐            │
+│   │ SE #1       │ ──────────────────►│ Hash        │            │
+│   │             │   Every 30 sec     │ storage:    │            │
+│   │ Capacity:   │   (configurable)   │ elements:   │            │
+│   │  - total    │                    │ {se_id}     │            │
+│   │  - used     │                    │             │            │
+│   │  - free     │                    │ TTL: 90s    │            │
+│   │  - status   │                    └─────────────┘            │
+│   │             │                                                │
+│   │ Health:     │                    ┌─────────────┐            │
+│   │  - healthy  │ ──────────────────►│ Sorted Set  │            │
+│   │             │   ZADD/ZREM        │ storage:    │            │
+│   └─────────────┘                    │ {mode}:     │            │
+│                                      │ by_priority │            │
+│                                      └─────────────┘            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Redis Keys:**
+- `storage:elements:{se_id}` - Hash с полными метаданными SE
+- `storage:{mode}:by_priority` - Sorted Set для Sequential Fill (score = priority)
+
+**При FULL статусе:** SE автоматически удаляется из sorted sets и не выбирается для новых файлов
+
 #### PostgreSQL SSL Configuration
 
 **Basic Setup (Production)**:
