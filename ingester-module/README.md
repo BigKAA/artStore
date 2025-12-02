@@ -30,13 +30,130 @@
 - **GZIP fallback**: Если Brotli не поддерживается клиентом
 - **Selective compression**: Только для файлов >10MB
 
-### 2. Storage Element Selection
+### 2. Storage Element Selection (StorageSelector Service)
 
-#### Intelligent Distribution
-- **Load balancing**: Распределение по заполненности Storage Elements
-- **Mode awareness**: Только edit и rw элементы для загрузки
-- **Geographic preference**: Опциональная привязка к ЦОД
-- **Health checking**: Автоматическое исключение недоступных элементов
+#### Sequential Fill Algorithm
+
+Сервис `StorageSelector` (`app/services/storage_selector.py`) реализует интеллектуальный выбор Storage Element для загрузки файлов:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   StorageSelector Flow                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. select_storage_element(file_size, retention_policy)         │
+│     │                                                            │
+│     ▼                                                            │
+│  2. Determine required_mode:                                     │
+│     TEMPORARY → edit | PERMANENT → rw                           │
+│     │                                                            │
+│     ▼                                                            │
+│  3. Try Redis Registry (primary source)                         │
+│     │  ZRANGE storage:{mode}:by_priority 0 -1                   │
+│     │  For each SE in priority order:                           │
+│     │    - Check capacity_status != FULL                        │
+│     │    - Check can_accept_file(file_size)                     │
+│     │  Return first matching SE                                 │
+│     │                                                            │
+│     ├──[Redis OK]──► Return StorageElementInfo                  │
+│     │                                                            │
+│     ├──[Redis fail]──► Try Admin Module API (fallback)          │
+│     │                  GET /api/v1/storage-elements/available   │
+│     │                                                            │
+│     └──[Admin fail]──► Try Local Config (emergency)             │
+│                        Read from environment variables          │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Retention Policy Mapping
+
+| Retention Policy | Target Mode | Use Case |
+|-----------------|-------------|----------|
+| `TEMPORARY` | `edit` | Документы в работе, TTL-based cleanup |
+| `PERMANENT` | `rw` | Долгосрочное архивное хранение |
+
+#### StorageElementInfo Data Class
+
+Информация о Storage Element получается из Redis Hash и включает:
+
+```python
+@dataclass
+class StorageElementInfo:
+    element_id: str      # Уникальный ID SE
+    mode: str            # edit, rw, ro, ar
+    endpoint: str        # HTTP URL для API вызовов
+    priority: int        # Порядок выбора (ascending)
+    capacity_total: int  # Общая ёмкость (bytes)
+    capacity_used: int   # Использовано (bytes)
+    capacity_free: int   # Свободно (bytes)
+    capacity_percent: float  # % использования
+    capacity_status: CapacityStatus  # OK, WARNING, CRITICAL, FULL
+    health_status: str   # healthy, degraded, unavailable
+    last_updated: datetime  # Timestamp последнего health report
+```
+
+#### Capacity Status Levels
+
+```python
+class CapacityStatus(str, Enum):
+    OK = "ok"           # Нормальная работа
+    WARNING = "warning" # Alert админам, запись продолжается
+    CRITICAL = "critical"  # Срочный alert, запись продолжается
+    FULL = "full"       # SE исключён из выбора
+```
+
+#### Local Cache
+
+- **TTL**: 5 секунд (настраивается)
+- **Назначение**: Уменьшение нагрузки на Redis при частых запросах
+- **Инвалидация**: Автоматическая по TTL или вручную через `invalidate_cache()`
+
+#### Fallback Chain
+
+```
+Redis Registry → Admin Module API → Local Config
+     │                  │                │
+     │ Real-time        │ Cached data    │ Static config
+     │ health data      │ from DB        │ from env vars
+     ▼                  ▼                ▼
+   Primary           Secondary        Emergency
+```
+
+#### Integration
+
+```python
+# Инициализация при startup
+from app.services.storage_selector import init_storage_selector
+
+storage_selector = await init_storage_selector(
+    redis_client=redis,
+    admin_client=admin_http_client
+)
+
+# Использование при upload
+se = await storage_selector.select_storage_element(
+    file_size=file.size,
+    retention_policy=RetentionPolicy.TEMPORARY
+)
+
+if se:
+    await upload_to_storage_element(se.endpoint, file)
+else:
+    raise NoAvailableStorageError()
+
+# Shutdown
+await close_storage_selector()
+```
+
+#### Prometheus Metrics
+
+Сервис записывает метрики через `record_storage_selection()`:
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `storage_selection_total` | retention_policy, status, source | Количество выборов SE |
+| `storage_selection_duration_seconds` | retention_policy | Время выбора SE |
 
 #### Service Discovery Integration
 - **Redis Pub/Sub**: Подписка на обновления конфигурации Storage Elements

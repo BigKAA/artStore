@@ -453,6 +453,13 @@ WAL_RETENTION_HOURS=24
 REDIS_URL=redis://localhost:6379/0
 REDIS_MASTER_ELECTION_ENABLED=false  # true для edit/rw clusters
 
+# Health Reporting (Sprint 14)
+STORAGE_ELEMENT_ID=se-01              # Уникальный ID для registry
+STORAGE_EXTERNAL_ENDPOINT=http://localhost:8010  # URL для Ingester Module
+STORAGE_PRIORITY=1                    # Priority для Sequential Fill (lower = higher priority)
+STORAGE_HEALTH_REPORT_INTERVAL=30     # Секунд между reports
+STORAGE_HEALTH_REPORT_TTL=90          # TTL для Redis ключей (interval * 3)
+
 # Reconciliation
 RECONCILE_SCHEDULE_HOURS=24
 RECONCILE_AUTO_FIX=true
@@ -594,6 +601,150 @@ docker-compose -f docker-compose.test.yml up --abort-on-container-exit storage-e
 - **Reconciliation**: Detect conflicts → auto-fix → audit log
 - **Mode transition**: rw → ro с Two-Phase Commit
 - **AR restore**: Queue request → webhook notification → TTL cleanup
+
+## Health Reporting Service (Sprint 14)
+
+### HealthReporter (`app/services/health_reporter.py`)
+
+Сервис периодической публикации статуса Storage Element в Redis Registry для Sequential Fill алгоритма Ingester Module.
+
+#### Архитектура
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Health Reporting Flow                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   Storage Element                     Redis Registry            │
+│   ┌─────────────┐                    ┌─────────────┐            │
+│   │ SE #1       │ ──────────────────►│ Hash        │            │
+│   │             │   Every 30 sec     │ storage:    │            │
+│   │ Capacity:   │   (configurable)   │ elements:   │            │
+│   │  - total    │                    │ {se_id}     │            │
+│   │  - used     │                    │             │            │
+│   │  - free     │                    │ TTL: 90s    │            │
+│   │  - status   │                    └─────────────┘            │
+│   │             │                                                │
+│   │ Health:     │                    ┌─────────────┐            │
+│   │  - healthy  │ ──────────────────►│ Sorted Set  │            │
+│   │             │   ZADD/ZREM        │ storage:    │            │
+│   └─────────────┘                    │ {mode}:     │            │
+│                                      │ by_priority │            │
+│                                      └─────────────┘            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Redis Schema
+
+| Key Pattern | Type | Description |
+|-------------|------|-------------|
+| `storage:elements:{se_id}` | Hash | Полные метаданные SE (TTL = report_ttl) |
+| `storage:{mode}:by_priority` | Sorted Set | SE IDs отсортированные по priority |
+
+#### Hash Fields (`storage:elements:{se_id}`)
+
+```redis
+HGETALL storage:elements:se-01
+{
+  "id": "se-01",
+  "mode": "rw",
+  "capacity_total": "1099511627776",      # 1TB в байтах
+  "capacity_used": "549755813888",         # 512GB
+  "capacity_free": "549755813888",         # 512GB
+  "capacity_percent": "50.00",
+  "endpoint": "http://storage-01:8010",
+  "priority": "1",
+  "last_updated": "2025-01-02T15:30:45+00:00",
+  "health_status": "healthy",
+  "capacity_status": "ok",                  # ok, warning, critical, full
+  "threshold_warning": "85.00",
+  "threshold_critical": "92.00",
+  "threshold_full": "98.00"
+}
+```
+
+#### Adaptive Capacity Thresholds
+
+Пороги рассчитываются динамически на основе размера SE:
+
+```python
+def calculate_adaptive_threshold(total_capacity_bytes: int, mode: str) -> dict:
+    total_gb = total_capacity_bytes / (1024**3)
+
+    if mode == "rw":
+        warning_free_gb = max(total_gb * 0.15, 150)   # 15% или 150GB
+        critical_free_gb = max(total_gb * 0.08, 80)   # 8% или 80GB
+        full_free_gb = max(total_gb * 0.02, 20)       # 2% или 20GB
+    elif mode == "edit":
+        warning_free_gb = max(total_gb * 0.10, 100)   # 10% или 100GB
+        critical_free_gb = max(total_gb * 0.05, 50)   # 5% или 50GB
+        full_free_gb = max(total_gb * 0.01, 10)       # 1% или 10GB
+```
+
+**Примеры для RW Storage:**
+
+| SE Size | Warning | Critical | Full | Waste |
+|---------|---------|----------|------|-------|
+| 1TB | 85% | 92% | 98% | 2% |
+| 10TB | 98.5% | 99.2% | 99.8% | 0.2% |
+| 100TB | 98.5% | 99.2% | 99.8% | 0.2% |
+
+#### Capacity Status Levels
+
+| Status | Description | Action |
+|--------|-------------|--------|
+| `OK` | Нормальная работа | Приём файлов продолжается |
+| `WARNING` | Приближение к порогу | Alert админам, приём продолжается |
+| `CRITICAL` | Срочное предупреждение | Urgent alert, приём продолжается |
+| `FULL` | SE заполнен | SE удаляется из Sorted Set, переключение на другой SE |
+
+#### Graceful Shutdown Behavior
+
+При shutdown SE автоматически удаляется из Redis:
+1. Удаляет Hash `storage:elements:{se_id}`
+2. Удаляет из Sorted Set `storage:rw:by_priority`
+3. Удаляет из Sorted Set `storage:edit:by_priority`
+
+#### Circuit Breaker Integration
+
+- При недоступности Redis используется Circuit Breaker
+- Report пропускается если circuit открыт
+- Автоматический recovery при восстановлении Redis
+
+#### Configuration
+
+```bash
+STORAGE_ELEMENT_ID=se-01              # Уникальный ID в registry
+STORAGE_EXTERNAL_ENDPOINT=http://localhost:8010  # URL для API calls
+STORAGE_PRIORITY=1                    # Sequential Fill priority (lower = higher)
+STORAGE_HEALTH_REPORT_INTERVAL=30     # Секунд между reports
+STORAGE_HEALTH_REPORT_TTL=90          # TTL для Redis ключей
+```
+
+#### Prometheus Metrics (Sprint 14)
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `storage_capacity_total_bytes` | element_id, mode | Общая ёмкость |
+| `storage_capacity_used_bytes` | element_id, mode | Использовано |
+| `storage_capacity_free_bytes` | element_id, mode | Свободно |
+| `storage_capacity_percent` | element_id, mode | Процент использования |
+| `storage_capacity_status` | element_id, status | Текущий статус (0=ok,1=warning,2=critical,3=full) |
+| `storage_redis_publish_total` | element_id, status | Количество publishes в Redis |
+| `storage_redis_publish_duration_seconds` | element_id | Время публикации |
+
+#### Usage
+
+```python
+# Инициализация при startup
+from app.services.health_reporter import init_health_reporter
+
+health_reporter = await init_health_reporter(redis_client)
+
+# Shutdown
+await stop_health_reporter()
+```
 
 ## Мониторинг и метрики
 

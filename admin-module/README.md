@@ -1051,6 +1051,197 @@ JWT ключи и другие секреты могут быть загруже
 2. **Environment Variables** (docker-compose, development)
 3. **File-based secrets** (./secrets/ directory)
 
+## Garbage Collection Service (Sprint 16)
+
+### GarbageCollectorService (`app/services/garbage_collector_service.py`)
+
+Фоновый сервис для автоматической очистки файлов по различным стратегиям.
+
+#### Архитектура
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  Garbage Collection Strategies                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. TTL-Based Cleanup                                          │
+│      ┌─────────────────────────────────────────────┐            │
+│      │ TEMPORARY files where ttl_expires_at <= now │            │
+│      │ → Add to cleanup queue (NORMAL priority)    │            │
+│      └─────────────────────────────────────────────┘            │
+│                                                                  │
+│   2. Finalized Files Cleanup                                    │
+│      ┌─────────────────────────────────────────────┐            │
+│      │ Files finalized > 24 hours ago              │            │
+│      │ → Delete from source (Edit) SE              │            │
+│      └─────────────────────────────────────────────┘            │
+│                                                                  │
+│   3. Orphaned Files Cleanup (on-demand)                         │
+│      ┌─────────────────────────────────────────────┐            │
+│      │ Files on SE without DB records (age > 7d)   │            │
+│      │ → Add to cleanup queue (LOW priority)       │            │
+│      └─────────────────────────────────────────────┘            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Cleanup Strategies
+
+| Strategy | Description | Safety Margin | Priority |
+|----------|-------------|---------------|----------|
+| **TTL-based** | Temporary файлы с истекшим TTL | None | NORMAL |
+| **Finalized** | Файлы после финализации с Edit SE | 24 hours | NORMAL |
+| **Orphaned** | Файлы без записей в БД | 7 days | LOW |
+
+#### Cleanup Queue Model
+
+```python
+class FileCleanupQueue:
+    id: UUID               # Primary key
+    file_id: UUID          # ID файла для удаления
+    storage_element_id: str  # ID SE где файл хранится
+    storage_path: str      # Путь к файлу на SE
+    scheduled_at: datetime # Когда запланировано удаление
+    priority: int          # HIGH=3, NORMAL=2, LOW=1
+    cleanup_reason: str    # ttl_expired, finalized, orphaned, manual
+    retry_count: int       # Количество попыток
+    processed_at: datetime # Когда обработано (NULL если pending)
+    success: bool          # Результат
+    error_message: str     # Сообщение об ошибке
+```
+
+#### GC Run Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     GC Job Execution                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. Process Cleanup Queue                                      │
+│      │ SELECT * FROM file_cleanup_queue                         │
+│      │ WHERE processed_at IS NULL                               │
+│      │   AND scheduled_at <= now                                │
+│      │   AND retry_count < 3                                    │
+│      │ ORDER BY priority DESC, scheduled_at ASC                 │
+│      │ LIMIT 100                                                │
+│      │                                                          │
+│      └──► For each item:                                        │
+│          │ GET storage_element from DB                          │
+│          │ DELETE file via HTTP API                             │
+│          │ Mark file as deleted in files table                  │
+│          └ Update queue item (success/failure)                  │
+│                                                                  │
+│   2. TTL-based Cleanup                                          │
+│      │ SELECT * FROM files                                      │
+│      │ WHERE retention_policy = 'TEMPORARY'                     │
+│      │   AND ttl_expires_at <= now                              │
+│      │   AND deleted_at IS NULL                                 │
+│      │                                                          │
+│      └──► Add to cleanup queue (if not already pending)         │
+│                                                                  │
+│   3. Finalized Files Cleanup                                    │
+│      │ SELECT * FROM file_finalize_transactions                 │
+│      │ WHERE status = 'COMPLETED'                               │
+│      │   AND completed_at <= now - 24h                          │
+│      │                                                          │
+│      └──► Add source SE file to cleanup queue                   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Safety Features
+
+| Feature | Value | Description |
+|---------|-------|-------------|
+| Safety margin (finalized) | 24 hours | Ожидание перед удалением из source SE |
+| Grace period (orphaned) | 7 days | Время подтверждения orphan статуса |
+| Max retry count | 3 | Максимум попыток удаления |
+| Batch size | 100 | Файлов за один цикл GC |
+| HTTP timeout | 30 seconds | Timeout для DELETE запросов к SE |
+
+#### Configuration
+
+```bash
+# GC Scheduler
+SCHEDULER_GC_ENABLED=true              # Включить GC job
+SCHEDULER_GC_INTERVAL_HOURS=6          # Интервал между запусками
+
+# GC Parameters (опционально, defaults shown)
+# GC_BATCH_SIZE=100
+# GC_HTTP_TIMEOUT=30
+# GC_SAFETY_MARGIN_HOURS=24
+# GC_ORPHAN_GRACE_DAYS=7
+# GC_MAX_RETRY_COUNT=3
+```
+
+#### Prometheus Metrics
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `gc_files_cleaned_total` | reason | Количество очищенных файлов |
+| `gc_files_failed_total` | reason, error_type | Количество ошибок |
+| `gc_run_duration_seconds` | cleanup_type | Длительность GC job |
+| `gc_last_run_timestamp` | - | Timestamp последнего запуска |
+| `gc_queue_pending_size` | - | Размер очереди (pending items) |
+
+#### GCRunResult
+
+```python
+@dataclass
+class GCRunResult:
+    started_at: datetime
+    completed_at: datetime
+    ttl_cleaned: int          # TTL-expired files cleaned
+    ttl_failed: int
+    finalized_cleaned: int    # Finalized source files cleaned
+    finalized_failed: int
+    orphaned_cleaned: int     # Orphaned files cleaned
+    orphaned_failed: int
+    queue_processed: int      # Items processed from queue
+    queue_failed: int
+    errors: List[str]         # Error messages
+
+    @property
+    def total_cleaned(self) -> int
+    @property
+    def total_failed(self) -> int
+    @property
+    def duration_seconds(self) -> float
+```
+
+#### Manual Operations
+
+```python
+# Добавить файл в очередь вручную
+await garbage_collector_service.add_to_cleanup_queue(
+    session=db_session,
+    file_id=uuid,
+    storage_element_id="se-01",
+    reason="manual",
+    priority=CleanupPriority.HIGH,
+    scheduled_at=datetime.now(timezone.utc)
+)
+
+# Очистка orphaned файлов (on-demand)
+await garbage_collector_service.cleanup_orphaned_files(
+    session=db_session,
+    storage_element_id="se-01",
+    file_ids_on_storage=[uuid1, uuid2, ...]
+)
+```
+
+#### Error Handling
+
+| Error Type | Behavior |
+|------------|----------|
+| SE not found | Mark as failed, no retry |
+| SE offline | Increment retry, try later |
+| HTTP timeout | Increment retry, try later |
+| Connection error | Increment retry, try later |
+| HTTP 404 | Success (file already gone) |
+| HTTP 200/204 | Success |
+| Exception | Increment retry, log error |
+
 ## Мониторинг и метрики
 
 ### Prometheus Metrics (`/metrics`)
