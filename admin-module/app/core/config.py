@@ -656,9 +656,44 @@ class SchedulerSettings(BaseSettings):
         description="Интервал проверки готовности в секундах (5-300)"
     )
 
+    # Garbage Collection - периодическая очистка файлов
+    gc_enabled: bool = Field(
+        default=True,
+        alias="SCHEDULER_GC_ENABLED",
+        description="Включить периодическую очистку файлов (GC job)"
+    )
+    gc_interval_hours: int = Field(
+        default=6,
+        ge=1,
+        le=168,
+        alias="SCHEDULER_GC_INTERVAL_HOURS",
+        description="Интервал запуска GC job в часах (1-168, default: 6)"
+    )
+    gc_batch_size: int = Field(
+        default=100,
+        ge=10,
+        le=1000,
+        alias="SCHEDULER_GC_BATCH_SIZE",
+        description="Максимальный batch size для GC операций (10-1000)"
+    )
+    gc_safety_margin_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        alias="SCHEDULER_GC_SAFETY_MARGIN_HOURS",
+        description="Safety margin после финализации перед удалением (1-168 часов)"
+    )
+    gc_orphan_grace_days: int = Field(
+        default=7,
+        ge=1,
+        le=30,
+        alias="SCHEDULER_GC_ORPHAN_GRACE_DAYS",
+        description="Grace period для orphaned файлов (1-30 дней)"
+    )
+
     model_config = SettingsConfigDict(env_prefix="SCHEDULER_", case_sensitive=False, extra="allow")
 
-    @field_validator("enabled", "jwt_rotation_enabled", "storage_health_check_enabled", "readiness_check_enabled", mode="before")
+    @field_validator("enabled", "jwt_rotation_enabled", "storage_health_check_enabled", "readiness_check_enabled", "gc_enabled", mode="before")
     @classmethod
     def parse_bool_fields(cls, v):
         """Парсинг boolean полей из environment variables."""

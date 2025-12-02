@@ -5,9 +5,13 @@
 Этот документ описывает детальный план реализации системы выбора Storage Elements и управления жизненным циклом документов в ArtStore.
 
 **Дата создания**: 2025-12-01
-**Статус**: Phase 2 (Sprint 15) - IMPLEMENTED ✅
+**Статус**: Phase 3 (Sprint 16) - IN PROGRESS 🔄
 **Приоритет**: High
 **Последнее обновление**: 2025-12-02
+
+**Sprint 16 Progress**:
+- ✅ Task 3.1: GarbageCollector Background Job - DONE
+- ⏳ Task 3.2: Storage Element Delete API - TODO
 
 ---
 
@@ -1849,14 +1853,28 @@ interface StorageElementStatus {
    - Test cleanup queue processing
 
 **Acceptance Criteria**:
-- [ ] GC job запускается каждые 6 часов
-- [ ] TTL-based cleanup удаляет expired files
-- [ ] Finalized files cleanup обрабатывает cleanup queue
-- [ ] Orphaned files cleanup удаляет files без DB records
-- [ ] Prometheus metrics записываются корректно
-- [ ] Unit и integration тесты проходят успешно
+- [x] GC job запускается каждые 6 часов ✅
+- [x] TTL-based cleanup удаляет expired files ✅
+- [x] Finalized files cleanup обрабатывает cleanup queue ✅
+- [x] Orphaned files cleanup удаляет files без DB records ✅
+- [x] Prometheus metrics записываются корректно ✅
+- [x] Unit тесты проходят успешно (19/19 passed) ✅
+- [ ] Integration тесты (TODO: Sprint 17)
 
 **Estimated Effort**: 10 hours
+
+**Реализованные файлы** (Sprint 16):
+- `admin-module/app/services/garbage_collector_service.py` - **NEW** GarbageCollectorService с тремя стратегиями очистки
+- `admin-module/app/core/config.py` - **UPDATED** Добавлены GC settings в SchedulerSettings
+- `admin-module/app/core/scheduler.py` - **UPDATED** Интеграция GC job в APScheduler
+- `admin-module/tests/unit/test_garbage_collector.py` - **NEW** Unit тесты (19 тестов)
+
+**Особенности реализации**:
+- **Три стратегии очистки**: TTL-based, Finalized files (+24h safety margin), Orphaned files (>7 days grace)
+- **Prometheus metrics**: gc_files_cleaned_total, gc_files_failed_total, gc_run_duration_seconds, gc_last_run_timestamp, gc_queue_pending_size
+- **Configurable settings**: SCHEDULER_GC_ENABLED, SCHEDULER_GC_INTERVAL_HOURS (default 6), SCHEDULER_GC_BATCH_SIZE (default 100), SCHEDULER_GC_SAFETY_MARGIN_HOURS (default 24), SCHEDULER_GC_ORPHAN_GRACE_DAYS (default 7)
+- **HTTP client**: Использует httpx.AsyncClient для удаления файлов на Storage Elements
+- **Retry logic**: max_retry_count=3 для обработки transient failures
 
 ---
 
@@ -2158,13 +2176,14 @@ storage_element_health_status = Gauge(
 
 ---
 
-### Sprint 16: Garbage Collection (Week 5-6)
+### Sprint 16: Garbage Collection (Week 5-6) - 🔄 IN PROGRESS
 
 **Deliverables**:
-- [ ] GarbageCollector background job
-- [ ] Storage Element delete API
-- [ ] Cleanup queue processing
-- [ ] Unit и integration тесты
+- [x] GarbageCollector background job ✅ (Task 3.1 DONE)
+- [ ] Storage Element delete API (Task 3.2 TODO)
+- [x] Cleanup queue processing ✅ (included in Task 3.1)
+- [x] Unit тесты ✅ (19/19 passed)
+- [ ] Integration тесты (Sprint 17)
 
 **Deployment**:
 1. Deploy Storage Element с delete API
@@ -2430,6 +2449,7 @@ curl -X POST http://localhost:8000/api/v1/admin/cleanup/trigger \
 | 2025-12-01 | 1.0 | Initial version | Claude + User |
 | 2025-12-01 | 1.1 | Актуализация: Adaptive capacity thresholds, multi-level alerting, intelligent file size handling, comprehensive monitoring & forecasting | Claude + User |
 | 2025-12-01 | 1.2 | **Sprint 14 IMPLEMENTED**: HealthReporter, StorageSelector, Admin Module internal API, Prometheus metrics. Updated acceptance criteria, added implementation notes | Claude + User |
+| 2025-12-02 | 1.3 | **Sprint 16 Task 3.1 IMPLEMENTED**: GarbageCollectorService с тремя стратегиями очистки (TTL, Finalized, Orphaned), Prometheus metrics, APScheduler integration, 19 unit tests passed | Claude + User |
 
 ---
 

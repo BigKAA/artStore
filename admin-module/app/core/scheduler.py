@@ -22,6 +22,7 @@ from app.core.database import get_sync_session, create_standalone_async_session
 from app.services.jwt_key_rotation_service import get_rotation_service
 from app.services.storage_element_publish_service import storage_element_publish_service
 from app.services.storage_sync_service import storage_sync_service
+from app.services.garbage_collector_service import GarbageCollectorService
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +360,62 @@ async def readiness_health_check_async() -> None:
         logger.error(f"Initial readiness health check failed: {e}", exc_info=True)
 
 
+def garbage_collection_job() -> None:
+    """
+    Background задача для Garbage Collection файлов.
+
+    Выполняется периодически согласно настройкам scheduler.gc_interval_hours.
+    Очищает файлы по трём стратегиям:
+    1. TTL-based cleanup: удаление temporary файлов с истекшим TTL
+    2. Finalized files cleanup: удаление из Edit SE после финализации (+24h safety)
+    3. Cleanup queue processing: обработка очереди на удаление
+
+    Note:
+        Эта функция запускает async код через asyncio.run(),
+        так как APScheduler BackgroundScheduler работает синхронно.
+    """
+    logger.info("Garbage Collection job started")
+
+    async def _gc():
+        """Внутренняя async функция для GC."""
+        # Создаем standalone session для нового event loop
+        session = await create_standalone_async_session()
+        try:
+            # Создаем GC service с настройками из config
+            gc_service = GarbageCollectorService(
+                batch_size=settings.scheduler.gc_batch_size,
+                safety_margin_hours=settings.scheduler.gc_safety_margin_hours,
+                orphan_grace_days=settings.scheduler.gc_orphan_grace_days,
+            )
+
+            # Запускаем GC
+            result = await gc_service.run_garbage_collection(session)
+
+            # Логируем результат
+            if result.total_failed > 0 or result.errors:
+                logger.warning(
+                    f"Garbage Collection completed with issues: "
+                    f"cleaned={result.total_cleaned}, failed={result.total_failed}, "
+                    f"duration={result.duration_seconds:.2f}s, "
+                    f"errors={len(result.errors)}"
+                )
+            else:
+                logger.info(
+                    f"Garbage Collection completed successfully: "
+                    f"cleaned={result.total_cleaned}, duration={result.duration_seconds:.2f}s"
+                )
+
+        except Exception as e:
+            logger.error(f"Garbage Collection job failed: {e}", exc_info=True)
+        finally:
+            await session.close()
+
+    try:
+        asyncio.run(_gc())
+    except Exception as e:
+        logger.error(f"Garbage Collection job failed with exception: {e}", exc_info=True)
+
+
 def job_listener(event) -> None:
     """
     Listener для событий APScheduler.
@@ -507,6 +564,30 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             logger.info(
                 f"Readiness health check job scheduled: "
                 f"interval={settings.scheduler.readiness_check_interval_seconds}s, "
+                f"timezone={settings.scheduler.timezone}"
+            )
+
+        # Garbage Collection job - периодическая очистка файлов
+        if settings.scheduler.gc_enabled:
+            _scheduler.add_job(
+                func=garbage_collection_job,
+                trigger=IntervalTrigger(
+                    hours=settings.scheduler.gc_interval_hours,
+                    timezone=tz
+                ),
+                id="garbage_collection",
+                name="Garbage Collection",
+                replace_existing=True,
+                max_instances=1,  # Только одна инстанция job может выполняться одновременно
+                coalesce=True,  # Если пропущено несколько запусков, выполнить только один
+                misfire_grace_time=3600  # 1 час grace period для missed jobs
+            )
+
+            logger.info(
+                f"Garbage Collection job scheduled: "
+                f"interval={settings.scheduler.gc_interval_hours}h, "
+                f"batch_size={settings.scheduler.gc_batch_size}, "
+                f"safety_margin={settings.scheduler.gc_safety_margin_hours}h, "
                 f"timezone={settings.scheduler.timezone}"
             )
 
