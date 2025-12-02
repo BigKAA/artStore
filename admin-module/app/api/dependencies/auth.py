@@ -1,101 +1,117 @@
 """
 FastAPI Dependencies для аутентификации и авторизации.
 Используются в эндпоинтах для проверки JWT токенов и прав доступа.
+
+Sprint 15: Исправлен импорт моделей - используем ServiceAccount вместо несуществующего User.
 """
 
 from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.core.database import get_db, get_sync_session
-from app.models.user import User, UserRole, UserStatus
+from app.core.database import get_db
+from app.models.service_account import ServiceAccount, ServiceAccountRole, ServiceAccountStatus
 from app.services.token_service import token_service
-from app.services.auth_service import auth_service
 
 # HTTP Bearer схема для JWT токенов
 security = HTTPBearer()
 
 
-async def get_current_user(
+async def get_current_service_account(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db)
-) -> User:
+) -> ServiceAccount:
     """
-    Dependency для получения текущего пользователя из JWT токена.
+    Dependency для получения текущего Service Account из JWT токена.
 
     Args:
         credentials: HTTP Authorization credentials (Bearer token)
         db: Database session
 
     Returns:
-        User: Текущий аутентифицированный пользователь
+        ServiceAccount: Текущий аутентифицированный Service Account
 
     Raises:
-        HTTPException: 401 если токен невалиден или пользователь не найден
+        HTTPException: 401 если токен невалиден или Service Account не найден
     """
     # Извлекаем токен
     token = credentials.credentials
 
-    # Валидируем токен и получаем user_id (с multi-version support)
-    sync_session = next(get_sync_session())
+    # Валидируем токен и получаем payload
     try:
-        user_id = token_service.get_user_id_from_token(token, session=sync_session)
-    finally:
-        sync_session.close()
-
-    if not user_id:
+        payload = token_service.validate_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
+            detail=f"Token validation failed: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Получаем пользователя из базы
-    user = await auth_service.get_user_by_id(db, user_id)
-    if not user:
+    # Получаем client_id из токена
+    client_id = payload.get("client_id")
+    if not client_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail="Token does not contain client_id",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Проверяем что пользователь активен
-    if user.status != UserStatus.ACTIVE:
+    # Получаем Service Account из базы
+    stmt = select(ServiceAccount).where(ServiceAccount.client_id == client_id)
+    result = await db.execute(stmt)
+    service_account = result.scalar_one_or_none()
+
+    if not service_account:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"User is {user.status.value}",
+            detail="Service Account not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return user
+    # Проверяем что Service Account активен
+    if service_account.status != ServiceAccountStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Service Account is {service_account.status.value}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return service_account
 
 
-async def get_current_active_user(
-    current_user: User = Depends(get_current_user)
-) -> User:
+async def get_current_active_service_account(
+    current_service_account: ServiceAccount = Depends(get_current_service_account)
+) -> ServiceAccount:
     """
-    Dependency для получения активного пользователя.
+    Dependency для получения активного Service Account.
 
     Args:
-        current_user: Текущий пользователь из токена
+        current_service_account: Текущий Service Account из токена
 
     Returns:
-        User: Активный пользователь
+        ServiceAccount: Активный Service Account
 
     Raises:
-        HTTPException: 403 если пользователь неактивен
+        HTTPException: 403 если Service Account неактивен
     """
-    if not current_user.can_login():
+    if current_service_account.status != ServiceAccountStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is not active"
+            detail="Service Account is not active"
         )
 
-    return current_user
+    return current_service_account
 
 
-def require_role(required_role: UserRole):
+def require_role(required_role: ServiceAccountRole):
     """
     Factory для создания dependency с проверкой роли.
 
@@ -105,52 +121,56 @@ def require_role(required_role: UserRole):
     Returns:
         Dependency function для проверки роли
     """
-    async def check_role(current_user: User = Depends(get_current_active_user)) -> User:
+    async def check_role(
+        current_service_account: ServiceAccount = Depends(get_current_active_service_account)
+    ) -> ServiceAccount:
         """
-        Проверка что пользователь имеет требуемую роль.
+        Проверка что Service Account имеет требуемую роль.
 
         Args:
-            current_user: Текущий пользователь
+            current_service_account: Текущий Service Account
 
         Returns:
-            User: Пользователь с требуемой ролью
+            ServiceAccount: Service Account с требуемой ролью
 
         Raises:
             HTTPException: 403 если роль недостаточна
         """
-        # Иерархия ролей: ADMIN > OPERATOR > USER
+        # Иерархия ролей: ADMIN > AUDITOR > USER > READONLY
         role_hierarchy = {
-            UserRole.ADMIN: 3,
-            UserRole.OPERATOR: 2,
-            UserRole.USER: 1
+            ServiceAccountRole.ADMIN: 4,
+            ServiceAccountRole.AUDITOR: 3,
+            ServiceAccountRole.USER: 2,
+            ServiceAccountRole.READONLY: 1
         }
 
-        user_level = role_hierarchy.get(current_user.role, 0)
+        account_level = role_hierarchy.get(current_service_account.role, 0)
         required_level = role_hierarchy.get(required_role, 0)
 
-        if user_level < required_level:
+        if account_level < required_level:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions. Required role: {required_role.value}"
             )
 
-        return current_user
+        return current_service_account
 
     return check_role
 
 
 # Pre-configured dependencies для разных ролей
-require_admin = require_role(UserRole.ADMIN)
-require_operator = require_role(UserRole.OPERATOR)
-require_user = require_role(UserRole.USER)
+require_admin = require_role(ServiceAccountRole.ADMIN)
+require_auditor = require_role(ServiceAccountRole.AUDITOR)
+require_user = require_role(ServiceAccountRole.USER)
+require_readonly = require_role(ServiceAccountRole.READONLY)
 
 
-async def get_optional_current_user(
+async def get_optional_current_service_account(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
     db: AsyncSession = Depends(get_db)
-) -> Optional[User]:
+) -> Optional[ServiceAccount]:
     """
-    Dependency для опционального получения пользователя.
+    Dependency для опционального получения Service Account.
     Не выбрасывает исключение если токен отсутствует.
 
     Args:
@@ -158,27 +178,29 @@ async def get_optional_current_user(
         db: Database session
 
     Returns:
-        Optional[User]: Пользователь если токен валиден, None иначе
+        Optional[ServiceAccount]: Service Account если токен валиден, None иначе
     """
     if not credentials:
         return None
 
     try:
-        # Пытаемся получить пользователя (с multi-version support)
-        sync_session = next(get_sync_session())
-        try:
-            user_id = token_service.get_user_id_from_token(credentials.credentials, session=sync_session)
-        finally:
-            sync_session.close()
-
-        if not user_id:
+        # Пытаемся получить Service Account
+        payload = token_service.validate_token(credentials.credentials)
+        if not payload:
             return None
 
-        user = await auth_service.get_user_by_id(db, user_id)
-        if not user or user.status != UserStatus.ACTIVE:
+        client_id = payload.get("client_id")
+        if not client_id:
             return None
 
-        return user
+        stmt = select(ServiceAccount).where(ServiceAccount.client_id == client_id)
+        result = await db.execute(stmt)
+        service_account = result.scalar_one_or_none()
+
+        if not service_account or service_account.status != ServiceAccountStatus.ACTIVE:
+            return None
+
+        return service_account
 
     except Exception:
         # Игнорируем ошибки валидации токена

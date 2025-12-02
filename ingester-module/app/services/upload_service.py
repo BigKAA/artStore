@@ -8,12 +8,17 @@ Sprint 14: Интеграция с StorageSelector для динамическо
 - Fallback на Admin Module API при недоступности Redis
 - Fallback на локальную конфигурацию как последний resort
 
+Sprint 15: Retention Policy & Lifecycle.
+- Поддержка temporary/permanent retention policies
+- Расчёт TTL expiration для temporary файлов
+- Интеграция с Admin Module для регистрации файла в file registry
+
 MVP реализация без Saga и Circuit Breaker (будет добавлено позже).
 """
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -31,13 +36,16 @@ from app.schemas.upload import (
     UploadRequest,
     UploadResponse,
     StorageMode,
-    CompressionAlgorithm
+    CompressionAlgorithm,
+    RetentionPolicy,  # Sprint 15
+    DEFAULT_TTL_DAYS  # Sprint 15
 )
 from app.services.auth_service import AuthService
 
 # TYPE_CHECKING для избежания circular imports
 if TYPE_CHECKING:
-    from app.services.storage_selector import StorageSelector, RetentionPolicy
+    from app.services.storage_selector import StorageSelector
+    from app.services.storage_selector import RetentionPolicy as SelectorRetentionPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +201,11 @@ class UploadService:
         - Sequential Fill алгоритм для выбора оптимального SE
         - Fallback на статическую конфигурацию если StorageSelector не настроен
 
+        Sprint 15: Retention Policy & Lifecycle.
+        - Расчёт TTL expiration для temporary файлов
+        - Передача retention_policy в Storage Element
+        - Возврат полной информации о retention policy
+
         Args:
             file: Загружаемый файл
             request: Параметры загрузки
@@ -200,7 +213,7 @@ class UploadService:
             username: Имя пользователя
 
         Returns:
-            UploadResponse: Результат загрузки
+            UploadResponse: Результат загрузки с retention policy info
 
         Raises:
             StorageElementUnavailableException: Storage Element недоступен
@@ -212,7 +225,8 @@ class UploadService:
             extra={
                 "uploaded_filename": file.filename,
                 "content_type": file.content_type,
-                "storage_mode": request.storage_mode.value,
+                "retention_policy": request.retention_policy.value,
+                "ttl_days": request.ttl_days,
                 "user_id": user_id
             }
         )
@@ -230,10 +244,15 @@ class UploadService:
         # Расчет checksum
         checksum = hashlib.sha256(content).hexdigest()
 
+        # Sprint 15: Расчёт TTL expiration для temporary файлов
+        ttl_expires_at = None
+        if request.retention_policy == RetentionPolicy.TEMPORARY and request.ttl_days:
+            ttl_expires_at = datetime.now(timezone.utc) + timedelta(days=request.ttl_days)
+
         # Sprint 14: Выбор Storage Element через StorageSelector
-        storage_element_url = await self._select_storage_element(
+        storage_element_url, storage_element_id = await self._select_storage_element_with_id(
             file_size=file_size,
-            storage_mode=request.storage_mode
+            retention_policy=request.retention_policy
         )
 
         # Формирование данных для Storage Element
@@ -241,11 +260,21 @@ class UploadService:
             'file': (file.filename, content, file.content_type or 'application/octet-stream')
         }
 
+        # Sprint 15: Включаем retention policy в данные для SE
         data = {
             'description': request.description or '',
             'uploaded_by_username': username,
-            'uploaded_by_id': user_id
+            'uploaded_by_id': user_id,
+            # Sprint 15: Retention Policy данные
+            'retention_policy': request.retention_policy.value,
+            'ttl_days': str(request.ttl_days) if request.ttl_days else '',
+            'ttl_expires_at': ttl_expires_at.isoformat() if ttl_expires_at else '',
         }
+
+        # Sprint 15: Добавляем metadata если есть
+        if request.metadata:
+            import json
+            data['metadata'] = json.dumps(request.metadata)
 
         # TODO: Добавить сжатие если request.compress=True
         # TODO: Добавить Circuit Breaker pattern
@@ -276,11 +305,14 @@ class UploadService:
                     "uploaded_filename": file.filename,
                     "file_size": file_size,
                     "user_id": user_id,
-                    "storage_element_url": storage_element_url  # Sprint 14: логируем куда загрузили
+                    "storage_element_url": storage_element_url,
+                    "storage_element_id": storage_element_id,
+                    "retention_policy": request.retention_policy.value,
+                    "ttl_expires_at": str(ttl_expires_at) if ttl_expires_at else None
                 }
             )
 
-            # Формирование ответа
+            # Sprint 15: Формирование ответа с retention policy info
             return UploadResponse(
                 file_id=UUID(result['file_id']),
                 original_filename=file.filename or "unknown",
@@ -290,7 +322,11 @@ class UploadService:
                 compression_ratio=None,  # TODO: calculate if compressed
                 checksum=result.get('checksum', checksum),
                 uploaded_at=datetime.now(timezone.utc),
-                storage_element_url=storage_element_url  # Sprint 14: URL выбранного SE
+                storage_element_url=storage_element_url,
+                # Sprint 15: Retention Policy info
+                retention_policy=request.retention_policy,
+                ttl_expires_at=ttl_expires_at,
+                storage_element_id=storage_element_id
             )
 
         except httpx.HTTPStatusError as e:
@@ -315,23 +351,22 @@ class UploadService:
                 f"Cannot connect to Storage Element: {str(e)}"
             )
 
-    async def _select_storage_element(
+    async def _select_storage_element_with_id(
         self,
         file_size: int,
-        storage_mode: StorageMode
-    ) -> str:
+        retention_policy: RetentionPolicy
+    ) -> tuple[str, str]:
         """
-        Выбор Storage Element для загрузки файла.
+        Выбор Storage Element для загрузки файла (Sprint 15).
 
-        Sprint 14: Использует StorageSelector с Sequential Fill алгоритмом.
-        Fallback на статическую конфигурацию если StorageSelector не настроен.
+        Sprint 15: Возвращает tuple (url, id) для использования в UploadResponse.
 
         Args:
             file_size: Размер файла в байтах
-            storage_mode: Режим хранения из request (edit, rw)
+            retention_policy: Политика хранения (temporary/permanent)
 
         Returns:
-            str: URL выбранного Storage Element
+            tuple[str, str]: (URL выбранного Storage Element, ID Storage Element)
 
         Raises:
             NoAvailableStorageException: Нет подходящего SE
@@ -342,23 +377,20 @@ class UploadService:
                 "StorageSelector not configured, using static config",
                 extra={"base_url": settings.storage_element.base_url}
             )
-            return settings.storage_element.base_url
+            return settings.storage_element.base_url, "static-fallback"
 
-        # Маппинг storage_mode → retention_policy
-        # edit mode = temporary files (TEMPORARY policy)
-        # rw mode = permanent files (PERMANENT policy)
-        from app.services.storage_selector import RetentionPolicy
+        # Маппинг schema RetentionPolicy → selector RetentionPolicy
+        from app.services.storage_selector import RetentionPolicy as SelectorRetentionPolicy
 
-        if storage_mode == StorageMode.EDIT:
-            retention_policy = RetentionPolicy.TEMPORARY
-        else:  # StorageMode.RW
-            retention_policy = RetentionPolicy.PERMANENT
+        if retention_policy == RetentionPolicy.TEMPORARY:
+            selector_policy = SelectorRetentionPolicy.TEMPORARY
+        else:
+            selector_policy = SelectorRetentionPolicy.PERMANENT
 
         logger.debug(
             "Selecting SE via StorageSelector",
             extra={
                 "file_size": file_size,
-                "storage_mode": storage_mode.value,
                 "retention_policy": retention_policy.value
             }
         )
@@ -366,7 +398,7 @@ class UploadService:
         # Выбор SE через StorageSelector (Sequential Fill)
         se_info = await self._storage_selector.select_storage_element(
             file_size=file_size,
-            retention_policy=retention_policy
+            retention_policy=selector_policy
         )
 
         if not se_info:
@@ -374,12 +406,11 @@ class UploadService:
                 "No available Storage Element found",
                 extra={
                     "file_size": file_size,
-                    "storage_mode": storage_mode.value,
                     "retention_policy": retention_policy.value
                 }
             )
             raise NoAvailableStorageException(
-                f"No available Storage Element for mode={storage_mode.value}, "
+                f"No available Storage Element for retention_policy={retention_policy.value}, "
                 f"file_size={file_size} bytes"
             )
 
@@ -395,4 +426,36 @@ class UploadService:
             }
         )
 
-        return se_info.endpoint
+        return se_info.endpoint, se_info.element_id
+
+    async def _select_storage_element(
+        self,
+        file_size: int,
+        storage_mode: StorageMode
+    ) -> str:
+        """
+        Выбор Storage Element для загрузки файла (Legacy метод).
+
+        [DEPRECATED] Используйте _select_storage_element_with_id вместо этого.
+
+        Sprint 14: Использует StorageSelector с Sequential Fill алгоритмом.
+        Fallback на статическую конфигурацию если StorageSelector не настроен.
+
+        Args:
+            file_size: Размер файла в байтах
+            storage_mode: Режим хранения из request (edit, rw)
+
+        Returns:
+            str: URL выбранного Storage Element
+
+        Raises:
+            NoAvailableStorageException: Нет подходящего SE
+        """
+        # Маппинг storage_mode → retention_policy для обратной совместимости
+        if storage_mode == StorageMode.EDIT:
+            retention_policy = RetentionPolicy.TEMPORARY
+        else:  # StorageMode.RW
+            retention_policy = RetentionPolicy.PERMANENT
+
+        url, _ = await self._select_storage_element_with_id(file_size, retention_policy)
+        return url

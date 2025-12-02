@@ -20,6 +20,8 @@ from app.services.upload_service import UploadService
 from app.services.storage_selector import init_storage_selector, close_storage_selector
 from app.services.admin_client import init_admin_client, close_admin_client
 from app.core.redis import get_redis_client, close_redis_client
+# Sprint 15: FinalizeService для Two-Phase Commit
+from app.services.finalize_service import FinalizeService, set_finalize_service
 
 # Import metrics modules to register with Prometheus (Sprint 23)
 from app.services import auth_metrics  # noqa: F401
@@ -38,6 +40,9 @@ auth_service = AuthService(
 
 # Инициализация Upload Service с аутентификацией
 upload_service = UploadService(auth_service=auth_service)
+
+# Sprint 15: Инициализация FinalizeService для Two-Phase Commit
+finalize_service = FinalizeService(auth_service=auth_service)
 
 
 @asynccontextmanager
@@ -109,6 +114,11 @@ async def lifespan(app: FastAPI):
     # Передаём storage_selector в upload_service
     upload_service.set_storage_selector(storage_selector)
 
+    # Sprint 15: Настройка FinalizeService
+    finalize_service.set_storage_selector(storage_selector)
+    set_finalize_service(finalize_service)
+    logger.info("FinalizeService initialized")
+
     yield
 
     # Shutdown
@@ -118,6 +128,7 @@ async def lifespan(app: FastAPI):
     await close_storage_selector()
     await close_admin_client()
     await close_redis_client()
+    await finalize_service.close()  # Sprint 15: Закрытие FinalizeService
     await upload_service.close()
     await auth_service.close()
     logger.info("All connections closed")
