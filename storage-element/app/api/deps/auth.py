@@ -157,7 +157,53 @@ async def require_operator_or_admin(
     return user
 
 
+async def require_service_account(
+    user: Annotated[UserContext, Depends(get_current_user)]
+) -> UserContext:
+    """
+    Требовать тип Service Account.
+
+    Dependency для системных endpoints (GC cleanup, inter-service communication).
+    Service Accounts имеют token_type="service_account".
+
+    Args:
+        user: Текущий пользователь из get_current_user
+
+    Returns:
+        UserContext: Контекст Service Account
+
+    Raises:
+        HTTPException: 403 если не Service Account
+
+    Примеры:
+        >>> @app.delete("/gc/files/{file_id}")
+        >>> async def gc_delete_file(
+        ...     file_id: UUID,
+        ...     service: Annotated[UserContext, Depends(require_service_account)]
+        ... ):
+        ...     # Только Service Accounts могут вызвать этот endpoint
+        ...     return {"status": "deleted"}
+    """
+    if not user.is_service_account:
+        logger.warning(
+            "Service account access denied",
+            extra={
+                "user_id": user.sub,
+                "username": user.username,
+                "token_type": user.token_type,
+                "role": user.role.value
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Service account access required. Only service accounts can perform GC operations."
+        )
+
+    return user
+
+
 # Type aliases для удобства использования
 CurrentUser = Annotated[UserContext, Depends(get_current_user)]
 AdminUser = Annotated[UserContext, Depends(require_admin)]
 OperatorUser = Annotated[UserContext, Depends(require_operator_or_admin)]
+ServiceAccount = Annotated[UserContext, Depends(require_service_account)]

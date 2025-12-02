@@ -4,13 +4,14 @@ API v1 Router - объединение всех endpoints.
 Структура:
 - /info - информация о storage element для auto-discovery
 - /files - файловые операции (upload, download, search, delete)
+- /gc - системные операции для Garbage Collector (только service accounts)
 - /admin - административные операции (в будущем)
 - /health - health checks (в main.py)
 """
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import files, info
+from app.api.v1.endpoints import files, info, gc
 
 # Создание главного router для API v1
 router = APIRouter()
@@ -27,6 +28,14 @@ router.include_router(
     files.router,
     prefix="/files",
     tags=["files"]
+)
+
+# Подключение GC endpoints для Garbage Collector (Sprint 16)
+# Доступны только для Service Accounts
+router.include_router(
+    gc.router,
+    prefix="/gc",
+    tags=["gc"]
 )
 
 # TODO: Подключить admin endpoints когда будут созданы
