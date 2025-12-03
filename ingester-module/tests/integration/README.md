@@ -28,8 +28,11 @@ Environment variables (already configured in .env):
 - `SERVICE_ACCOUNT_ADMIN_MODULE_URL`
 - `SERVICE_ACCOUNT_CLIENT_ID`
 - `SERVICE_ACCOUNT_CLIENT_SECRET`
-- `STORAGE_ELEMENT_BASE_URL`
+- `SERVICE_DISCOVERY_ENABLED` (Sprint 16: обязательно, заменяет STORAGE_ELEMENT_BASE_URL)
 - `TLS_ENABLED` (опционально для mTLS testing)
+
+**Note:** Sprint 16 - `STORAGE_ELEMENT_BASE_URL` удалён. Endpoints Storage Elements
+получаются через Service Discovery (Redis/Admin Module API).
 
 ## Running Tests
 

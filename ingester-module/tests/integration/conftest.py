@@ -2,6 +2,8 @@
 Integration test fixtures and configuration.
 
 Provides fixtures for E2E testing with mock services.
+
+Sprint 16: Добавлен mock_auth_service для тестов UploadService без реального Admin Module.
 """
 
 import pytest
@@ -10,6 +12,7 @@ from app.main import app
 from datetime import datetime, timezone, timedelta
 import jwt as pyjwt
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 
 @pytest.fixture
@@ -194,3 +197,31 @@ async def mock_admin_token_response():
         "token_type": "Bearer",
         "expires_in": 1800
     }
+
+
+@pytest.fixture
+def mock_auth_service():
+    """
+    Mock AuthService для тестов UploadService без реального Admin Module.
+
+    Sprint 16: Используется для тестов, которые не требуют E2E аутентификации.
+    """
+    from app.services.auth_service import AuthService
+
+    mock = MagicMock(spec=AuthService)
+    mock.get_token = AsyncMock(return_value="mock-jwt-token")
+    mock.close = AsyncMock()
+    return mock
+
+
+@pytest.fixture
+def upload_service_with_mock_auth(mock_auth_service):
+    """
+    UploadService с mock AuthService для unit/integration тестов.
+
+    Sprint 16: Для тестов HTTP client без реальной аутентификации.
+    """
+    from app.services.upload_service import UploadService
+
+    service = UploadService(auth_service=mock_auth_service)
+    return service

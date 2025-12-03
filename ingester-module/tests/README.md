@@ -104,7 +104,7 @@ docker-compose -f docker-compose.test.yml --profile integration down -v
 - **Endpoints**:
   - `POST /api/v1/files/upload` - File upload
   - `DELETE /api/v1/files/{file_id}` - File deletion
-  - `GET /api/v1/health/live` - Health check
+  - `GET /health/live` - Health check (Sprint 16: стандартизированный путь)
 
 ## Current Test Status
 
