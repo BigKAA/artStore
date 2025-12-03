@@ -37,7 +37,7 @@
     {
       "httpRequest": {
         "method": "GET",
-        "path": "/api/v1/health/live"
+        "path": "/health/live"
       },
       "httpResponse": {
         "statusCode": 200,
@@ -45,7 +45,9 @@
           "Content-Type": ["application/json"]
         },
         "body": {
-          "status": "healthy"
+          "status": "healthy",
+          "service": "storage-element",
+          "version": "1.0.0"
         }
       }
     }
