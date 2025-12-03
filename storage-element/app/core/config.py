@@ -320,6 +320,52 @@ class StorageSettings(BaseSettings):
         description="Множитель для TTL Redis ключей (TTL = interval * multiplier)"
     )
 
+    # Adaptive Capacity Thresholds (опциональные override для тестирования)
+    # Если заданы - используются вместо автоматического расчёта
+    # Значения в процентах заполнения (0-100)
+    capacity_warning_threshold: Optional[float] = Field(
+        default=None,
+        alias="CAPACITY_WARNING_THRESHOLD",
+        ge=0,
+        le=100,
+        description="Override для WARNING порога (% заполнения). None = автоматический расчёт"
+    )
+    capacity_critical_threshold: Optional[float] = Field(
+        default=None,
+        alias="CAPACITY_CRITICAL_THRESHOLD",
+        ge=0,
+        le=100,
+        description="Override для CRITICAL порога (% заполнения). None = автоматический расчёт"
+    )
+    capacity_full_threshold: Optional[float] = Field(
+        default=None,
+        alias="CAPACITY_FULL_THRESHOLD",
+        ge=0,
+        le=100,
+        description="Override для FULL порога (% заполнения). None = автоматический расчёт"
+    )
+
+    def get_capacity_thresholds_override(self) -> Optional[dict]:
+        """
+        Возвращает override пороги, если все три заданы.
+
+        Returns:
+            dict с порогами или None если используется автоматический расчёт
+        """
+        if (self.capacity_warning_threshold is not None and
+            self.capacity_critical_threshold is not None and
+            self.capacity_full_threshold is not None):
+            return {
+                "warning_threshold": self.capacity_warning_threshold,
+                "critical_threshold": self.capacity_critical_threshold,
+                "full_threshold": self.capacity_full_threshold,
+                # Для override режима free_gb не используются
+                "warning_free_gb": 0,
+                "critical_free_gb": 0,
+                "full_free_gb": 0,
+            }
+        return None
+
     @property
     def max_size_bytes(self) -> int:
         """Максимальный размер в байтах"""

@@ -25,6 +25,7 @@ from app.core.logging import get_logger
 from app.core.capacity_calculator import (
     CapacityStatus,
     calculate_adaptive_threshold,
+    get_thresholds_with_override,
     get_capacity_status,
     format_capacity_info,
 )
@@ -163,10 +164,11 @@ class HealthReporter:
             # Получаем статистику хранилища
             storage_stats = await self._get_storage_stats()
 
-            # Рассчитываем адаптивные пороги
-            thresholds = calculate_adaptive_threshold(
+            # Рассчитываем адаптивные пороги (с поддержкой override из env)
+            thresholds = get_thresholds_with_override(
                 storage_stats["total"],
-                self.mode
+                self.mode,
+                settings.storage  # Передаём settings для проверки override
             )
 
             # Определяем статус ёмкости
