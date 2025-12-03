@@ -44,8 +44,8 @@ def upgrade() -> None:
     service_account_role_enum = postgresql.ENUM('ADMIN', 'USER', 'AUDITOR', 'READONLY', name='service_account_role_enum', create_type=True)
     service_account_status_enum = postgresql.ENUM('ACTIVE', 'SUSPENDED', 'EXPIRED', 'DELETED', name='service_account_status_enum', create_type=True)
     storage_mode_enum = postgresql.ENUM('edit', 'rw', 'ro', 'ar', name='storage_mode_enum', create_type=True)
-    storage_type_enum = postgresql.ENUM('hot', 'warm', 'cold', name='storage_type_enum', create_type=True)
-    storage_status_enum = postgresql.ENUM('READY', 'INITIALIZING', 'UPGRADING', 'DEGRADED', 'OFFLINE', name='storage_status_enum', create_type=True)
+    storage_type_enum = postgresql.ENUM('local', 's3', name='storage_type_enum', create_type=True)
+    storage_status_enum = postgresql.ENUM('online', 'offline', 'degraded', 'maintenance', name='storage_status_enum', create_type=True)
 
     # Note: Do NOT manually call .create() - SQLAlchemy will auto-create ENUMs when tables are created
 
@@ -126,31 +126,40 @@ def upgrade() -> None:
     op.create_index('idx_jwt_keys_kid', 'jwt_keys', ['kid'], unique=False)
 
     # Create storage_elements table
+    # Схема соответствует модели StorageElement из app/models/storage_element.py
     op.create_table(
         'storage_elements',
-        sa.Column('id', postgresql.UUID(as_uuid=True), server_default=sa.text('gen_random_uuid()'), nullable=False, comment='Уникальный UUID идентификатор Storage Element'),
-        sa.Column('name', sa.String(100), nullable=False, comment='Название Storage Element (unique per environment)'),
-        sa.Column('description', sa.String(500), nullable=True, comment='Описание Storage Element'),
-        sa.Column('mode', storage_mode_enum, nullable=False, server_default='rw', comment='Режим доступа: edit, rw, ro, ar'),
-        sa.Column('storage_type', storage_type_enum, nullable=False, server_default='hot', comment='Тип хранилища: hot, warm, cold'),
-        sa.Column('status', storage_status_enum, nullable=False, server_default='READY', comment='Статус хранилища'),
-        sa.Column('backend_type', sa.String(50), nullable=False, comment='Тип backend: local, s3, azure_blob, etc.'),
-        sa.Column('config', postgresql.JSONB(), nullable=False, comment='Backend-specific configuration (S3 bucket, path, credentials)'),
-        sa.Column('capacity_gb', sa.BigInteger(), nullable=True, comment='Общая вместимость в GB (NULL = unlimited)'),
-        sa.Column('used_gb', sa.BigInteger(), nullable=False, server_default='0', comment='Используемое место в GB'),
-        sa.Column('max_file_size_gb', sa.Integer(), nullable=False, server_default='100', comment='Максимальный размер одного файла в GB'),
-        sa.Column('health_status', sa.String(50), nullable=False, server_default='healthy', comment='Health status: healthy, degraded, critical'),
+        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False, comment='Уникальный идентификатор Storage Element'),
+        sa.Column('element_id', sa.String(50), nullable=True, comment='Уникальный строковый ID для Redis Registry (например: se-01)'),
+        sa.Column('name', sa.String(100), nullable=False, comment='Человекочитаемое имя storage element (уникальное)'),
+        sa.Column('description', sa.String(500), nullable=True, comment='Описание хранилища'),
+        sa.Column('mode', storage_mode_enum, nullable=False, server_default='edit', comment='Режим работы storage element'),
+        sa.Column('priority', sa.Integer(), nullable=False, server_default='100', comment='Приоритет для Sequential Fill алгоритма (меньше = выше приоритет)'),
+        sa.Column('storage_type', storage_type_enum, nullable=False, server_default='local', comment='Тип физического хранилища'),
+        sa.Column('base_path', sa.String(500), nullable=False, comment='Базовый путь (local) или bucket name (s3)'),
+        sa.Column('api_url', sa.String(255), nullable=False, comment='URL для API доступа к storage element'),
+        sa.Column('api_key', sa.String(255), nullable=True, comment='API ключ для аутентификации (хешированный)'),
+        sa.Column('status', storage_status_enum, nullable=False, server_default='online', comment='Текущий статус storage element'),
+        sa.Column('capacity_bytes', sa.BigInteger(), nullable=True, comment='Общая емкость в байтах'),
+        sa.Column('used_bytes', sa.BigInteger(), nullable=False, server_default='0', comment='Использовано байтов'),
+        sa.Column('file_count', sa.Integer(), nullable=False, server_default='0', comment='Количество файлов'),
+        sa.Column('retention_days', sa.Integer(), nullable=True, comment='Срок хранения файлов в днях (None = бессрочно)'),
+        sa.Column('last_health_check', sa.DateTime(timezone=True), nullable=True, comment='Время последней проверки health'),
+        sa.Column('is_replicated', sa.Boolean(), nullable=False, server_default=sa.false(), comment='Флаг репликации'),
+        sa.Column('replica_count', sa.Integer(), nullable=False, server_default='0', comment='Количество реплик'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), comment='Дата создания'),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), onupdate=sa.func.now(), comment='Дата обновления'),
-        sa.Column('last_health_check', sa.DateTime(timezone=True), nullable=True, comment='Дата последней проверки здоровья'),
         sa.PrimaryKeyConstraint('id', name=op.f('pk_storage_elements')),
         sa.UniqueConstraint('name', name=op.f('uq_storage_elements_name')),
+        sa.UniqueConstraint('element_id', name=op.f('uq_storage_elements_element_id')),
     )
 
     op.create_index('idx_storage_elements_name', 'storage_elements', ['name'], unique=False)
+    op.create_index('idx_storage_elements_element_id', 'storage_elements', ['element_id'], unique=True)
     op.create_index('idx_storage_elements_mode', 'storage_elements', ['mode'], unique=False)
     op.create_index('idx_storage_elements_status', 'storage_elements', ['status'], unique=False)
-    op.create_index('idx_storage_elements_health', 'storage_elements', ['health_status'], unique=False)
+    op.create_index('idx_storage_mode_status', 'storage_elements', ['mode', 'status'], unique=False)
+    op.create_index('idx_storage_mode_priority', 'storage_elements', ['mode', 'priority'], unique=False)
 
     # Create audit_logs table
     op.create_table(
@@ -199,9 +208,11 @@ def downgrade() -> None:
     op.drop_index('idx_audit_logs_severity', table_name='audit_logs')
     op.drop_index('idx_audit_logs_event_type', table_name='audit_logs')
 
-    op.drop_index('idx_storage_elements_health', table_name='storage_elements')
+    op.drop_index('idx_storage_mode_priority', table_name='storage_elements')
+    op.drop_index('idx_storage_mode_status', table_name='storage_elements')
     op.drop_index('idx_storage_elements_status', table_name='storage_elements')
     op.drop_index('idx_storage_elements_mode', table_name='storage_elements')
+    op.drop_index('idx_storage_elements_element_id', table_name='storage_elements')
     op.drop_index('idx_storage_elements_name', table_name='storage_elements')
 
     op.drop_index('idx_jwt_keys_kid', table_name='jwt_keys')
