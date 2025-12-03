@@ -95,6 +95,12 @@ class AuthSettings(BaseSettings):
     public_key_path: Path = Path("./keys/public_key.pem")
     algorithm: str = "RS256"
 
+    # Sprint 16: Admin Module URL для health checks и Service Discovery fallback
+    admin_module_url: str = Field(
+        default="http://admin-module:8000",
+        description="URL Admin Module для health checks и Service Discovery fallback"
+    )
+
     @field_validator("enabled", mode="before")
     @classmethod
     def parse_bool_fields(cls, v):
@@ -103,17 +109,38 @@ class AuthSettings(BaseSettings):
 
 
 class StorageElementSettings(BaseSettings):
-    """Настройки взаимодействия со Storage Element."""
+    """
+    HTTP client настройки для взаимодействия со Storage Elements.
+
+    Sprint 16: base_url УДАЛЁН - endpoints получаются через Service Discovery.
+
+    Endpoints выбираются динамически через:
+    1. Redis Service Discovery (primary)
+    2. Admin Module API (fallback)
+
+    Эти настройки применяются к HTTP клиентам для всех SE endpoints.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="STORAGE_ELEMENT_",
         case_sensitive=False
     )
 
-    base_url: str = "http://localhost:8010"
-    timeout: int = 30  # секунды
-    max_retries: int = 3
-    connection_pool_size: int = 100
+    # Sprint 16: base_url УДАЛЁН - Service Discovery обязателен
+    # Используйте StorageSelector для получения SE endpoints
+
+    timeout: int = Field(
+        default=30,
+        description="HTTP request timeout в секундах"
+    )
+    max_retries: int = Field(
+        default=3,
+        description="Максимальное количество retry при ошибках"
+    )
+    connection_pool_size: int = Field(
+        default=100,
+        description="Размер HTTP connection pool для каждого SE endpoint"
+    )
 
 
 class RedisSettings(BaseSettings):

@@ -338,11 +338,20 @@ class FinalizeService:
 
         Returns:
             tuple[str, str]: (endpoint, id) выбранного SE
+
+        Raises:
+            NoAvailableStorageException: StorageSelector не настроен или нет SE
         """
+        # Sprint 16: StorageSelector обязателен, static fallback удалён
         if not self._storage_selector:
-            # Fallback на статическую конфигурацию
-            logger.warning("StorageSelector not available, using static config")
-            return settings.storage_element.base_url, "static-fallback"
+            logger.error(
+                "StorageSelector not configured - Service Discovery required for finalization",
+                extra={"error": "StorageSelector must be set via set_storage_selector()"}
+            )
+            raise NoAvailableStorageException(
+                "StorageSelector not configured. "
+                "Service Discovery (Redis or Admin Module) is required for finalization."
+            )
 
         from app.services.storage_selector import RetentionPolicy as SelectorRetentionPolicy
 

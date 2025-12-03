@@ -129,17 +129,50 @@ async def finalize_file(
     # - checksum: SHA-256 checksum
     # - retention_policy: Проверить что файл temporary
 
-    # Временная заглушка для MVP (в production это будет запрос к Admin Module)
-    # TODO: Реализовать получение данных из file registry
+    # Sprint 16: Получение данных о файле через Service Discovery
+    # TODO Sprint 15.2: Реализовать получение данных из Admin Module file registry
+    # В production эти данные должны приходить из Admin Module /api/v1/files/{file_id}
     try:
-        # Placeholder данные для MVP тестирования
-        # В production эти данные придут из Admin Module /api/v1/files/{file_id}
-        from app.core.config import settings
+        # Получаем source SE через StorageSelector (первый доступный Edit SE)
+        # ВАЖНО: В production нужно получить реальные данные файла из file registry
+        from app.services.storage_selector import (
+            get_storage_selector,
+            RetentionPolicy as SelectorRetentionPolicy
+        )
 
-        source_se_id = "storage-element-01"  # TODO: из file registry
-        source_se_endpoint = settings.storage_element.base_url  # TODO: из file registry
-        file_size = 0  # TODO: из file registry
-        checksum = ""  # TODO: из file registry
+        storage_selector = await get_storage_selector()
+        if not storage_selector._initialized:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="StorageSelector not initialized - Service Discovery required"
+            )
+
+        # MVP: Получаем первый доступный Edit SE для source
+        # В production нужно получить конкретный SE где хранится файл
+        source_se_info = await storage_selector.select_storage_element(
+            file_size=0,  # TODO: получить из file registry
+            retention_policy=SelectorRetentionPolicy.TEMPORARY
+        )
+
+        if not source_se_info:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No available Edit Storage Element for finalization source"
+            )
+
+        source_se_id = source_se_info.element_id
+        source_se_endpoint = source_se_info.endpoint
+        file_size = 0  # TODO: получить из file registry
+        checksum = ""  # TODO: получить из file registry
+
+        logger.warning(
+            "Using MVP placeholder for file metadata",
+            extra={
+                "file_id": str(file_id),
+                "source_se_id": source_se_id,
+                "note": "TODO Sprint 15.2: Implement file registry lookup"
+            }
+        )
 
         response = await finalize_svc.finalize_file(
             file_id=file_id,

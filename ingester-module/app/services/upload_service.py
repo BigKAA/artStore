@@ -6,12 +6,15 @@ Ingester Module - Upload Service.
 Sprint 14: Интеграция с StorageSelector для динамического выбора SE.
 - Sequential Fill алгоритм через Redis Registry
 - Fallback на Admin Module API при недоступности Redis
-- Fallback на локальную конфигурацию как последний resort
 
 Sprint 15: Retention Policy & Lifecycle.
 - Поддержка temporary/permanent retention policies
 - Расчёт TTL expiration для temporary файлов
 - Интеграция с Admin Module для регистрации файла в file registry
+
+Sprint 16: Удаление STORAGE_ELEMENT_BASE_URL fallback.
+- Service Discovery (Redis или Admin Module) обязателен
+- Local config fallback удалён
 
 MVP реализация без Saga и Circuit Breaker (будет добавлено позже).
 """
@@ -95,36 +98,19 @@ class UploadService:
 
     async def _get_client(self) -> httpx.AsyncClient:
         """
-        Получить HTTP клиент для default SE (создает если не существует).
+        [DEPRECATED Sprint 16] Метод удалён.
 
-        Используется как fallback когда StorageSelector не настроен.
+        Storage Element выбирается динамически через StorageSelector.
+        Используйте _get_client_for_endpoint() вместо этого метода.
 
-        Sprint 16 Phase 4: Поддержка mTLS для inter-service authentication.
-
-        Returns:
-            httpx.AsyncClient: Async HTTP клиент с mTLS support
+        Raises:
+            RuntimeError: Всегда - метод deprecated
         """
-        if self._client is None:
-            # Конфигурация HTTP клиента
-            client_config = {
-                "base_url": settings.storage_element.base_url,
-                "timeout": settings.storage_element.timeout,
-                "limits": httpx.Limits(
-                    max_connections=settings.storage_element.connection_pool_size
-                ),
-                "http2": True,  # HTTP/2 для лучшей производительности
-            }
-
-            self._client = httpx.AsyncClient(**client_config)
-
-            logger.info(
-                "HTTP client initialized",
-                extra={
-                    "base_url": settings.storage_element.base_url
-                }
-            )
-
-        return self._client
+        raise RuntimeError(
+            "Direct client creation is deprecated (Sprint 16). "
+            "Use _get_client_for_endpoint() with SE from StorageSelector. "
+            "Ensure StorageSelector is configured via set_storage_selector()."
+        )
 
     async def _get_client_for_endpoint(self, endpoint: str) -> httpx.AsyncClient:
         """
@@ -371,13 +357,17 @@ class UploadService:
         Raises:
             NoAvailableStorageException: Нет подходящего SE
         """
-        # Fallback на статическую конфигурацию если StorageSelector не настроен
+        # Sprint 16: StorageSelector обязателен, static fallback удалён
         if not self._storage_selector:
-            logger.warning(
-                "StorageSelector not configured, using static config",
-                extra={"base_url": settings.storage_element.base_url}
+            logger.error(
+                "StorageSelector not configured - Service Discovery is required",
+                extra={"error": "StorageSelector must be set via set_storage_selector()"}
             )
-            return settings.storage_element.base_url, "static-fallback"
+            raise NoAvailableStorageException(
+                "StorageSelector not configured. "
+                "Service Discovery (Redis or Admin Module) is required. "
+                "Ensure StorageSelector is initialized in application startup."
+            )
 
         # Маппинг schema RetentionPolicy → selector RetentionPolicy
         from app.services.storage_selector import RetentionPolicy as SelectorRetentionPolicy

@@ -1,60 +1,25 @@
 # ==============================================================================
-# ArtStore - Главный Docker Compose файл
+# ArtStore - Docker Compose файл
 # ==============================================================================
-# Запускает полную систему ArtStore:
-# - Инфраструктура: PostgreSQL, Redis, MinIO, PgAdmin
-# - Backend: Admin Module, Storage Element, Ingester Module, Query Module
-# - Frontend: Admin UI (Angular)
+#
+# КОНФИГУРАЦИЯ:
+#   - 3 Storage Elements x 1GB каждый
+#   - se-01: APP_MODE=edit, PRIORITY=100 (первый для заполнения)
+#   - se-02: APP_MODE=edit, PRIORITY=200 (второй для заполнения)
+#   - se-03: APP_MODE=rw, PRIORITY=300 (fallback для finalized файлов)
 #
 # Использование:
-#   # Запуск всей системы
-#   docker-compose up -d
+#   docker-compose -f docker-compose.yml up -d
+#   docker-compose -f docker-compose.yml logs -f
+#   docker-compose -f docker-compose.yml down -v
 #
-#   # Запуск только инфраструктуры
-#   docker-compose up -d postgres redis minio pgadmin
-#
-#   # Запуск конкретного модуля
-#   docker-compose up -d admin-module
-#
-#   # Просмотр логов
-#   docker-compose logs -f <service-name>
-#
-#   # Остановка
-#   docker-compose down
-#
-# ВАЖНО: Всегда запускайте из корня проекта!
-# ==============================================================================
-# Admin user credentials 
-# ==============================================================================
-# login: admin
-# password: admin123
-# ==============================================================================
-# SERVICE ACCOUNT CREDENTIALS
-# ==============================================================================
-# Для интеграционного тестирования используйте:
-#
-# Name: admin-service
-# Client ID: sa_prod_admin_service_66e7f458
-# Client Secret: D#^Cj)h3e,Ih%Fnf
-# Role: ADMIN
-# Rate Limit: 1000 req/min
-# Created: 2025-11-26
-#
-# OAuth 2.0 Token Endpoint:
-#   POST http://localhost:8000/api/v1/auth/token
-#   Body: {
-#     "grant_type": "client_credentials",
-#     "client_id": "sa_prod_admin_service_66e7f458",
-#     "client_secret": "D#^Cj)h3e,Ih%Fnf"
-#   }
-#
-# Secret expires: 2026-02-24
+# ВАЖНО: Запускать из корня проекта /home/artur/Projects/artStore
 # ==============================================================================
 
 version: '3.8'
 
 # ==============================================================================
-# INFRASTRUCTURE SERVICES
+# INFRASTRUCTURE SERVICES (без изменений)
 # ==============================================================================
 services:
   # PostgreSQL 15 - Primary Database
@@ -79,14 +44,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-        reservations:
-          memory: 512M
 
-  # Redis 7 - Service Discovery & Caching (SYNC режим!)
+  # Redis 7 - Service Discovery & Caching
   redis:
     image: redis:7-alpine
     container_name: artstore_redis
@@ -103,12 +62,6 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 256M
 
   # MinIO - S3-Compatible Object Storage
   minio:
@@ -119,8 +72,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"  # S3 API
-      - "9001:9001"  # Web Console
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -132,37 +85,6 @@ services:
       timeout: 20s
       retries: 3
       start_period: 60s
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 256M
-
-  # PgAdmin 4 - PostgreSQL Management (Optional)
-  pgadmin:
-    image: dpage/pgadmin4:9.10
-    container_name: artstore_pgadmin
-    restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-password}
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - artstore_network
-    depends_on:
-      - postgres
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 128M
 
 # ==============================================================================
 # BACKEND SERVICES
@@ -181,7 +103,7 @@ services:
       # Application
       APP_NAME: artstore-admin-module
       APP_DEBUG: "on"
-      APP_SWAGGER_ENABLED: "on"  # Enable Swagger UI for development
+      APP_SWAGGER_ENABLED: "on"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: json
 
@@ -196,10 +118,6 @@ services:
 
       # PostgreSQL SSL (optional)
       DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
-      DB_SSL_MODE: ${DB_SSL_MODE:-require}
-      DB_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
-      DB_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
-      DB_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
 
       # Redis
       REDIS_URL: redis://redis:6379/0
@@ -256,7 +174,7 @@ services:
       INITIAL_ACCOUNT_ROLE: ADMIN
       INITIAL_ACCOUNT_PASSWORD: TestPassword123!
 
-      # Scheduler (Background Jobs)
+      # Scheduler
       SCHEDULER_ENABLED: "on"
       SCHEDULER_TIMEZONE: "UTC"
       SCHEDULER_JWT_ROTATION_ENABLED: "on"
@@ -264,13 +182,8 @@ services:
       SCHEDULER_STORAGE_HEALTH_CHECK_ENABLED: "on"
       SCHEDULER_STORAGE_HEALTH_CHECK_INTERVAL_SECONDS: 60
     volumes:
-      # JWT keys (persist для всех узлов кластера)
       - admin_jwt_keys:/app/secrets
-
-      # Logs
       - admin_logs:/app/logs
-
-      # tmpfs для временных файлов
       - type: tmpfs
         target: /tmp
     networks:
@@ -287,7 +200,11 @@ services:
       retries: 3
       start_period: 60s
 
-  # Storage Element 01 - Physical File Storage (RW mode)
+  # ===========================================================================
+  # STORAGE ELEMENT 01 - EDIT MODE, PRIORITY=100, MAX_SIZE=1GB
+  # ===========================================================================
+  # Первый SE для заполнения (Sequential Fill Algorithm)
+  # ===========================================================================
   storage-element-01:
     build:
       context: ./storage-element
@@ -299,21 +216,26 @@ services:
     environment:
       # Application
       APP_NAME: artstore-storage-element-01
-      APP_MODE: rw  # edit, rw, ro, ar
-      APP__SWAGGER_ENABLED: "on"  # Двойное подчеркивание для вложенных настроек
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MODE: edit  # EDIT режим для новых файлов
+      APP__SWAGGER_ENABLED: "on"
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       LOG_FORMAT: json
 
-      # Storage Configuration
-      STORAGE_TYPE: s3  # local или s3
-      STORAGE_MAX_SIZE_GB: 100
+      # Storage Configuration - ТЕСТОВЫЙ РАЗМЕР 1GB
+      STORAGE_TYPE: s3
+      STORAGE_MAX_SIZE_GB: 1  # 1GB для быстрого тестирования
 
-      # Health Reporting Settings (Sprint 14)
+      # Health Reporting Settings
       STORAGE_ELEMENT_ID: se-01
-      STORAGE_PRIORITY: 100
+      STORAGE_PRIORITY: 100  # Наивысший приоритет
       STORAGE_EXTERNAL_ENDPOINT: http://storage-element-01:8000
       HEALTH_REPORT_INTERVAL: 30
       HEALTH_REPORT_TTL_MULTIPLIER: 3
+
+      # Adaptive Capacity Thresholds
+      CAPACITY_WARNING_THRESHOLD: 85
+      CAPACITY_CRITICAL_THRESHOLD: 92
+      CAPACITY_FULL_THRESHOLD: 98
 
       # Local Filesystem
       STORAGE_LOCAL_BASE_PATH: /app/.data/storage
@@ -344,12 +266,8 @@ services:
       DB_DATABASE: artstore
       DB_TABLE_PREFIX: storage_elem_01
 
-      # PostgreSQL SSL (optional)
+      # PostgreSQL SSL
       DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
-      DB_SSL_MODE: ${DB_SSL_MODE:-require}
-      DB_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
-      DB_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
-      DB_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
 
       # Redis
       REDIS_HOST: redis
@@ -361,16 +279,9 @@ services:
       WAL_ENABLED: "on"
       WAL_RETENTION_HOURS: 24
     volumes:
-      # JWT Keys
       - ./storage-element/keys:/app/keys:ro
-
-      # Данные хранилища (именованный volume)
       - storage_data_01:/app/.data/storage
-
-      # Logs
       - storage_logs_01:/app/logs
-
-      # tmpfs для временных файлов
       - type: tmpfs
         target: /tmp
     networks:
@@ -391,11 +302,17 @@ services:
       retries: 3
       start_period: 60s
 
-  # Storage Element 02 - Physical File Storage (RW mode - secondary)
+  # ===========================================================================
+  # STORAGE ELEMENT 02 - EDIT MODE, PRIORITY=200, MAX_SIZE=1GB
+  # ===========================================================================
+  # Второй SE для заполнения после se-01
+  # Использует тот же image что и storage-element-01
+  # ===========================================================================
   storage-element-02:
-    build:
-      context: ./storage-element
-      dockerfile: Dockerfile
+    image: artstore_storage-element-01:latest
+    depends_on:
+      storage-element-01:
+        condition: service_healthy
     container_name: artstore_storage_element_02
     restart: unless-stopped
     ports:
@@ -403,21 +320,26 @@ services:
     environment:
       # Application
       APP_NAME: artstore-storage-element-02
-      APP_MODE: rw  # edit, rw, ro, ar
-      APP__SWAGGER_ENABLED: "on"  # Двойное подчеркивание для вложенных настроек
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MODE: edit  # EDIT режим для новых файлов
+      APP__SWAGGER_ENABLED: "on"
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       LOG_FORMAT: json
 
-      # Storage Configuration
-      STORAGE_TYPE: s3  # local или s3
-      STORAGE_MAX_SIZE_GB: 100
+      # Storage Configuration - ТЕСТОВЫЙ РАЗМЕР 1GB
+      STORAGE_TYPE: s3
+      STORAGE_MAX_SIZE_GB: 1  # 1GB для быстрого тестирования
 
-      # Health Reporting Settings (Sprint 14)
+      # Health Reporting Settings
       STORAGE_ELEMENT_ID: se-02
-      STORAGE_PRIORITY: 200
+      STORAGE_PRIORITY: 200  # Средний приоритет
       STORAGE_EXTERNAL_ENDPOINT: http://storage-element-02:8000
       HEALTH_REPORT_INTERVAL: 30
       HEALTH_REPORT_TTL_MULTIPLIER: 3
+
+      # Adaptive Capacity Thresholds
+      CAPACITY_WARNING_THRESHOLD: 85
+      CAPACITY_CRITICAL_THRESHOLD: 92
+      CAPACITY_FULL_THRESHOLD: 98
 
       # Local Filesystem
       STORAGE_LOCAL_BASE_PATH: /app/.data/storage
@@ -448,12 +370,8 @@ services:
       DB_DATABASE: artstore
       DB_TABLE_PREFIX: storage_elem_02
 
-      # PostgreSQL SSL (optional)
+      # PostgreSQL SSL
       DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
-      DB_SSL_MODE: ${DB_SSL_MODE:-require}
-      DB_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
-      DB_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
-      DB_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
 
       # Redis
       REDIS_HOST: redis
@@ -465,29 +383,108 @@ services:
       WAL_ENABLED: "on"
       WAL_RETENTION_HOURS: 24
     volumes:
-      # JWT Keys
       - ./storage-element/keys:/app/keys:ro
-
-      # Данные хранилища (именованный volume)
       - storage_data_02:/app/.data/storage
-
-      # Logs
       - storage_logs_02:/app/logs
-
-      # tmpfs для временных файлов
       - type: tmpfs
         target: /tmp
     networks:
       - artstore_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===========================================================================
+  # STORAGE ELEMENT 03 - RW MODE, PRIORITY=300, MAX_SIZE=1GB
+  # ===========================================================================
+  # Третий SE в RW режиме для finalized файлов
+  # Использует тот же image что и storage-element-01
+  # ===========================================================================
+  storage-element-03:
+    image: artstore_storage-element-01:latest
     depends_on:
-      postgres:
+      storage-element-01:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      admin-module:
-        condition: service_healthy
+    container_name: artstore_storage_element_03
+    restart: unless-stopped
+    ports:
+      - "8012:8000"
+    environment:
+      # Application
+      APP_NAME: artstore-storage-element-03
+      APP_MODE: rw  # RW режим для finalized файлов
+      APP__SWAGGER_ENABLED: "on"
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      LOG_FORMAT: json
+
+      # Storage Configuration - ТЕСТОВЫЙ РАЗМЕР 1GB
+      STORAGE_TYPE: s3
+      STORAGE_MAX_SIZE_GB: 1  # 1GB для быстрого тестирования
+
+      # Health Reporting Settings
+      STORAGE_ELEMENT_ID: se-03
+      STORAGE_PRIORITY: 300  # Низший приоритет (fallback)
+      STORAGE_EXTERNAL_ENDPOINT: http://storage-element-03:8000
+      HEALTH_REPORT_INTERVAL: 30
+      HEALTH_REPORT_TTL_MULTIPLIER: 3
+
+      # Adaptive Capacity Thresholds
+      CAPACITY_WARNING_THRESHOLD: 85
+      CAPACITY_CRITICAL_THRESHOLD: 92
+      CAPACITY_FULL_THRESHOLD: 98
+
+      # Local Filesystem
+      STORAGE_LOCAL_BASE_PATH: /app/.data/storage
+
+      # S3 Configuration
+      STORAGE_S3_ENDPOINT_URL: http://minio:9000
+      STORAGE_S3_ACCESS_KEY_ID: minioadmin
+      STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
+      STORAGE_S3_BUCKET_NAME: artstore-files
+      STORAGE_S3_REGION: us-east-1
+      STORAGE_S3_APP_FOLDER: storage_element_03
+
+      # JWT Authentication
+      JWT_PUBLIC_KEY_PATH: /app/keys/public_key.pem
+      JWT_ALGORITHM: RS256
+
+      # Service Account для взаимодействия с Admin Module
+      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_66e7f458
+      SERVICE_ACCOUNT_CLIENT_SECRET: "D#^Cj)h3e,Ih%Fnf"
+      SERVICE_ACCOUNT_ADMIN_MODULE_URL: http://admin-module:8000
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://${DB_USERNAME:-artstore}:${DB_PASSWORD:-password}@postgres:5432/artstore
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore
+      DB_TABLE_PREFIX: storage_elem_03
+
+      # PostgreSQL SSL
+      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_POOL_SIZE: 10
+
+      # WAL
+      WAL_ENABLED: "on"
+      WAL_RETENTION_HOURS: 24
+    volumes:
+      - ./storage-element/keys:/app/keys:ro
+      - storage_data_03:/app/.data/storage
+      - storage_logs_03:/app/logs
+      - type: tmpfs
+        target: /tmp
+    networks:
+      - artstore_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 30s
@@ -507,8 +504,8 @@ services:
     environment:
       # Application
       APP_NAME: artstore-ingester-module
-      APP_SWAGGER_ENABLED: "on"  # Enable Swagger UI for development
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_SWAGGER_ENABLED: "on"
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       LOG_FORMAT: json
 
       # Upload Limits
@@ -522,14 +519,23 @@ services:
 
       # Redis (Service Discovery)
       REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       SERVICE_DISCOVERY_CHANNEL: artstore:storage-elements
 
       # Circuit Breaker
       CIRCUIT_BREAKER_ENABLED: "on"
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5
 
-      # Storage Element connection
-      STORAGE_ELEMENT_BASE_URL: http://storage-element:8000
+      # Sprint 16: Storage Element через Service Discovery (base_url удалён)
+      # Endpoints выбираются динамически: Redis → Admin Module fallback
+      STORAGE_ELEMENT_TIMEOUT: 30
+      STORAGE_ELEMENT_MAX_RETRIES: 3
+      STORAGE_ELEMENT_CONNECTION_POOL_SIZE: 100
+
+      # Auth settings для Admin Module health checks
+      AUTH_ADMIN_MODULE_URL: http://admin-module:8000
 
       # Service Account для аутентификации с Admin Module
       SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_66e7f458
@@ -540,13 +546,8 @@ services:
       JWT_PUBLIC_KEY_PATH: /app/keys/public_key.pem
       JWT_ALGORITHM: RS256
     volumes:
-      # JWT Keys
       - ./ingester-module/keys:/app/keys:ro
-
-      # Logs
       - ingester_logs:/app/logs
-
-      # tmpfs для временных файлов
       - type: tmpfs
         target: /tmp
     networks:
@@ -557,7 +558,8 @@ services:
       admin-module:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8020/api/v1/health/live"]
+      # Sprint 16: Стандартизированный health endpoint (без /api/v1)
+      test: ["CMD", "curl", "-f", "http://localhost:8020/health/live"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -575,8 +577,8 @@ services:
     environment:
       # Application
       APP_NAME: artstore-query-module
-      SWAGGER_ENABLED: "on"  # Enable Swagger UI for development
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SWAGGER_ENABLED: "on"
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       LOG_FORMAT: json
 
       # Database
@@ -586,15 +588,14 @@ services:
       DATABASE_PASSWORD: ${DB_PASSWORD:-password}
       DATABASE_DATABASE: artstore
 
-      # PostgreSQL SSL (optional)
+      # PostgreSQL SSL
       DATABASE_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
-      DATABASE_SSL_MODE: ${DB_SSL_MODE:-require}
-      DATABASE_SSL_CA_CERT: ${DB_SSL_CA_CERT:-}
-      DATABASE_SSL_CLIENT_CERT: ${DB_SSL_CLIENT_CERT:-}
-      DATABASE_SSL_CLIENT_KEY: ${DB_SSL_CLIENT_KEY:-}
 
       # Redis
       REDIS_URL: redis://redis:6379/1
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 1
       SERVICE_DISCOVERY_CHANNEL: artstore:storage-elements
 
       # Caching
@@ -609,10 +610,7 @@ services:
       # Circuit Breaker
       CIRCUIT_BREAKER_ENABLED: "on"
     volumes:
-      # Logs
       - query_logs:/app/logs
-
-      # tmpfs для временных файлов
       - type: tmpfs
         target: /tmp
     networks:
@@ -628,41 +626,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-
-# ==============================================================================
-# FRONTEND SERVICES
-# ==============================================================================
-
-  # Admin UI - Angular Frontend Application
-  admin-ui:
-    build:
-      context: ./admin-ui
-      dockerfile: Dockerfile
-    container_name: artstore_admin_ui
-    restart: unless-stopped
-    ports:
-      - "4200:80"
-    networks:
-      - artstore_network
-    depends_on:
-      admin-module:
-        condition: service_healthy
-      ingester-module:
-        condition: service_healthy
-      query-module:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-        reservations:
-          memory: 64M
 
 # ==============================================================================
 # NETWORKS
@@ -686,8 +649,6 @@ volumes:
     name: artstore_redis_data
   minio_data:
     name: artstore_minio_data
-  pgadmin_data:
-    name: artstore_pgadmin_data
 
   # Admin Module
   admin_jwt_keys:
@@ -707,6 +668,12 @@ volumes:
   storage_logs_02:
     name: artstore_storage_logs_02
 
+  # Storage Element 03 (NEW)
+  storage_data_03:
+    name: artstore_storage_data_03
+  storage_logs_03:
+    name: artstore_storage_logs_03
+
   # Ingester Module
   ingester_logs:
     name: artstore_ingester_logs
@@ -714,14 +681,3 @@ volumes:
   # Query Module
   query_logs:
     name: artstore_query_logs
-
-# ==============================================================================
-# NOTES
-# ==============================================================================
-# 1. Все сервисы логируют в именованные volumes, НЕ в source directories
-# 2. tmpfs используется для временных файлов (pytest cache, temp uploads)
-# 3. Health checks обеспечивают ready state перед запуском зависимых модулей
-# 4. Resource limits предотвращают OOM
-# 5. Логи в JSON формате для production (ELK/Splunk integration)
-# 6. Redis работает в SYNC режиме для Service Discovery
-# ==============================================================================

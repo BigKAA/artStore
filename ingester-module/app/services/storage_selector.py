@@ -1,7 +1,7 @@
 """
 StorageSelector - Сервис выбора Storage Element для загрузки файлов.
 
-Sprint 14: Redis Storage Registry & Adaptive Capacity.
+Sprint 14-16: Redis Storage Registry & Adaptive Capacity.
 
 Алгоритм Sequential Fill:
 1. Получаем список доступных SE из Redis sorted set (отсортированы по priority)
@@ -10,8 +10,9 @@ Sprint 14: Redis Storage Registry & Adaptive Capacity.
    - can_accept_file(file_size)
 3. Возвращаем первый подходящий SE
 
-Fallback Pattern:
-- Redis → Admin Module HTTP API → Local config
+Fallback Pattern (Sprint 16):
+- Redis → Admin Module HTTP API
+- Local config fallback УДАЛЁН - Service Discovery обязателен
 
 ВАЖНО: Использует redis.asyncio (async), НЕ синхронный redis-py!
 """
@@ -123,8 +124,7 @@ class StorageSelector:
     def __init__(self):
         """Инициализация StorageSelector."""
         self._redis_client = None
-        self._admin_client = None  # Будет инициализирован в Task 6
-        self._local_config: Optional[dict] = None  # Fallback config
+        self._admin_client = None  # Admin Module HTTP клиент для fallback
         self._initialized = False
 
         # Кеш SE для уменьшения нагрузки на Redis
@@ -165,9 +165,9 @@ class StorageSelector:
         2. Фильтруем по mode (edit для TEMPORARY, rw для PERMANENT)
         3. Выбираем первый SE с достаточной емкостью
 
-        Fallback:
+        Fallback (Sprint 16):
         - Redis недоступен → Admin Module API
-        - Admin Module недоступен → Local config
+        - Если оба недоступны → RuntimeError (Service Discovery обязателен)
 
         Args:
             file_size: Размер файла в байтах
@@ -220,32 +220,18 @@ class StorageSelector:
                 )
                 return se
 
-            # Попытка 3: Local config fallback
-            se = await self._select_from_local_config(file_size, required_mode)
-            if se:
-                source = "local_config"
-                status = "fallback"
-                logger.warning(
-                    f"Selected SE from local config fallback",
-                    extra={
-                        "se_id": se.element_id,
-                        "mode": se.mode,
-                        "file_size": file_size,
-                        "retention_policy": retention_policy.value,
-                        "source": "local_config"
-                    }
-                )
-                return se
-
-            # Нет подходящего SE
+            # Sprint 16: Local config fallback УДАЛЁН
+            # Service Discovery (Redis или Admin Module) обязателен
             source = "none"
             status = "failed"
             logger.error(
-                f"No suitable Storage Element found",
+                "No suitable Storage Element found - Service Discovery unavailable",
                 extra={
                     "file_size": file_size,
                     "retention_policy": retention_policy.value,
-                    "required_mode": required_mode
+                    "required_mode": required_mode,
+                    "redis_available": self._redis_client is not None,
+                    "admin_available": self._admin_client is not None
                 }
             )
             return None
@@ -425,57 +411,8 @@ class StorageSelector:
             )
             return None
 
-    async def _select_from_local_config(
-        self,
-        file_size: int,
-        required_mode: str
-    ) -> Optional[StorageElementInfo]:
-        """
-        Выбор SE из локальной конфигурации.
-
-        Последний fallback когда ни Redis, ни Admin Module недоступны.
-
-        Args:
-            file_size: Размер файла в байтах
-            required_mode: Требуемый режим SE
-
-        Returns:
-            StorageElementInfo или None
-        """
-        # Используем конфигурацию из settings
-        # Это простой fallback на единственный SE из environment
-        try:
-            base_url = settings.storage_element.base_url
-
-            # Создаём базовую информацию из config
-            # При fallback мы не знаем точную емкость, поэтому устанавливаем placeholder
-            se_info = StorageElementInfo(
-                element_id="local-fallback",
-                mode=required_mode,
-                endpoint=base_url,
-                priority=100,
-                capacity_total=0,  # Неизвестно
-                capacity_used=0,
-                capacity_free=0,
-                capacity_percent=0.0,
-                capacity_status=CapacityStatus.OK,  # Предполагаем что OK
-                health_status="unknown",
-                last_updated=datetime.now(timezone.utc)
-            )
-
-            logger.warning(
-                "Using local config fallback - capacity checks disabled",
-                extra={"endpoint": base_url}
-            )
-
-            return se_info
-
-        except Exception as e:
-            logger.error(
-                f"Local config fallback failed",
-                extra={"error": str(e)}
-            )
-            return None
+    # Sprint 16: метод _select_from_local_config() УДАЛЁН
+    # Service Discovery через Redis или Admin Module обязателен
 
     async def get_all_available_storage_elements(
         self,
