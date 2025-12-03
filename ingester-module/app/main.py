@@ -64,12 +64,15 @@ async def lifespan(app: FastAPI):
     - Cleanup resources
     """
     # Startup
+    # Sprint 16: Удалён storage_element_url из логирования (Service Discovery обязателен)
     logger.info(
         "Starting Ingester Module",
         extra={
             "app_name": settings.app.name,
             "version": settings.app.version,
-            "storage_element_url": settings.storage_element.base_url
+            "service_discovery": "redis+admin_module",
+            "redis_url": f"{settings.redis.host}:{settings.redis.port}",
+            "admin_module_url": settings.auth.admin_module_url
         }
     )
 
@@ -185,6 +188,11 @@ if settings.cors.enabled:
             "cors_max_age": settings.cors.max_age
         }
     )
+
+# Sprint 16: Health endpoints на /health (стандарт системы, без /api/v1)
+from app.api.v1.endpoints import health as health_router
+app.include_router(health_router.router, prefix="/health", tags=["health"])
+logger.info("Health endpoints registered: /health/live, /health/ready")
 
 # Подключение API router
 app.include_router(api_router, prefix="/api/v1")
