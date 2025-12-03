@@ -269,19 +269,23 @@ ArtStore использует **два типа учетных записей**:
 - `CRITICAL` - Срочное предупреждение, приём продолжается
 - `FULL` - SE исключается из выбора, перенаправление на следующий SE
 
-### Fallback Pattern
+### Fallback Pattern (Sprint 16)
 
 При недоступности основного источника информации о SE система автоматически переключается на резервные:
 
 ```
-Redis Registry → Admin Module API → Local Config
-     │                  │                │
-     │ Sorted Sets      │ HTTP Fallback  │ Environment
-     │ Real-time        │ API            │ Variables
-     │ health data      │ Cached data    │ Static config
-     ▼                  ▼                ▼
-   Primary           Secondary        Emergency
+Redis Registry → Admin Module API → Error
+     │                  │               │
+     │ Sorted Sets      │ HTTP Fallback │ No static
+     │ Real-time        │ API           │ fallback!
+     │ health data      │ Cached data   │
+     ▼                  ▼               ▼
+   Primary           Secondary       503 Error
 ```
+
+**ВАЖНО (Sprint 16):** Статическая конфигурация `STORAGE_ELEMENT_BASE_URL` удалена.
+Service Discovery (Redis или Admin Module API) теперь **ОБЯЗАТЕЛЕН**.
+Если оба источника недоступны, операции загрузки/финализации завершатся ошибкой 503.
 
 ## File Lifecycle Management
 

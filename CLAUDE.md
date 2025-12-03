@@ -69,11 +69,12 @@ ArtStore - это распределенная система файлового
 6. **Saga Pattern**: Координация распределенных транзакций через Admin Module
 7. **Circuit Breaker**: Graceful degradation при недоступности dependencies
 
-### Service Discovery Pattern
+### Service Discovery Pattern (Sprint 16)
 
 - Admin Module публикует конфигурацию storage-elements в Redis
 - Ingester/Query подписываются на обновления через Redis Pub/Sub
-- Fallback на локальную конфигурацию при недоступности Redis
+- **Fallback chain**: Redis → Admin Module API → Error (НЕТ статического fallback)
+- **ВАЖНО (Sprint 16)**: `STORAGE_ELEMENT_BASE_URL` удалён, Service Discovery обязателен
 
 ### Redis Async Usage Pattern
 
@@ -180,6 +181,8 @@ pip install -r query-module/requirements.txt
 
 3. **Ingester Module** (порты 8020-8029) - Загрузка файлов
    - Streaming upload, validation, compression
+   - **Sprint 16**: Service Discovery обязателен (STORAGE_ELEMENT_BASE_URL удалён)
+   - Health endpoints: `/health/live`, `/health/ready`
    - См. `ingester-module/README.md`
 
 4. **Query Module** (порты 8030-8039) - Поиск и скачивание

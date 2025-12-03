@@ -57,11 +57,12 @@
 │     │                                                            │
 │     ├──[Redis OK]──► Return StorageElementInfo                  │
 │     │                                                            │
-│     ├──[Redis fail]──► Try Admin Module API (fallback)          │
-│     │                  GET /api/v1/storage-elements/available   │
-│     │                                                            │
-│     └──[Admin fail]──► Try Local Config (emergency)             │
-│                        Read from environment variables          │
+│     └──[Redis fail]──► Try Admin Module API (fallback)          │
+│                        GET /api/v1/internal/storage-elements/available   │
+│                        Return StorageElementInfo or raise error │
+│                                                                  │
+│  NOTE: Sprint 16 - Static STORAGE_ELEMENT_BASE_URL removed.     │
+│  Service Discovery (Redis/Admin Module) is now MANDATORY.       │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -109,16 +110,21 @@ class CapacityStatus(str, Enum):
 - **Назначение**: Уменьшение нагрузки на Redis при частых запросах
 - **Инвалидация**: Автоматическая по TTL или вручную через `invalidate_cache()`
 
-#### Fallback Chain
+#### Fallback Chain (Sprint 16)
 
 ```
-Redis Registry → Admin Module API → Local Config
-     │                  │                │
-     │ Real-time        │ Cached data    │ Static config
-     │ health data      │ from DB        │ from env vars
-     ▼                  ▼                ▼
-   Primary           Secondary        Emergency
+Redis Registry → Admin Module API → Error
+     │                  │               │
+     │ Real-time        │ Cached data   │ No fallback!
+     │ health data      │ from DB       │ Service Discovery
+     ▼                  ▼               │ is MANDATORY
+   Primary           Secondary          ▼
+                                      503 Error
 ```
+
+**Important (Sprint 16):** Static `STORAGE_ELEMENT_BASE_URL` configuration has been
+removed. At least one of Redis or Admin Module must be available for file operations.
+If both are unavailable, upload/finalize operations will fail with 503 Service Unavailable.
 
 #### Integration
 
@@ -155,10 +161,13 @@ await close_storage_selector()
 | `storage_selection_total` | retention_policy, status, source | Количество выборов SE |
 | `storage_selection_duration_seconds` | retention_policy | Время выбора SE |
 
-#### Service Discovery Integration
-- **Redis Pub/Sub**: Подписка на обновления конфигурации Storage Elements
-- **Local cache**: Fallback на локальную конфигурацию при недоступности Redis
+#### Service Discovery Integration (Sprint 16)
+
+- **Redis Pub/Sub**: Подписка на обновления конфигурации Storage Elements (primary)
+- **Admin Module API**: Fallback на HTTP API при недоступности Redis
+- **Local cache**: Кеширование SE информации на 5 секунд для снижения нагрузки
 - **Automatic refresh**: Обновление списка Storage Elements в real-time
+- **No static fallback**: `STORAGE_ELEMENT_BASE_URL` удалён, Service Discovery обязателен
 
 ### 3. File Operations
 
@@ -465,51 +474,139 @@ ingester-module/
 ### Environment Variables
 
 ```bash
-# Upload Limits
-MAX_FILE_SIZE_MB=1024  # 1GB
-MAX_BATCH_FILES=100
-MAX_BATCH_SIZE_MB=1024
-CHUNK_SIZE_MB=10
+# ==========================================
+# Application Settings
+# ==========================================
+APP_NAME=artstore-ingester
+APP_VERSION=0.1.0
+APP_DEBUG=off
+APP_HOST=0.0.0.0
+APP_PORT=8020
 
-# Compression
-COMPRESSION_ENABLED=true
-COMPRESSION_MIN_SIZE_MB=10
-COMPRESSION_ALGORITHM=brotli  # brotli или gzip
+# ==========================================
+# Authentication Settings
+# ==========================================
+AUTH_ENABLED=on
+AUTH_PUBLIC_KEY_PATH=/app/keys/public_key.pem
+AUTH_ALGORITHM=RS256
+AUTH_ADMIN_MODULE_URL=http://admin-module:8000  # Sprint 16: используется для fallback
 
-# Storage Element Selection
-STORAGE_SELECTION_STRATEGY=least_used  # least_used, round_robin, random
-STORAGE_HEALTH_CHECK_INTERVAL_SECONDS=30
+# ==========================================
+# Storage Element HTTP Client Settings (Sprint 16)
+# ==========================================
+# IMPORTANT: STORAGE_ELEMENT_BASE_URL удалён в Sprint 16!
+# Endpoints выбираются динамически через Service Discovery:
+# - Primary: Redis Service Discovery
+# - Fallback: Admin Module API (/api/v1/internal/storage-elements/available)
+STORAGE_ELEMENT_TIMEOUT=30
+STORAGE_ELEMENT_MAX_RETRIES=3
+STORAGE_ELEMENT_CONNECTION_POOL_SIZE=100
 
-# Service Discovery
-REDIS_URL=redis://localhost:6379/0
-SERVICE_DISCOVERY_CHANNEL=artstore:storage-elements
-SERVICE_DISCOVERY_FALLBACK_CONFIG=/config/storage-elements.json
+# ==========================================
+# Redis Settings (Service Discovery - MANDATORY)
+# ==========================================
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=
+REDIS_MAX_CONNECTIONS=50
 
-# Resumable Uploads
-RESUMABLE_UPLOADS_ENABLED=true
-UPLOAD_SESSION_TTL_HOURS=2
-UPLOAD_SESSION_CLEANUP_INTERVAL_HOURS=1
+# ==========================================
+# Compression Settings
+# ==========================================
+COMPRESSION_ENABLED=on
+COMPRESSION_ALGORITHM=gzip  # gzip или brotli
+COMPRESSION_LEVEL=6  # 1-9 для gzip, 0-11 для brotli
+COMPRESSION_MIN_SIZE=1024  # Минимальный размер файла для сжатия (bytes)
 
-# Circuit Breaker
-CIRCUIT_BREAKER_ENABLED=true
-CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
-CIRCUIT_BREAKER_SUCCESS_THRESHOLD=2
-CIRCUIT_BREAKER_TIMEOUT_SECONDS=60
+# ==========================================
+# Logging Settings
+# ==========================================
+LOG_LEVEL=INFO
+LOG_FORMAT=json  # json (production) или text (development)
 
-# Saga Coordination
-SAGA_ENABLED=true
-SAGA_TIMEOUT_SECONDS=300
-SAGA_RETRY_MAX_ATTEMPTS=3
+# ==========================================
+# Upload Limits (Future)
+# ==========================================
+# MAX_FILE_SIZE_MB=1024  # 1GB
+# MAX_BATCH_FILES=100
+# MAX_BATCH_SIZE_MB=1024
+# CHUNK_SIZE_MB=10
 
-# Validation
-VIRUS_SCAN_ENABLED=false  # Требует ClamAV integration
-MIME_TYPE_VALIDATION=true
-ALLOWED_MIME_TYPES=application/pdf,application/msword,image/*
+# ==========================================
+# Resumable Uploads (Future)
+# ==========================================
+# RESUMABLE_UPLOADS_ENABLED=true
+# UPLOAD_SESSION_TTL_HOURS=2
+# UPLOAD_SESSION_CLEANUP_INTERVAL_HOURS=1
 
+# ==========================================
+# Circuit Breaker (Future)
+# ==========================================
+# CIRCUIT_BREAKER_ENABLED=true
+# CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+# CIRCUIT_BREAKER_SUCCESS_THRESHOLD=2
+# CIRCUIT_BREAKER_TIMEOUT_SECONDS=60
+
+# ==========================================
+# Saga Coordination (Future)
+# ==========================================
+# SAGA_ENABLED=true
+# SAGA_TIMEOUT_SECONDS=300
+# SAGA_RETRY_MAX_ATTEMPTS=3
+
+# ==========================================
+# Validation (Future)
+# ==========================================
+# VIRUS_SCAN_ENABLED=false  # Требует ClamAV integration
+# MIME_TYPE_VALIDATION=true
+# ALLOWED_MIME_TYPES=application/pdf,application/msword,image/*
+
+# ==========================================
 # Monitoring
-OPENTELEMETRY_ENABLED=true
-PROMETHEUS_METRICS_ENABLED=true
+# ==========================================
+# OPENTELEMETRY_ENABLED=true
+# PROMETHEUS_METRICS_ENABLED=true
 ```
+
+## Architecture Changes (Sprint 16)
+
+### Service Discovery стал обязательным
+
+**Что изменилось:**
+- Удалена статическая конфигурация `STORAGE_ELEMENT_BASE_URL`
+- Endpoints Storage Elements получаются ТОЛЬКО через Service Discovery
+- Fallback chain: Redis → Admin Module API → Error (no static fallback)
+
+**Почему:**
+- Единственный источник истины для конфигурации SE
+- Динамическое обновление endpoints без перезапуска
+- Консистентность данных о capacity и health статусах
+- Упрощение конфигурации (меньше env variables)
+
+**Миграция:**
+1. Удалить `STORAGE_ELEMENT_BASE_URL` из `.env` файлов
+2. Убедиться что Redis доступен ИЛИ Admin Module API настроен
+3. Проверить что SE зарегистрированы через Admin Module
+
+### Health Check endpoints стандартизированы
+
+**Было:** `/api/v1/health/live`, `/api/v1/health/ready`
+**Стало:** `/health/live`, `/health/ready`
+
+Теперь соответствует стандарту других модулей (Admin, Storage, Query).
+
+### Readiness Check проверяет все writable SE
+
+Health check `/health/ready` теперь:
+1. Проверяет Redis (Service Discovery)
+2. Проверяет Admin Module (fallback)
+3. Получает ВСЕ writable SE (режимы `edit`/`rw`)
+4. Проверяет каждый SE на `/health/live`
+5. Возвращает агрегированный статус:
+   - `ok`: все компоненты healthy
+   - `degraded`: частично healthy
+   - `fail`: критические компоненты недоступны
 
 ## Тестирование
 
@@ -558,6 +655,23 @@ pytest ingester-module/tests/integration/ -v
 - `artstore.ingester.transfer` - Перенос файла между Storage Elements
 
 ## Troubleshooting
+
+### Проблемы с Service Discovery (Sprint 16)
+
+**Проблема**: `503 Service Unavailable` - No available Storage Elements
+**Причина**: Service Discovery не может найти доступные SE
+**Решение**:
+1. Проверить что Redis запущен: `redis-cli ping`
+2. Проверить что Admin Module доступен: `curl http://admin-module:8000/health/live`
+3. Проверить что SE зарегистрированы в Redis: `redis-cli KEYS "storage:*"`
+4. Проверить логи Ingester на ошибки подключения
+
+**Проблема**: `RuntimeError: StorageSelector is required`
+**Причина**: StorageSelector не инициализирован (Redis и Admin Module недоступны)
+**Решение**:
+1. Убедиться что `AUTH_ADMIN_MODULE_URL` настроен правильно
+2. Проверить сетевую связность между модулями
+3. Проверить что Admin Module полностью запустился (health/ready)
 
 ### Проблемы с загрузкой
 
