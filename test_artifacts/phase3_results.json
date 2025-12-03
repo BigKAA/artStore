@@ -1,0 +1,82 @@
+{
+  "phase": "Phase 3: Positive Scenarios",
+  "timestamp": "2025-12-03T18:02:20.173917",
+  "summary": {
+    "total_tests": 7,
+    "passed": 6,
+    "failed": 1,
+    "success_rate": "85.7%"
+  },
+  "results": [
+    {
+      "name": "T1: Sequential Fill (40 files to se-01)",
+      "passed": true,
+      "message": "Files distributed: SE-01=0, SE-02=0",
+      "details": {
+        "distribution": {
+          "se-01": 40
+        },
+        "bytes_used": 373043200
+      },
+      "duration_seconds": 8.276758
+    },
+    {
+      "name": "T2: Fill SE-01 to 96%",
+      "passed": true,
+      "message": "SE-01 at 93.9% (target: 96%)",
+      "details": {
+        "used_bytes": 1008435200,
+        "capacity_bytes": 1073741824
+      },
+      "duration_seconds": 1153.057566
+    },
+    {
+      "name": "T3: Capacity Status Transitions",
+      "passed": true,
+      "message": "Usage at 93.9%, expected status: CRITICAL",
+      "details": {
+        "usage_percent": 93.9178466796875,
+        "expected_status": "CRITICAL"
+      },
+      "duration_seconds": 0.009133
+    },
+    {
+      "name": "T4: Switch to SE-02 when SE-01 is FULL",
+      "passed": true,
+      "message": "File routed to SE-se-01",
+      "details": {
+        "storage_element_id": "se-01"
+      },
+      "duration_seconds": 75.17997
+    },
+    {
+      "name": "T5: Upload 20 files to SE-02",
+      "passed": false,
+      "message": "Error: 'in <string>' requires string as left operand, not int",
+      "details": {},
+      "duration_seconds": 0.005733
+    },
+    {
+      "name": "T6: File Finalization (TEMPORARY\u2192PERMANENT)",
+      "passed": true,
+      "message": "Finalized 5 files, 0 failed",
+      "details": {
+        "finalized_count": 5,
+        "failed_count": 0
+      },
+      "duration_seconds": 1.185464
+    },
+    {
+      "name": "T7: New files should go to edit SE (not rw)",
+      "passed": true,
+      "message": "All 0 files correctly routed to edit SE (SE-01 or SE-02)",
+      "details": {
+        "distribution": {
+          "se-01": 5
+        }
+      },
+      "duration_seconds": 1.064795
+    }
+  ],
+  "files_uploaded": 6469
+}

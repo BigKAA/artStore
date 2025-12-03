@@ -103,7 +103,7 @@ async def _get_storage_stats(db: AsyncSession) -> tuple[int, int]:
         result = await db.execute(
             select(
                 func.coalesce(func.sum(FileMetadata.file_size), 0),
-                func.count(FileMetadata.id)
+                func.count(FileMetadata.file_id)
             )
         )
         row = result.one()
