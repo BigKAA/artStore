@@ -7,10 +7,18 @@ threshold = max(percentage, minimum_GB)
 Это обеспечивает:
 - Для больших SE (>1TB): процентные пороги работают корректно
 - Для малых SE (<1TB): минимальные GB гарантируют безопасный буфер
+
+Поддерживает override порогов через environment variables:
+- CAPACITY_WARNING_THRESHOLD
+- CAPACITY_CRITICAL_THRESHOLD
+- CAPACITY_FULL_THRESHOLD
 """
 
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from app.core.config import StorageSettings
 
 
 class CapacityStatus(Enum):
@@ -106,6 +114,47 @@ def calculate_adaptive_threshold(
         "critical_free_gb": critical_free_gb,
         "full_free_gb": full_free_gb,
     }
+
+
+def get_thresholds_with_override(
+    total_capacity_bytes: int,
+    mode: str,
+    storage_settings: Optional["StorageSettings"] = None
+) -> Optional[dict]:
+    """
+    Получает пороги capacity с поддержкой override из environment variables.
+
+    Порядок приоритета:
+    1. Override из environment variables (если все три заданы)
+    2. Автоматический расчёт на основе размера SE
+
+    Args:
+        total_capacity_bytes: Общая ёмкость в байтах
+        mode: Режим хранилища ("rw", "edit", "ro", "ar")
+        storage_settings: Настройки storage из config (опционально)
+
+    Returns:
+        dict с порогами или None для ro/ar режимов
+
+    Example:
+        >>> # С override из env (CAPACITY_WARNING_THRESHOLD=85, etc.)
+        >>> thresholds = get_thresholds_with_override(1 * GB, "edit", settings.storage)
+        >>> thresholds["warning_threshold"]
+        85.0
+
+        >>> # Без override - автоматический расчёт
+        >>> thresholds = get_thresholds_with_override(10 * TB, "rw")
+        >>> thresholds["warning_threshold"]  # ~85% для 10TB
+        85.0
+    """
+    # Проверяем override из settings
+    if storage_settings is not None:
+        override = storage_settings.get_capacity_thresholds_override()
+        if override is not None:
+            return override
+
+    # Fallback на автоматический расчёт
+    return calculate_adaptive_threshold(total_capacity_bytes, mode)
 
 
 def get_capacity_status(
