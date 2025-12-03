@@ -428,14 +428,35 @@ class S3StorageService(StorageService):
         self.access_key = access_key or settings.storage.s3.access_key_id
         self.secret_key = secret_key or settings.storage.s3.secret_access_key
         self.bucket_name = bucket_name or settings.storage.s3.bucket_name
+        # app_folder используется как prefix для всех S3 ключей,
+        # что позволяет изолировать данные разных Storage Element в одном бакете
+        self.app_folder = settings.storage.s3.app_folder
 
         logger.info(
             f"S3StorageService initialized",
             extra={
                 "endpoint_url": self.endpoint_url,
-                "bucket_name": self.bucket_name
+                "bucket_name": self.bucket_name,
+                "app_folder": self.app_folder
             }
         )
+
+    def _get_s3_key(self, relative_path: str) -> str:
+        """
+        Формирует полный S3 ключ с учётом app_folder prefix.
+
+        Все операции с S3 должны использовать этот метод для формирования ключа,
+        чтобы гарантировать изоляцию данных в пределах app_folder.
+
+        Args:
+            relative_path: Относительный путь файла (без app_folder)
+
+        Returns:
+            Полный S3 ключ в формате "{app_folder}/{relative_path}"
+        """
+        # Убираем возможные лидирующие слэши из relative_path
+        clean_path = relative_path.lstrip('/')
+        return f"{self.app_folder}/{clean_path}"
 
     async def write_file(
         self,
@@ -500,7 +521,7 @@ class S3StorageService(StorageService):
                 # Upload в S3
                 await s3_client.put_object(
                     Bucket=self.bucket_name,
-                    Key=relative_path,
+                    Key=self._get_s3_key(relative_path),
                     Body=file_bytes,
                     Metadata={
                         'checksum': checksum,
@@ -576,7 +597,7 @@ class S3StorageService(StorageService):
             ) as s3_client:
                 response = await s3_client.get_object(
                     Bucket=self.bucket_name,
-                    Key=relative_path
+                    Key=self._get_s3_key(relative_path)
                 )
 
                 stream = response['Body']
@@ -647,7 +668,7 @@ class S3StorageService(StorageService):
             ) as s3_client:
                 await s3_client.delete_object(
                     Bucket=self.bucket_name,
-                    Key=relative_path
+                    Key=self._get_s3_key(relative_path)
                 )
 
                 logger.info(
@@ -709,7 +730,7 @@ class S3StorageService(StorageService):
             ) as s3_client:
                 await s3_client.head_object(
                     Bucket=self.bucket_name,
-                    Key=relative_path
+                    Key=self._get_s3_key(relative_path)
                 )
                 return True
 
@@ -753,7 +774,7 @@ class S3StorageService(StorageService):
             ) as s3_client:
                 response = await s3_client.head_object(
                     Bucket=self.bucket_name,
-                    Key=relative_path
+                    Key=self._get_s3_key(relative_path)
                 )
                 return response['ContentLength']
 
@@ -816,7 +837,7 @@ class S3StorageService(StorageService):
 
                 await s3_client.put_object(
                     Bucket=self.bucket_name,
-                    Key=relative_path,
+                    Key=self._get_s3_key(relative_path),
                     Body=json_data,
                     ContentType='application/json'
                 )
@@ -886,7 +907,7 @@ class S3StorageService(StorageService):
             ) as s3_client:
                 response = await s3_client.get_object(
                     Bucket=self.bucket_name,
-                    Key=relative_path
+                    Key=self._get_s3_key(relative_path)
                 )
 
                 # Чтение всего содержимого JSON файла
@@ -954,7 +975,7 @@ class S3StorageService(StorageService):
             ) as s3_client:
                 await s3_client.delete_object(
                     Bucket=self.bucket_name,
-                    Key=relative_path
+                    Key=self._get_s3_key(relative_path)
                 )
 
                 logger.info(
