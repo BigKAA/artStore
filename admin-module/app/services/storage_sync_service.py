@@ -26,6 +26,7 @@ from app.services.storage_discovery_service import (
     StorageDiscoveryService,
     StorageElementDiscoveryResult,
 )
+from app.services.storage_element_publish_service import storage_element_publish_service
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,8 @@ class StorageSyncService:
 
             await db.commit()
 
+            # Публикуем обновления в Redis для Service Discovery
+            # Это критически важно для корректной работы Sequential Fill Algorithm
             if changes:
                 logger.info(
                     f"Синхронизация {storage_element.name}: "
@@ -249,6 +252,10 @@ class StorageSyncService:
                     logger.debug(
                         f"  {change.field}: {change.old_value} -> {change.new_value}"
                     )
+                # Публикуем в Redis только если были изменения
+                await storage_element_publish_service.publish_on_sync(
+                    db, storage_element
+                )
             else:
                 logger.debug(f"Синхронизация {storage_element.name}: без изменений")
 
@@ -268,6 +275,11 @@ class StorageSyncService:
             storage_element.status = StorageStatus.OFFLINE
             storage_element.last_health_check = datetime.now(timezone.utc)
             await db.commit()
+
+            # Публикуем изменение статуса в Redis
+            await storage_element_publish_service.publish_on_sync(
+                db, storage_element
+            )
 
             return SyncResult(
                 storage_element_id=storage_element_id,

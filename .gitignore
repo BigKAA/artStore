@@ -216,3 +216,4 @@ data/
 .utils/nginx/certs/
 .playwright-mcp/
 claudedocs/
+.archive/

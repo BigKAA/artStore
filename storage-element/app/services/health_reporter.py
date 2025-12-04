@@ -19,8 +19,11 @@ from typing import Optional
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+from sqlalchemy import select, func
 
 from app.core.config import settings
+from app.db.session import AsyncSessionLocal
+from app.models.file_metadata import FileMetadata
 from app.core.logging import get_logger
 from app.core.capacity_calculator import (
     CapacityStatus,
@@ -329,17 +332,28 @@ class HealthReporter:
         и отслеживаем usage через метаданные файлов в БД.
 
         Returns:
-            dict: Оценочная статистика S3
+            dict: Статистика S3 на основе данных из PostgreSQL
         """
         # Для S3 total = настроенный лимит
         total = settings.storage.max_size_bytes
 
-        # TODO: В будущем получать actual usage из БД или S3 API
-        # Пока используем placeholder
-        # Это будет реализовано в Sprint 15 через tracking в БД
+        # Получаем actual usage из БД (сумма file_size всех файлов)
         used = 0
-        free = total
-        percent = 0.0
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(func.coalesce(func.sum(FileMetadata.file_size), 0))
+                )
+                used = int(result.scalar_one())
+        except Exception as e:
+            logger.warning(
+                f"Не удалось получить статистику из БД: {e}",
+                extra={"se_id": self.se_id, "error": str(e)}
+            )
+            used = 0
+
+        free = max(0, total - used)
+        percent = (used / total * 100) if total > 0 else 0.0
 
         return {
             "total": total,
