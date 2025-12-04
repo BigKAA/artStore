@@ -155,7 +155,8 @@ class StorageSelector:
     async def select_storage_element(
         self,
         file_size: int,
-        retention_policy: RetentionPolicy = RetentionPolicy.TEMPORARY
+        retention_policy: RetentionPolicy = RetentionPolicy.TEMPORARY,
+        excluded_se_ids: Optional[set[str]] = None,
     ) -> Optional[StorageElementInfo]:
         """
         Выбор Storage Element для загрузки файла.
@@ -169,9 +170,13 @@ class StorageSelector:
         - Redis недоступен → Admin Module API
         - Если оба недоступны → RuntimeError (Service Discovery обязателен)
 
+        Sprint 17: Добавлен excluded_se_ids для поддержки retry logic.
+        SE из этого множества пропускаются при выборе.
+
         Args:
             file_size: Размер файла в байтах
             retention_policy: Политика хранения (определяет тип SE)
+            excluded_se_ids: Множество ID SE для исключения из выбора (Sprint 17)
 
         Returns:
             StorageElementInfo или None если нет подходящего SE
@@ -187,7 +192,7 @@ class StorageSelector:
 
         try:
             # Попытка 1: Redis Registry
-            se = await self._select_from_redis(file_size, required_mode)
+            se = await self._select_from_redis(file_size, required_mode, excluded_se_ids)
             if se:
                 source = "redis"
                 status = "success"
@@ -198,13 +203,14 @@ class StorageSelector:
                         "mode": se.mode,
                         "file_size": file_size,
                         "retention_policy": retention_policy.value,
-                        "source": "redis"
+                        "source": "redis",
+                        "excluded_se_ids": list(excluded_se_ids) if excluded_se_ids else [],
                     }
                 )
                 return se
 
             # Попытка 2: Admin Module Fallback API
-            se = await self._select_from_admin_module(file_size, required_mode)
+            se = await self._select_from_admin_module(file_size, required_mode, excluded_se_ids)
             if se:
                 source = "admin_module"
                 status = "fallback"
@@ -215,7 +221,8 @@ class StorageSelector:
                         "mode": se.mode,
                         "file_size": file_size,
                         "retention_policy": retention_policy.value,
-                        "source": "admin_module"
+                        "source": "admin_module",
+                        "excluded_se_ids": list(excluded_se_ids) if excluded_se_ids else [],
                     }
                 )
                 return se
@@ -251,16 +258,20 @@ class StorageSelector:
     async def _select_from_redis(
         self,
         file_size: int,
-        required_mode: str
+        required_mode: str,
+        excluded_se_ids: Optional[set[str]] = None,
     ) -> Optional[StorageElementInfo]:
         """
         Выбор SE из Redis Registry.
 
         Использует sorted set storage:{mode}:by_priority для Sequential Fill.
 
+        Sprint 17: Добавлен excluded_se_ids для поддержки retry logic.
+
         Args:
             file_size: Размер файла в байтах
             required_mode: Требуемый режим SE (edit или rw)
+            excluded_se_ids: Множество ID SE для исключения из выбора
 
         Returns:
             StorageElementInfo или None
@@ -285,6 +296,14 @@ class StorageSelector:
 
             # Проверяем каждый SE в порядке priority
             for se_id in se_ids:
+                # Sprint 17: Пропускаем excluded SE
+                if excluded_se_ids and se_id in excluded_se_ids:
+                    logger.debug(
+                        f"SE {se_id} skipped (excluded)",
+                        extra={"reason": "excluded_se_ids"}
+                    )
+                    continue
+
                 se_info = await self._get_se_info_from_redis(se_id)
 
                 if se_info is None:
@@ -373,16 +392,20 @@ class StorageSelector:
     async def _select_from_admin_module(
         self,
         file_size: int,
-        required_mode: str
+        required_mode: str,
+        excluded_se_ids: Optional[set[str]] = None,
     ) -> Optional[StorageElementInfo]:
         """
         Выбор SE через Admin Module Fallback API.
 
         Используется когда Redis недоступен.
 
+        Sprint 17: Добавлен excluded_se_ids для поддержки retry logic.
+
         Args:
             file_size: Размер файла в байтах
             required_mode: Требуемый режим SE
+            excluded_se_ids: Множество ID SE для исключения из выбора
 
         Returns:
             StorageElementInfo или None
@@ -399,8 +422,11 @@ class StorageSelector:
             )
 
             if se_list:
-                # Первый SE уже отсортирован по priority
-                return se_list[0]
+                # Sprint 17: Фильтруем excluded SE
+                for se in se_list:
+                    if excluded_se_ids and se.element_id in excluded_se_ids:
+                        continue
+                    return se
 
             return None
 

@@ -10,6 +10,11 @@ Liveness и Readiness probes для Kubernetes/Docker health monitoring.
 - Readiness проверяет ВСЕ writable SE через StorageSelector
 - Исправлен endpoint: /health/live (не /api/v1/health/live)
 - Агрегация статусов: ok (100%), degraded (>0%), fail (0%)
+
+Sprint 17: Расширенная проверка Capacity Monitor.
+- Проверка состояния Leader Election
+- Проверка что есть хотя бы 1 SE в режиме edit
+- Проверка свежести capacity cache
 """
 
 import logging
@@ -152,6 +157,33 @@ async def readiness():
         if checks.get('redis') not in ('ok', 'not_configured'):
             overall_status = 'degraded'
 
+    # Sprint 17: Проверка Capacity Monitor
+    capacity_monitor_status = None
+    try:
+        from app.services.capacity_monitor import get_capacity_monitor
+
+        capacity_monitor = await get_capacity_monitor()
+        if capacity_monitor:
+            cm_status = capacity_monitor.get_status()
+            capacity_monitor_status = {
+                'instance_id': cm_status.get('instance_id'),
+                'role': cm_status.get('role'),
+                'running': cm_status.get('running'),
+                'storage_elements_count': cm_status.get('storage_elements_count'),
+            }
+            checks['capacity_monitor'] = 'ok' if cm_status.get('running') else 'degraded'
+        else:
+            checks['capacity_monitor'] = 'not_configured'
+            # Capacity Monitor опциональный, не влияет на overall status
+    except ImportError:
+        checks['capacity_monitor'] = 'not_available'
+    except Exception as e:
+        logger.warning(
+            "Capacity Monitor health check failed",
+            extra={"error": str(e)}
+        )
+        checks['capacity_monitor'] = 'error'
+
     # 3. Проверка Storage Elements через StorageSelector
     try:
         from app.services.storage_selector import get_storage_selector
@@ -206,6 +238,16 @@ async def readiness():
 
                         storage_elements_status[se_info.element_id] = se_health
 
+                # Sprint 17: Подсчёт SE по режимам (edit/rw)
+                edit_se_count = sum(
+                    1 for se_id, se in storage_elements_status.items()
+                    if se.get('mode') == 'edit' and se.get('status') == 'ok'
+                )
+                rw_se_count = sum(
+                    1 for se_id, se in storage_elements_status.items()
+                    if se.get('mode') == 'rw' and se.get('status') == 'ok'
+                )
+
                 # Агрегация статуса SE
                 if healthy_se_count == 0:
                     checks['storage_elements'] = 'fail'
@@ -216,6 +258,19 @@ async def readiness():
                         overall_status = 'degraded'
                 else:
                     checks['storage_elements'] = 'ok'
+
+                # Sprint 17: Проверка минимальных требований по режимам
+                # Для загрузки TEMPORARY файлов нужен хотя бы 1 edit SE
+                if edit_se_count == 0:
+                    logger.warning(
+                        "No healthy edit-mode Storage Elements available",
+                        extra={"edit_se_count": edit_se_count, "rw_se_count": rw_se_count}
+                    )
+                    checks['edit_storage'] = 'fail'
+                    if overall_status == 'ok':
+                        overall_status = 'degraded'
+                else:
+                    checks['edit_storage'] = 'ok'
 
     except ImportError:
         logger.error("StorageSelector import failed")
@@ -237,6 +292,8 @@ async def readiness():
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'checks': checks,
         'storage_elements': storage_elements_status if storage_elements_status else None,
+        # Sprint 17: Добавлен статус Capacity Monitor
+        'capacity_monitor': capacity_monitor_status,
         'summary': {
             'total_se': total_se_count,
             'healthy_se': healthy_se_count,

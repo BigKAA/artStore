@@ -33,7 +33,8 @@ from app.core.config import settings
 from app.core.exceptions import (
     StorageElementUnavailableException,
     FileSizeLimitExceededException,
-    NoAvailableStorageException
+    NoAvailableStorageException,
+    InsufficientStorageException,  # Sprint 17
 )
 from app.schemas.upload import (
     UploadRequest,
@@ -49,6 +50,7 @@ from app.services.auth_service import AuthService
 if TYPE_CHECKING:
     from app.services.storage_selector import StorageSelector
     from app.services.storage_selector import RetentionPolicy as SelectorRetentionPolicy
+    from app.services.capacity_monitor import AdaptiveCapacityMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,16 @@ class UploadService:
     - Обработку ошибок загрузки
 
     Sprint 14: Интеграция с StorageSelector для Sequential Fill алгоритма.
+
+    Sprint 17: Retry logic и Lazy Update интеграция.
+    - Обработка 507 Insufficient Storage с retry на другой SE
+    - Интеграция с AdaptiveCapacityMonitor для lazy update
+    - Исключение failed SE из повторного выбора
+    - Конфигурируемое количество retry (default: 3)
     """
+
+    # Sprint 17: Максимальное количество retry при 507
+    DEFAULT_MAX_RETRIES = 3
 
     def __init__(self, auth_service: AuthService):
         """
@@ -81,6 +92,9 @@ class UploadService:
         # Sprint 14: StorageSelector для динамического выбора SE
         self._storage_selector: Optional["StorageSelector"] = None
 
+        # Sprint 17: AdaptiveCapacityMonitor для lazy update
+        self._capacity_monitor: Optional["AdaptiveCapacityMonitor"] = None
+
         # Кеш HTTP клиентов для разных SE endpoints
         self._se_clients: dict[str, httpx.AsyncClient] = {}
 
@@ -95,6 +109,19 @@ class UploadService:
         """
         self._storage_selector = storage_selector
         logger.info("StorageSelector injected into UploadService")
+
+    def set_capacity_monitor(self, capacity_monitor: "AdaptiveCapacityMonitor") -> None:
+        """
+        Установка AdaptiveCapacityMonitor для lazy update.
+
+        Sprint 17: Вызывается из main.py lifespan после инициализации CapacityMonitor.
+        При 507 ошибках UploadService триггерит lazy update через этот monitor.
+
+        Args:
+            capacity_monitor: Инициализированный AdaptiveCapacityMonitor
+        """
+        self._capacity_monitor = capacity_monitor
+        logger.info("AdaptiveCapacityMonitor injected into UploadService")
 
     async def _get_client(self) -> httpx.AsyncClient:
         """
@@ -192,6 +219,11 @@ class UploadService:
         - Передача retention_policy в Storage Element
         - Возврат полной информации о retention policy
 
+        Sprint 17: Retry Logic с Lazy Update.
+        - Обработка 507 Insufficient Storage с retry на другой SE
+        - Интеграция с AdaptiveCapacityMonitor для lazy update
+        - Исключение failed SE из повторного выбора
+
         Args:
             file: Загружаемый файл
             request: Параметры загрузки
@@ -205,6 +237,7 @@ class UploadService:
             StorageElementUnavailableException: Storage Element недоступен
             FileSizeLimitExceededException: Превышен лимит размера
             NoAvailableStorageException: Нет доступного SE для загрузки
+            InsufficientStorageException: Все SE переполнены (после retry)
         """
         logger.info(
             "Starting file upload",
@@ -264,13 +297,168 @@ class UploadService:
 
         # TODO: Добавить сжатие если request.compress=True
         # TODO: Добавить Circuit Breaker pattern
-        # TODO: Добавить retry logic
+
+        # Sprint 17: Retry logic при 507 Insufficient Storage
+        # Исключаем SE которые вернули 507 и пробуем другие
+        excluded_se_ids: set[str] = set()
+        last_insufficient_storage_error: Optional[InsufficientStorageException] = None
+
+        for attempt in range(self.DEFAULT_MAX_RETRIES):
+            try:
+                result = await self._upload_to_storage_element(
+                    content=content,
+                    filename=file.filename,
+                    content_type=file.content_type,
+                    data=data,
+                    file_size=file_size,
+                    retention_policy=request.retention_policy,
+                    excluded_se_ids=excluded_se_ids,
+                )
+
+                logger.info(
+                    "File uploaded successfully",
+                    extra={
+                        "file_id": result["file_id"],
+                        "uploaded_filename": file.filename,
+                        "file_size": file_size,
+                        "user_id": user_id,
+                        "storage_element_url": result["storage_element_url"],
+                        "storage_element_id": result["storage_element_id"],
+                        "retention_policy": request.retention_policy.value,
+                        "ttl_expires_at": str(ttl_expires_at) if ttl_expires_at else None,
+                        "attempt": attempt + 1,
+                    }
+                )
+
+                # Sprint 15: Формирование ответа с retention policy info
+                return UploadResponse(
+                    file_id=UUID(result['file_id']),
+                    original_filename=file.filename or "unknown",
+                    storage_filename=result.get('original_filename', ''),
+                    file_size=file_size,
+                    compressed=request.compress,
+                    compression_ratio=None,  # TODO: calculate if compressed
+                    checksum=result.get('checksum', checksum),
+                    uploaded_at=datetime.now(timezone.utc),
+                    storage_element_url=result["storage_element_url"],
+                    # Sprint 15: Retention Policy info
+                    retention_policy=request.retention_policy,
+                    ttl_expires_at=ttl_expires_at,
+                    storage_element_id=result["storage_element_id"]
+                )
+
+            except InsufficientStorageException as e:
+                # Sprint 17: 507 Insufficient Storage - trigger lazy update и retry
+                last_insufficient_storage_error = e
+                excluded_se_ids.add(e.storage_element_id)
+
+                logger.warning(
+                    "Storage Element returned 507 Insufficient Storage",
+                    extra={
+                        "se_id": e.storage_element_id,
+                        "attempt": attempt + 1,
+                        "max_retries": self.DEFAULT_MAX_RETRIES,
+                        "excluded_se_ids": list(excluded_se_ids),
+                        "file_size": file_size,
+                    }
+                )
+
+                # Trigger lazy update через CapacityMonitor
+                if self._capacity_monitor:
+                    await self._capacity_monitor.trigger_lazy_update(
+                        se_id=e.storage_element_id,
+                        reason="insufficient_storage"
+                    )
+
+                # Если есть ещё попытки - продолжаем с другим SE
+                if attempt < self.DEFAULT_MAX_RETRIES - 1:
+                    logger.info(
+                        "Retrying upload with different Storage Element",
+                        extra={
+                            "attempt": attempt + 2,
+                            "excluded_se_ids": list(excluded_se_ids),
+                        }
+                    )
+                    continue
+
+                # Все попытки исчерпаны
+                logger.error(
+                    "All Storage Elements exhausted (507 Insufficient Storage)",
+                    extra={
+                        "excluded_se_ids": list(excluded_se_ids),
+                        "file_size": file_size,
+                        "retention_policy": request.retention_policy.value,
+                    }
+                )
+                raise
+
+            except NoAvailableStorageException:
+                # Нет доступных SE (все в excluded или все заняты)
+                if last_insufficient_storage_error:
+                    logger.error(
+                        "No available Storage Elements after 507 retries",
+                        extra={
+                            "excluded_se_ids": list(excluded_se_ids),
+                            "file_size": file_size,
+                        }
+                    )
+                    raise last_insufficient_storage_error
+                raise
+
+        # Fallback - не должны сюда попасть
+        raise NoAvailableStorageException(
+            "Upload failed after all retry attempts"
+        )
+
+    async def _upload_to_storage_element(
+        self,
+        content: bytes,
+        filename: str,
+        content_type: Optional[str],
+        data: dict,
+        file_size: int,
+        retention_policy: RetentionPolicy,
+        excluded_se_ids: set[str],
+    ) -> dict:
+        """
+        Внутренний метод для загрузки файла на конкретный SE.
+
+        Sprint 17: Выделен из upload_file для поддержки retry logic.
+
+        Args:
+            content: Содержимое файла
+            filename: Имя файла
+            content_type: MIME тип
+            data: Данные для multipart form
+            file_size: Размер файла
+            retention_policy: Политика хранения
+            excluded_se_ids: Множество ID SE для исключения из выбора
+
+        Returns:
+            dict: Результат от Storage Element + storage_element_url, storage_element_id
+
+        Raises:
+            InsufficientStorageException: SE вернул 507
+            StorageElementUnavailableException: SE недоступен
+            NoAvailableStorageException: Нет подходящего SE
+        """
+        # Выбор Storage Element через StorageSelector
+        storage_element_url, storage_element_id = await self._select_storage_element_with_id(
+            file_size=file_size,
+            retention_policy=retention_policy,
+            excluded_se_ids=excluded_se_ids,
+        )
+
+        # Формирование файла для multipart
+        files = {
+            'file': (filename, content, content_type or 'application/octet-stream')
+        }
 
         try:
             # Получить JWT access token для аутентификации
             access_token = await self.auth_service.get_access_token()
 
-            # Sprint 14: Используем клиент для выбранного SE endpoint
+            # Используем клиент для выбранного SE endpoint
             client = await self._get_client_for_endpoint(storage_element_url)
 
             # Отправка запроса в Storage Element с Authorization header
@@ -281,47 +469,39 @@ class UploadService:
                 data=data
             )
 
+            # Sprint 17: Проверка на 507 Insufficient Storage
+            if response.status_code == 507:
+                raise InsufficientStorageException(
+                    message=f"Storage Element {storage_element_id} has insufficient storage",
+                    storage_element_id=storage_element_id,
+                    required_bytes=file_size,
+                )
+
             response.raise_for_status()
             result = response.json()
 
-            logger.info(
-                "File uploaded successfully",
-                extra={
-                    "file_id": result.get('file_id'),
-                    "uploaded_filename": file.filename,
-                    "file_size": file_size,
-                    "user_id": user_id,
-                    "storage_element_url": storage_element_url,
-                    "storage_element_id": storage_element_id,
-                    "retention_policy": request.retention_policy.value,
-                    "ttl_expires_at": str(ttl_expires_at) if ttl_expires_at else None
-                }
-            )
+            # Добавляем информацию о SE в результат
+            result["storage_element_url"] = storage_element_url
+            result["storage_element_id"] = storage_element_id
 
-            # Sprint 15: Формирование ответа с retention policy info
-            return UploadResponse(
-                file_id=UUID(result['file_id']),
-                original_filename=file.filename or "unknown",
-                storage_filename=result.get('original_filename', ''),
-                file_size=file_size,
-                compressed=request.compress,
-                compression_ratio=None,  # TODO: calculate if compressed
-                checksum=result.get('checksum', checksum),
-                uploaded_at=datetime.now(timezone.utc),
-                storage_element_url=storage_element_url,
-                # Sprint 15: Retention Policy info
-                retention_policy=request.retention_policy,
-                ttl_expires_at=ttl_expires_at,
-                storage_element_id=storage_element_id
-            )
+            return result
 
         except httpx.HTTPStatusError as e:
+            # Sprint 17: Проверка на 507 через HTTPStatusError
+            if e.response.status_code == 507:
+                raise InsufficientStorageException(
+                    message=f"Storage Element {storage_element_id} has insufficient storage",
+                    storage_element_id=storage_element_id,
+                    required_bytes=file_size,
+                )
+
             logger.error(
                 "Storage Element HTTP error",
                 extra={
                     "status_code": e.response.status_code,
                     "error": str(e),
-                    "storage_element_url": storage_element_url
+                    "storage_element_url": storage_element_url,
+                    "storage_element_id": storage_element_id,
                 }
             )
             raise StorageElementUnavailableException(
@@ -331,7 +511,11 @@ class UploadService:
         except httpx.RequestError as e:
             logger.error(
                 "Storage Element connection error",
-                extra={"error": str(e), "storage_element_url": storage_element_url}
+                extra={
+                    "error": str(e),
+                    "storage_element_url": storage_element_url,
+                    "storage_element_id": storage_element_id,
+                }
             )
             raise StorageElementUnavailableException(
                 f"Cannot connect to Storage Element: {str(e)}"
@@ -340,16 +524,21 @@ class UploadService:
     async def _select_storage_element_with_id(
         self,
         file_size: int,
-        retention_policy: RetentionPolicy
+        retention_policy: RetentionPolicy,
+        excluded_se_ids: Optional[set[str]] = None,
     ) -> tuple[str, str]:
         """
         Выбор Storage Element для загрузки файла (Sprint 15).
 
         Sprint 15: Возвращает tuple (url, id) для использования в UploadResponse.
 
+        Sprint 17: Добавлен excluded_se_ids для поддержки retry logic.
+        SE из этого множества исключаются из выбора.
+
         Args:
             file_size: Размер файла в байтах
             retention_policy: Политика хранения (temporary/permanent)
+            excluded_se_ids: Множество ID SE для исключения из выбора (Sprint 17)
 
         Returns:
             tuple[str, str]: (URL выбранного Storage Element, ID Storage Element)
@@ -381,14 +570,16 @@ class UploadService:
             "Selecting SE via StorageSelector",
             extra={
                 "file_size": file_size,
-                "retention_policy": retention_policy.value
+                "retention_policy": retention_policy.value,
+                "excluded_se_ids": list(excluded_se_ids) if excluded_se_ids else [],
             }
         )
 
-        # Выбор SE через StorageSelector (Sequential Fill)
+        # Sprint 17: Выбор SE через StorageSelector с исключением failed SE
         se_info = await self._storage_selector.select_storage_element(
             file_size=file_size,
-            retention_policy=selector_policy
+            retention_policy=selector_policy,
+            excluded_se_ids=excluded_se_ids,  # Sprint 17
         )
 
         if not se_info:
