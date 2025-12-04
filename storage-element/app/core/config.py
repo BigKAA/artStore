@@ -269,6 +269,14 @@ class S3StorageSettings(BaseSettings):
     region: str = "us-east-1"
     app_folder: str = "storage_element_01"
 
+    # Soft capacity limit для S3 (байты)
+    # S3 практически unlimited, используем soft limit для capacity management
+    soft_capacity_limit: int = Field(
+        default=10 * 1024 * 1024 * 1024 * 1024,  # 10 TB
+        alias="STORAGE_S3_SOFT_CAPACITY_LIMIT",
+        description="Soft capacity limit для S3 хранилища в байтах"
+    )
+
 
 class StorageSettings(BaseSettings):
     """Общие настройки хранилища"""
@@ -302,6 +310,12 @@ class StorageSettings(BaseSettings):
         default="http://localhost:8010",
         alias="STORAGE_EXTERNAL_ENDPOINT",
         description="Внешний URL этого SE для доступа из Ingester/Query"
+    )
+    # Географическое расположение (datacenter location)
+    datacenter_location: str = Field(
+        default="dc1",
+        alias="STORAGE_DATACENTER_LOCATION",
+        description="Географическое расположение Storage Element (dc1, dc2, etc.)"
     )
     # Интервал публикации статуса в Redis (секунды)
     health_report_interval: int = Field(
