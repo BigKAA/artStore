@@ -214,6 +214,112 @@ class LoggingSettings(BaseSettings):
     file: Optional[Path] = None
 
 
+class CapacityMonitorSettings(BaseSettings):
+    """
+    Настройки AdaptiveCapacityMonitor для geo-distributed capacity management.
+
+    Sprint 17: HTTP polling к Storage Elements с Redis Leader Election.
+
+    Leader Election:
+    - Только 1 Ingester (LEADER) выполняет polling
+    - Остальные (FOLLOWERS) читают из shared Redis cache
+    - Automatic failover при падении Leader (TTL-based)
+
+    Polling:
+    - HTTP GET /api/v1/capacity к каждому SE
+    - Exponential backoff при ошибках
+    - Adaptive интервалы при стабильности/изменениях
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="CAPACITY_MONITOR_",
+        case_sensitive=False
+    )
+
+    enabled: bool = Field(
+        default=True,
+        description="Включить Capacity Monitor (для geo-distributed SE)"
+    )
+
+    # Leader Election
+    leader_lock_key: str = Field(
+        default="capacity_monitor:leader_lock",
+        description="Redis key для Leader lock"
+    )
+    leader_ttl: int = Field(
+        default=30,
+        description="TTL Leader lock в секундах"
+    )
+    leader_renewal_interval: int = Field(
+        default=10,
+        description="Интервал продления Leader lock в секундах"
+    )
+
+    # Polling intervals
+    base_interval: int = Field(
+        default=30,
+        description="Базовый интервал polling в секундах"
+    )
+    max_interval: int = Field(
+        default=300,
+        description="Максимальный интервал polling (adaptive) в секундах"
+    )
+    min_interval: int = Field(
+        default=10,
+        description="Минимальный интервал polling в секундах"
+    )
+
+    # HTTP client
+    http_timeout: int = Field(
+        default=15,
+        description="HTTP timeout для polling в секундах"
+    )
+    http_retries: int = Field(
+        default=3,
+        description="Количество retry при ошибках polling"
+    )
+    retry_base_delay: float = Field(
+        default=2.0,
+        description="Базовая задержка для exponential backoff в секундах"
+    )
+
+    # Cache TTL
+    cache_ttl: int = Field(
+        default=600,
+        description="TTL для capacity cache в секундах"
+    )
+    health_ttl: int = Field(
+        default=600,
+        description="TTL для health cache в секундах"
+    )
+
+    # Circuit breaker
+    failure_threshold: int = Field(
+        default=3,
+        description="Количество failures до пометки SE как unhealthy"
+    )
+    recovery_threshold: int = Field(
+        default=2,
+        description="Количество successes для восстановления SE"
+    )
+
+    # Adaptive logic
+    stability_threshold: int = Field(
+        default=5,
+        description="Polls без изменений для увеличения интервала"
+    )
+    change_threshold: float = Field(
+        default=5.0,
+        description="Процент изменения capacity для уменьшения интервала"
+    )
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
+
 class CORSSettings(BaseSettings):
     """
     Настройки CORS для защиты от CSRF attacks.
@@ -404,6 +510,7 @@ class Settings(BaseSettings):
     compression: CompressionSettings = Field(default_factory=CompressionSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     cors: CORSSettings = Field(default_factory=CORSSettings)
+    capacity_monitor: CapacityMonitorSettings = Field(default_factory=CapacityMonitorSettings)
 
 
 # Singleton instance

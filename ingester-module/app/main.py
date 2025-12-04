@@ -22,6 +22,12 @@ from app.services.admin_client import init_admin_client, close_admin_client
 from app.core.redis import get_redis_client, close_redis_client
 # Sprint 15: FinalizeService для Two-Phase Commit
 from app.services.finalize_service import FinalizeService, set_finalize_service
+# Sprint 17: AdaptiveCapacityMonitor для geo-distributed SE
+from app.services.capacity_monitor import (
+    init_capacity_monitor,
+    close_capacity_monitor,
+    CapacityMonitorConfig,
+)
 
 # Import metrics modules to register with Prometheus
 from app.services import auth_metrics  # noqa: F401
@@ -123,12 +129,61 @@ async def lifespan(app: FastAPI):
     set_finalize_service(finalize_service)
     logger.info("FinalizeService initialized")
 
+    # Sprint 17: Инициализация AdaptiveCapacityMonitor (если включен)
+    capacity_monitor = None
+    if settings.capacity_monitor.enabled and redis_client:
+        try:
+            # Получаем endpoints SE из Admin Module или конфигурации
+            # TODO: Интеграция с Admin Module для получения списка SE endpoints
+            # Пока используем пустой dict - endpoints будут добавлены через API
+            storage_endpoints = {}
+
+            # Конфигурация из settings
+            monitor_config = CapacityMonitorConfig(
+                leader_lock_key=settings.capacity_monitor.leader_lock_key,
+                leader_ttl=settings.capacity_monitor.leader_ttl,
+                leader_renewal_interval=settings.capacity_monitor.leader_renewal_interval,
+                base_interval=settings.capacity_monitor.base_interval,
+                max_interval=settings.capacity_monitor.max_interval,
+                min_interval=settings.capacity_monitor.min_interval,
+                http_timeout=settings.capacity_monitor.http_timeout,
+                http_retries=settings.capacity_monitor.http_retries,
+                retry_base_delay=settings.capacity_monitor.retry_base_delay,
+                cache_ttl=settings.capacity_monitor.cache_ttl,
+                health_ttl=settings.capacity_monitor.health_ttl,
+                failure_threshold=settings.capacity_monitor.failure_threshold,
+                recovery_threshold=settings.capacity_monitor.recovery_threshold,
+                stability_threshold=settings.capacity_monitor.stability_threshold,
+                change_threshold=settings.capacity_monitor.change_threshold,
+            )
+
+            capacity_monitor = await init_capacity_monitor(
+                redis_client=redis_client,
+                storage_endpoints=storage_endpoints,
+                config=monitor_config,
+            )
+            logger.info(
+                "AdaptiveCapacityMonitor initialized",
+                extra={
+                    "role": capacity_monitor.role.value,
+                    "instance_id": capacity_monitor.instance_id,
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to initialize AdaptiveCapacityMonitor - continuing without it",
+                extra={"error": str(e)}
+            )
+
     yield
 
     # Shutdown
     logger.info("Shutting down Ingester Module")
 
     # Закрытие в обратном порядке
+    # Sprint 17: Остановка AdaptiveCapacityMonitor
+    await close_capacity_monitor()
+
     await close_storage_selector()
     await close_admin_client()
     await close_redis_client()
