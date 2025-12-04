@@ -63,6 +63,32 @@ class NoAvailableStorageException(UploadException):
     pass
 
 
+class InsufficientStorageException(UploadException):
+    """
+    Storage Element не имеет достаточно места (HTTP 507).
+
+    Sprint 17: Триггерит lazy update в CapacityMonitor и retry на другой SE.
+
+    Attributes:
+        storage_element_id: ID SE который вернул 507
+        required_bytes: Запрошенный размер файла
+        available_bytes: Доступное место (если известно)
+    """
+
+    def __init__(
+        self,
+        message: str,
+        storage_element_id: str,
+        required_bytes: int = 0,
+        available_bytes: int = 0,
+        details: dict = None
+    ):
+        super().__init__(message, details)
+        self.storage_element_id = storage_element_id
+        self.required_bytes = required_bytes
+        self.available_bytes = available_bytes
+
+
 class InvalidFileTypeException(UploadException):
     """Недопустимый тип файла."""
     pass

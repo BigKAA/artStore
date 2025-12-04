@@ -169,6 +169,10 @@ async def lifespan(app: FastAPI):
                     "instance_id": capacity_monitor.instance_id,
                 }
             )
+
+            # Sprint 17: Инъекция CapacityMonitor в UploadService для lazy update
+            upload_service.set_capacity_monitor(capacity_monitor)
+
         except Exception as e:
             logger.warning(
                 "Failed to initialize AdaptiveCapacityMonitor - continuing without it",
