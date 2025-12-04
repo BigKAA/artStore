@@ -11,7 +11,7 @@ API v1 Router - объединение всех endpoints.
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import files, info, gc
+from app.api.v1.endpoints import files, info, gc, capacity
 
 # Создание главного router для API v1
 router = APIRouter()
@@ -36,6 +36,13 @@ router.include_router(
     gc.router,
     prefix="/gc",
     tags=["gc"]
+)
+
+# Подключение capacity endpoint для мониторинга (Sprint N+1)
+# Доступен без аутентификации для adaptive polling
+router.include_router(
+    capacity.router,
+    tags=["capacity"]
 )
 
 # TODO: Подключить admin endpoints когда будут созданы
