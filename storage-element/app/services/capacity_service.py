@@ -108,26 +108,27 @@ class CapacityService:
         S3 не имеет традиционного "capacity" (практически unlimited).
         Используем:
         - Вычисление текущего размера bucket через list_objects_v2
-        - Soft limit из конфигурации как "total capacity"
+        - max_size из конфигурации как "total capacity" (унифицированный параметр)
 
         Returns:
             dict: Capacity информация
         """
         try:
-            # Soft limit из конфигурации (например, 10TB)
-            soft_limit = settings.storage.s3.soft_capacity_limit
+            # Унифицированный max_size из конфигурации (в байтах)
+            # Заменяет deprecated soft_capacity_limit
+            max_capacity = settings.storage.max_size
 
             # Вычисляем текущий размер bucket
             total_size = await self._calculate_s3_bucket_size()
 
-            available = max(soft_limit - total_size, 0)
-            percent_used = round((total_size / soft_limit) * 100, 2) if soft_limit > 0 else 0.0
+            available = max(max_capacity - total_size, 0)
+            percent_used = round((total_size / max_capacity) * 100, 2) if max_capacity > 0 else 0.0
 
             logger.debug(
                 "S3 capacity calculated",
                 extra={
                     "bucket": settings.storage.s3.bucket_name,
-                    "soft_limit_bytes": soft_limit,
+                    "max_capacity_bytes": max_capacity,
                     "used_bytes": total_size,
                     "available_bytes": available,
                     "percent_used": percent_used,
@@ -135,7 +136,7 @@ class CapacityService:
             )
 
             return {
-                "total": soft_limit,
+                "total": max_capacity,
                 "used": total_size,
                 "available": available,
                 "percent_used": percent_used,

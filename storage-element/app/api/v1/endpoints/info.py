@@ -171,7 +171,7 @@ async def get_storage_element_info(
         mode=settings.app.mode.value,
         storage_type=settings.storage.type.value,
         base_path=_get_base_path(),
-        capacity_bytes=settings.storage.max_size_bytes,
+        capacity_bytes=settings.storage.max_size,  # Унифицированный параметр в байтах
         used_bytes=used_bytes,
         file_count=file_count,
         status=_determine_status()

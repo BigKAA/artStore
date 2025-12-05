@@ -49,8 +49,9 @@ def mock_settings_s3():
     mock.storage.s3.endpoint_url = "http://localhost:9000"
     mock.storage.s3.access_key_id = "test-access-key"
     mock.storage.s3.secret_access_key = "test-secret-key"
-    mock.storage.s3.soft_capacity_limit = 10 * 1024 ** 4  # 10TB
     mock.storage.s3.app_folder = "app/"
+    # Унифицированный параметр max_size (в байтах) - заменяет soft_capacity_limit
+    mock.storage.max_size = 10 * 1024 ** 4  # 10TB
     return mock
 
 
@@ -244,9 +245,10 @@ class TestS3Capacity:
             assert "S3 connection failed" in str(exc_info.value.message)
 
     @pytest.mark.asyncio
-    async def test_get_s3_capacity_zero_soft_limit(self, capacity_service, mock_settings_s3):
-        """Zero soft limit edge case."""
-        mock_settings_s3.storage.s3.soft_capacity_limit = 0
+    async def test_get_s3_capacity_zero_max_size(self, capacity_service, mock_settings_s3):
+        """Zero max_size edge case (предотвращение деления на ноль)."""
+        # Устанавливаем max_size = 0 для проверки обработки edge case
+        mock_settings_s3.storage.max_size = 0
 
         with patch("app.services.capacity_service.settings", mock_settings_s3), \
              patch.object(
