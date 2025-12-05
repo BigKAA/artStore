@@ -135,7 +135,10 @@ class StorageSelector:
         Выбор SE через AdaptiveCapacityMonitor (POLLING) или Admin Module API.
         """
         self._admin_client = None  # Admin Module HTTP клиент для fallback
+        self._redis_client = None  # DEPRECATED (Sprint 19) - оставлен для совместимости legacy методов
         self._initialized = False
+        self._cache = {}  # Локальный кеш SE
+        self._cache_timestamp = None
 
     async def initialize(self, redis_client=None, admin_client=None) -> None:
         """
@@ -194,6 +197,7 @@ class StorageSelector:
         start_time = time.perf_counter()
         source = "unknown"
         status = "failed"
+        se = None  # Инициализируем для использования в finally блоке
 
         try:
             # Sprint 19 Phase 4: Fallback chain POLLING → Admin Module
@@ -454,38 +458,31 @@ class StorageSelector:
             logger.debug("AdaptiveCapacityMonitor not available")
             return None
 
-        if not self._redis_client:
-            logger.debug("Redis not available for POLLING model")
-            return None
-
         try:
-            # Читаем sorted set capacity:{mode}:available
-            sorted_set_key = f"capacity:{required_mode}:available"
-            se_ids_with_scores = await self._redis_client.zrange(
-                sorted_set_key, 0, -1, withscores=True
+            # Sprint 19 Phase 4: Используем AdaptiveCapacityMonitor напрямую
+            # вместо legacy Redis sorted sets
+            available_se = await capacity_monitor.get_available_storage_elements(
+                mode=required_mode
             )
 
-            if not se_ids_with_scores:
+            if not available_se:
                 logger.debug(
-                    f"No SE in POLLING sorted set",
-                    extra={"sorted_set_key": sorted_set_key}
+                    f"No SE available in POLLING model",
+                    extra={"required_mode": required_mode}
                 )
                 return None
 
-            # Sequential Fill: перебираем по priority
-            for se_id, priority in se_ids_with_scores:
+            # Sequential Fill: SE отсортированы по priority (низший = высший приоритет)
+            for capacity_info in available_se:
+                se_id = capacity_info.storage_id
+
                 # Пропускаем excluded SE
                 if excluded_se_ids and se_id in excluded_se_ids:
                     continue
 
-                # Получаем capacity данные из POLLING модели
-                capacity_info = await capacity_monitor.get_capacity(se_id)
-                if not capacity_info:
-                    continue
-
                 # Конвертируем в StorageElementInfo
                 se_info = self._convert_capacity_to_element_info(
-                    capacity_info, priority=int(priority)
+                    capacity_info, priority=100  # TODO: получить priority из config
                 )
 
                 # Проверяем, может ли SE принять файл
@@ -494,14 +491,14 @@ class StorageSelector:
                         f"Selected SE from POLLING model",
                         extra={
                             "se_id": se_id,
-                            "priority": priority,
                             "capacity_percent": se_info.capacity_percent,
+                            "mode": se_info.mode,
                             "source": "adaptive_monitor",
                         }
                     )
                     return se_info
 
-            logger.debug("No suitable SE found in POLLING model")
+            logger.debug("No suitable SE found in POLLING model (all full or wrong mode)")
             return None
 
         except Exception as e:

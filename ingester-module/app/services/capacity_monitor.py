@@ -883,8 +883,9 @@ class AdaptiveCapacityMonitor:
 
             result.append(capacity)
 
-        # Сортировка по percent_used (меньше заполненные первыми)
-        result.sort(key=lambda x: x.percent_used)
+        # Sequential Fill: Сортировка по priority (меньший priority = выше приоритет)
+        # SE с priority=100 обрабатывается раньше SE с priority=200
+        result.sort(key=lambda x: self._storage_priorities.get(x.storage_id, 100))
 
         return result
 
