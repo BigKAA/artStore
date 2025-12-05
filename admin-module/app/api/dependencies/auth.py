@@ -40,8 +40,14 @@ async def get_current_service_account(
     token = credentials.credentials
 
     # Валидируем токен и получаем payload
+    # Sprint 21: Поддержка типа токена "service_account" (унифицированный JWT из Sprint 20)
     try:
-        payload = token_service.validate_token(token)
+        # Сначала пробуем как service_account токен (OAuth 2.0 Client Credentials)
+        payload = token_service.validate_token(token, token_type="service_account")
+        if not payload:
+            # Если не service_account, пробуем как access токен (Admin User)
+            payload = token_service.validate_token(token, token_type="access")
+
         if not payload:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -185,7 +191,11 @@ async def get_optional_current_service_account(
 
     try:
         # Пытаемся получить Service Account
-        payload = token_service.validate_token(credentials.credentials)
+        # Sprint 21: Поддержка типа токена "service_account" (унифицированный JWT из Sprint 20)
+        payload = token_service.validate_token(credentials.credentials, token_type="service_account")
+        if not payload:
+            # Fallback на access токен для совместимости
+            payload = token_service.validate_token(credentials.credentials, token_type="access")
         if not payload:
             return None
 
