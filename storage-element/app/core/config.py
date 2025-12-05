@@ -11,8 +11,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import Field, field_validator
+import logging
+import warnings
+
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 def parse_bool_from_env(v) -> bool:
@@ -269,28 +274,116 @@ class S3StorageSettings(BaseSettings):
     region: str = "us-east-1"
     app_folder: str = "storage_element_01"
 
-    # Soft capacity limit для S3 (байты)
-    # S3 практически unlimited, используем soft limit для capacity management
-    soft_capacity_limit: int = Field(
-        default=10 * 1024 * 1024 * 1024 * 1024,  # 10 TB
+    # DEPRECATED: soft_capacity_limit удалён в v1.1.0
+    # Используйте STORAGE_MAX_SIZE в StorageSettings для всех типов хранилищ
+    # Оставлен для backward compatibility при чтении из env (будет проигнорирован)
+    legacy_soft_capacity_limit: Optional[int] = Field(
+        default=None,
         alias="STORAGE_S3_SOFT_CAPACITY_LIMIT",
-        description="Soft capacity limit для S3 хранилища в байтах"
+        description="DEPRECATED: Используйте STORAGE_MAX_SIZE вместо этого параметра"
     )
 
 
 class StorageSettings(BaseSettings):
-    """Общие настройки хранилища"""
+    """
+    Общие настройки хранилища.
+
+    Параметр max_size - единый параметр размера в байтах для всех типов хранилищ.
+
+    Migration Notes (v1.1.0):
+        - STORAGE_MAX_SIZE_GB deprecated → используйте STORAGE_MAX_SIZE (в байтах)
+        - STORAGE_S3_SOFT_CAPACITY_LIMIT deprecated → используйте STORAGE_MAX_SIZE
+        - Legacy параметры автоматически мигрируются с warning в логах
+    """
     model_config = SettingsConfigDict(
         env_prefix="STORAGE_",
         case_sensitive=False
     )
 
     type: StorageType = StorageType.LOCAL
-    max_size_gb: int = 1  # Максимальный размер в гигабайтах
+
+    # Новый единый параметр размера хранилища (в байтах)
+    # Заменяет max_size_gb и S3StorageSettings.soft_capacity_limit
+    max_size: int = Field(
+        default=1 * 1024 * 1024 * 1024,  # 1 GB по умолчанию
+        alias="STORAGE_MAX_SIZE",
+        gt=0,
+        description="Максимальный размер хранилища в байтах (для local и s3)"
+    )
+
+    # DEPRECATED: Legacy параметр для backward compatibility
+    # Если задан - автоматически мигрируется в max_size с warning
+    legacy_max_size_gb: Optional[int] = Field(
+        default=None,
+        alias="STORAGE_MAX_SIZE_GB",
+        description="DEPRECATED: Используйте STORAGE_MAX_SIZE (в байтах) вместо этого параметра"
+    )
 
     # Sub-settings
     local: LocalStorageSettings = Field(default_factory=LocalStorageSettings)
     s3: S3StorageSettings = Field(default_factory=S3StorageSettings)
+
+    @model_validator(mode='after')
+    def migrate_legacy_size_params(self) -> 'StorageSettings':
+        """
+        Миграция legacy параметров max_size_gb и soft_capacity_limit.
+
+        Приоритет (от высшего к низшему):
+        1. STORAGE_MAX_SIZE (если явно задан, не равен default)
+        2. STORAGE_MAX_SIZE_GB (legacy, с deprecation warning)
+        3. STORAGE_S3_SOFT_CAPACITY_LIMIT для S3 (legacy, с deprecation warning)
+        4. Default значение (1 GB)
+        """
+        default_max_size = 1 * 1024 * 1024 * 1024  # 1 GB
+
+        # Проверяем, был ли max_size явно задан (не равен default)
+        max_size_explicitly_set = self.max_size != default_max_size
+
+        if not max_size_explicitly_set:
+            # Проверяем legacy STORAGE_MAX_SIZE_GB
+            if self.legacy_max_size_gb is not None:
+                warnings.warn(
+                    "STORAGE_MAX_SIZE_GB is deprecated. "
+                    "Migrate to STORAGE_MAX_SIZE (in bytes). "
+                    f"Converting {self.legacy_max_size_gb} GB to bytes.",
+                    DeprecationWarning,
+                    stacklevel=2
+                )
+                logger.warning(
+                    "DEPRECATED: STORAGE_MAX_SIZE_GB=%d detected. "
+                    "Please migrate to STORAGE_MAX_SIZE=%d (bytes)",
+                    self.legacy_max_size_gb,
+                    self.legacy_max_size_gb * 1024 * 1024 * 1024
+                )
+                # Используем object.__setattr__ для обхода frozen model
+                object.__setattr__(
+                    self,
+                    'max_size',
+                    self.legacy_max_size_gb * 1024 * 1024 * 1024
+                )
+
+            # Проверяем legacy STORAGE_S3_SOFT_CAPACITY_LIMIT для S3 типа
+            elif (self.type == StorageType.S3 and
+                  self.s3.legacy_soft_capacity_limit is not None):
+                warnings.warn(
+                    "STORAGE_S3_SOFT_CAPACITY_LIMIT is deprecated. "
+                    "Migrate to STORAGE_MAX_SIZE (in bytes).",
+                    DeprecationWarning,
+                    stacklevel=2
+                )
+                logger.warning(
+                    "DEPRECATED: STORAGE_S3_SOFT_CAPACITY_LIMIT=%d detected. "
+                    "Please migrate to STORAGE_MAX_SIZE=%d (bytes)",
+                    self.s3.legacy_soft_capacity_limit,
+                    self.s3.legacy_soft_capacity_limit
+                )
+                object.__setattr__(
+                    self,
+                    'max_size',
+                    self.s3.legacy_soft_capacity_limit
+                )
+
+        return self
 
     # Health Reporting Settings (Sprint 14)
     # Уникальный идентификатор Storage Element для Redis registry
@@ -382,8 +475,23 @@ class StorageSettings(BaseSettings):
 
     @property
     def max_size_bytes(self) -> int:
-        """Максимальный размер в байтах"""
-        return self.max_size_gb * 1024 * 1024 * 1024
+        """
+        Максимальный размер в байтах.
+
+        DEPRECATED: Используйте max_size напрямую.
+        Этот property оставлен для backward compatibility.
+        """
+        return self.max_size
+
+    @property
+    def max_size_gb_display(self) -> float:
+        """Максимальный размер в гигабайтах (для UI/логов)"""
+        return round(self.max_size / (1024 * 1024 * 1024), 2)
+
+    @property
+    def max_size_tb_display(self) -> float:
+        """Максимальный размер в терабайтах (для UI/логов)"""
+        return round(self.max_size / (1024 ** 4), 4)
 
     @property
     def health_report_ttl(self) -> int:
