@@ -446,34 +446,110 @@ class FinalizeService:
     async def _verify_checksum(
         self,
         file_id: UUID,
-        target_endpoint: str
+        target_endpoint: str,
+        max_retries: int = 3,
+        retry_delay: float = 0.5
     ) -> str:
         """
         Получение checksum файла с target SE для verification.
 
+        Использует retry логику для обработки race condition,
+        когда файл ещё не полностью закоммичен на Storage Element
+        после копирования (eventual consistency).
+
         Args:
             file_id: UUID файла
             target_endpoint: URL target SE
+            max_retries: Максимальное количество попыток (default: 3)
+            retry_delay: Задержка между попытками в секундах (default: 0.5)
 
         Returns:
             str: SHA-256 checksum файла на target SE
+
+        Raises:
+            StorageElementUnavailableException: Если все попытки неуспешны
         """
+        import asyncio
+
         access_token = await self.auth_service.get_access_token()
         target_client = await self._get_client_for_endpoint(target_endpoint)
 
-        try:
-            response = await target_client.get(
-                f"/api/v1/files/{file_id}/metadata",
-                headers={"Authorization": f"Bearer {access_token}"}
-            )
-            response.raise_for_status()
-            metadata = response.json()
-            return metadata.get("checksum", "")
+        last_error: Optional[Exception] = None
 
-        except httpx.HTTPStatusError as e:
-            raise StorageElementUnavailableException(
-                f"Failed to verify checksum: {e.response.status_code}"
-            )
+        for attempt in range(max_retries):
+            try:
+                response = await target_client.get(
+                    f"/api/v1/files/{file_id}/metadata",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                response.raise_for_status()
+                metadata = response.json()
+
+                checksum = metadata.get("checksum", "")
+
+                if attempt > 0:
+                    logger.info(
+                        "Checksum verification succeeded after retry",
+                        extra={
+                            "file_id": str(file_id),
+                            "attempt": attempt + 1,
+                            "max_retries": max_retries
+                        }
+                    )
+
+                return checksum
+
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                status_code = e.response.status_code
+
+                # Retry только для 404 (файл ещё не готов) и 5xx (временные ошибки)
+                # Не retry для 401/403 (auth errors) или других 4xx
+                if status_code == 404 or status_code >= 500:
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            "Checksum verification failed, retrying",
+                            extra={
+                                "file_id": str(file_id),
+                                "attempt": attempt + 1,
+                                "max_retries": max_retries,
+                                "status_code": status_code,
+                                "retry_delay": retry_delay
+                            }
+                        )
+                        await asyncio.sleep(retry_delay)
+                        continue
+
+                # Для других ошибок или последней попытки - выбрасываем исключение
+                raise StorageElementUnavailableException(
+                    f"Failed to verify checksum: {status_code}"
+                )
+
+            except httpx.RequestError as e:
+                # Network errors - retry
+                last_error = e
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        "Checksum verification network error, retrying",
+                        extra={
+                            "file_id": str(file_id),
+                            "attempt": attempt + 1,
+                            "max_retries": max_retries,
+                            "error": str(e),
+                            "retry_delay": retry_delay
+                        }
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+
+                raise StorageElementUnavailableException(
+                    f"Failed to verify checksum: network error - {e}"
+                )
+
+        # Все попытки исчерпаны
+        raise StorageElementUnavailableException(
+            f"Failed to verify checksum after {max_retries} attempts: {last_error}"
+        )
 
     async def _rollback_transaction(self, transaction_id: UUID) -> None:
         """
