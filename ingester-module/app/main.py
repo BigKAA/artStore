@@ -7,13 +7,14 @@ Ingester Module - FastAPI Application Entry Point.
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
-
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
 from app.core.observability import setup_observability
+from app.core.exceptions import NoAvailableStorageException
 from app.api.v1.router import api_router
 from app.services.auth_service import AuthService
 from app.services.upload_service import UploadService
@@ -365,6 +366,47 @@ app.include_router(api_router, prefix="/api/v1")
 # Prometheus metrics endpoint
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
+
+
+# Sprint 20 Fix 3: Exception handler для NoAvailableStorageException → HTTP 503
+@app.exception_handler(NoAvailableStorageException)
+async def no_available_storage_exception_handler(
+    request: Request, exc: NoAvailableStorageException
+) -> JSONResponse:
+    """
+    Обработчик NoAvailableStorageException.
+
+    Возвращает HTTP 503 Service Unavailable вместо 500 Internal Server Error,
+    что корректно указывает клиенту на временную недоступность сервиса
+    и позволяет применить retry логику.
+
+    Args:
+        request: FastAPI Request объект
+        exc: NoAvailableStorageException исключение
+
+    Returns:
+        JSONResponse с кодом 503 и информацией об ошибке
+    """
+    logger.warning(
+        "No available Storage Element for upload",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "error": exc.message,
+            "details": exc.details,
+        }
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": exc.message,
+            "error_type": "NoAvailableStorageException",
+            "retry_after": 30,  # Рекомендация клиенту подождать 30 секунд
+        },
+        headers={
+            "Retry-After": "30",  # Стандартный HTTP header для 503
+        }
+    )
 
 
 @app.get("/", include_in_schema=False)
