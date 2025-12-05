@@ -287,6 +287,26 @@ async def readiness():
     # Формирование ответа
     health_percentage = (healthy_se_count / total_se_count * 100) if total_se_count > 0 else 0
 
+    # Sprint 18 Phase 3: Информация об источниках данных (Parallel Run)
+    data_sources = {
+        'polling_model': {
+            'enabled': settings.capacity_monitor.enabled and settings.capacity_monitor.use_for_selection,
+            'description': 'AdaptiveCapacityMonitor (POLLING)',
+            'redis_keys': ['capacity:{se_id}', 'health:{se_id}', 'capacity:{mode}:available']
+        },
+        'push_model': {
+            'enabled': settings.capacity_monitor.fallback_to_push,
+            'description': 'HealthReporter (PUSH)',
+            'redis_keys': ['storage:elements:{se_id}', 'storage:{mode}:by_priority']
+        },
+        'admin_module': {
+            'enabled': True,  # Всегда доступен как последний fallback
+            'description': 'Admin Module Fallback API',
+            'endpoint': '/api/v1/internal/storage-elements/available'
+        },
+        'fallback_chain': 'POLLING → PUSH → Admin Module'
+    }
+
     response_data = {
         'status': overall_status,
         'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -294,6 +314,8 @@ async def readiness():
         'storage_elements': storage_elements_status if storage_elements_status else None,
         # Sprint 17: Добавлен статус Capacity Monitor
         'capacity_monitor': capacity_monitor_status,
+        # Sprint 18 Phase 3: Информация об источниках данных
+        'data_sources': data_sources,
         'summary': {
             'total_se': total_se_count,
             'healthy_se': healthy_se_count,

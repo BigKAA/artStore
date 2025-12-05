@@ -190,6 +190,7 @@ class AdaptiveCapacityMonitor:
         redis_client: Redis,
         storage_endpoints: dict[str, str],  # {se_id: endpoint_url}
         config: Optional[CapacityMonitorConfig] = None,
+        storage_priorities: Optional[dict[str, int]] = None,  # Sprint 18 Phase 3
     ):
         """
         Инициализация AdaptiveCapacityMonitor.
@@ -198,10 +199,13 @@ class AdaptiveCapacityMonitor:
             redis_client: Async Redis client
             storage_endpoints: Словарь {se_id: endpoint_url} для polling
             config: Конфигурация (опционально)
+            storage_priorities: Словарь {se_id: priority} для sorted set (Sprint 18 Phase 3)
         """
         self._redis = redis_client
         self._storage_endpoints = storage_endpoints
         self._config = config or CapacityMonitorConfig()
+        # Sprint 18 Phase 3: Priorities для sorted set (Sequential Fill)
+        self._storage_priorities = storage_priorities or {}
 
         # Instance ID для Leader Election (уникальный для каждого Ingester)
         self._instance_id = f"ingester-{uuid.uuid4().hex[:8]}"
@@ -720,6 +724,8 @@ class AdaptiveCapacityMonitor:
         """
         Сохранение capacity данных в Redis cache.
 
+        Sprint 18 Phase 3: Добавлен sorted set для Sequential Fill стратегии.
+
         Args:
             se_id: ID Storage Element
             capacity_info: Capacity информация для сохранения
@@ -741,6 +747,21 @@ class AdaptiveCapacityMonitor:
                 capacity_info.health.value,
                 ex=self._config.health_ttl
             )
+
+            # Sprint 18 Phase 3: Обновляем sorted set для Sequential Fill
+            # Ключ: capacity:{mode}:available, score = priority
+            mode = capacity_info.mode
+            if mode in ("edit", "rw"):
+                sorted_set_key = f"capacity:{mode}:available"
+                priority = self._storage_priorities.get(se_id, 100)  # default priority = 100
+
+                # SE доступен для записи - добавляем в sorted set
+                if capacity_info.is_writable and capacity_info.health == HealthStatus.HEALTHY:
+                    await self._redis.zadd(sorted_set_key, {se_id: priority})
+                    await self._redis.expire(sorted_set_key, self._config.cache_ttl)
+                else:
+                    # SE недоступен - удаляем из sorted set
+                    await self._redis.zrem(sorted_set_key, se_id)
 
         except RedisError as e:
             logger.error(
@@ -981,7 +1002,8 @@ async def get_capacity_monitor() -> Optional[AdaptiveCapacityMonitor]:
 async def init_capacity_monitor(
     redis_client: Redis,
     storage_endpoints: dict[str, str],
-    config: Optional[CapacityMonitorConfig] = None
+    config: Optional[CapacityMonitorConfig] = None,
+    storage_priorities: Optional[dict[str, int]] = None,  # Sprint 18 Phase 3
 ) -> AdaptiveCapacityMonitor:
     """
     Инициализация глобального Capacity Monitor.
@@ -992,6 +1014,7 @@ async def init_capacity_monitor(
         redis_client: Async Redis client
         storage_endpoints: Dict {se_id: endpoint_url}
         config: Опциональная конфигурация
+        storage_priorities: Dict {se_id: priority} для sorted set (Sprint 18 Phase 3)
 
     Returns:
         Инициализированный AdaptiveCapacityMonitor
@@ -1001,7 +1024,8 @@ async def init_capacity_monitor(
     _capacity_monitor = AdaptiveCapacityMonitor(
         redis_client=redis_client,
         storage_endpoints=storage_endpoints,
-        config=config
+        config=config,
+        storage_priorities=storage_priorities,  # Sprint 18 Phase 3
     )
 
     await _capacity_monitor.start()

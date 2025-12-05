@@ -109,6 +109,41 @@ PromQL:
     sum(rate(storage_element_selected_total[5m])) by (storage_element_id)
 """
 
+# Sprint 18 Phase 3: Parallel Run метрики источника выбора
+storage_selection_source_total = Counter(
+    "storage_selection_source_total",
+    "Storage selections by data source (parallel run tracking)",
+    ["source", "status"]
+)
+"""
+Отслеживание источника данных при выборе SE (Phase 3 Parallel Run).
+
+Labels:
+    source: "adaptive_monitor" (POLLING), "redis" (PUSH), "admin_module", "none"
+    status: "success", "failed"
+
+Позволяет мониторить:
+- Соотношение POLLING vs PUSH модели
+- Частоту fallback на Admin Module
+- Случаи когда SE недоступен
+
+PromQL:
+    # POLLING vs PUSH ratio
+    sum(rate(storage_selection_source_total{source="adaptive_monitor"}[5m]))
+    /
+    sum(rate(storage_selection_source_total{source="redis"}[5m]))
+
+    # Fallback rate to Admin Module
+    sum(rate(storage_selection_source_total{source="admin_module"}[5m]))
+    /
+    sum(rate(storage_selection_source_total[5m]))
+
+    # Unavailability rate
+    sum(rate(storage_selection_source_total{source="none"}[5m]))
+    /
+    sum(rate(storage_selection_source_total[5m]))
+"""
+
 
 # ============================================================================
 # FILE FINALIZATION METRICS (Two-Phase Commit)
@@ -520,6 +555,21 @@ def update_finalize_in_progress(delta: int) -> None:
         finalize_transactions_in_progress.dec(abs(delta))
 
 
+def record_selection_source(source: str, success: bool) -> None:
+    """
+    Запись метрики источника выбора SE (Sprint 18 Phase 3 Parallel Run).
+
+    Args:
+        source: "adaptive_monitor" (POLLING), "redis" (PUSH), "admin_module", "none"
+        success: True если SE успешно выбран, False если не найден
+    """
+    storage_selection_source_total.labels(
+        source=source,
+        status="success" if success else "failed"
+    ).inc()
+    logger.debug(f"Selection source recorded: source={source}, success={success}")
+
+
 # ============================================================================
 # CAPACITY MONITOR HELPER FUNCTIONS
 # ============================================================================
@@ -679,6 +729,7 @@ def get_all_ingester_metrics() -> dict:
         "storage_selection_total": storage_selection_total,
         "storage_unavailable_total": storage_unavailable_total,
         "storage_element_selected": storage_element_selected,
+        "storage_selection_source_total": storage_selection_source_total,  # Sprint 18 Phase 3
         # File Finalization
         "file_finalize_duration": file_finalize_duration,
         "file_finalize_total": file_finalize_total,
