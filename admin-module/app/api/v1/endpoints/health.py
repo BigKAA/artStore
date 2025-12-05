@@ -101,9 +101,21 @@ async def readiness(response: Response):
         health_check_counter.labels(type="readiness", status="failure").inc()
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
+    # Определяем режим работы: degraded если Redis недоступен но БД работает
+    is_degraded = state.is_ready and not state.redis.ok
+
     # Формируем базовый ответ
+    # Sprint 21: Добавлен "degraded" статус для работы без Redis
+    if is_degraded:
+        status_value = "degraded"
+    elif state.is_ready:
+        status_value = "ready"
+    else:
+        status_value = "not_ready"
+
     result = {
-        "status": "ready" if state.is_ready else "not_ready",
+        "status": status_value,
+        "degraded": is_degraded,  # Sprint 21: Явный флаг degraded mode
         "timestamp": datetime.utcnow().isoformat(),
         "service": settings.app_name,
         "version": settings.app_version,
