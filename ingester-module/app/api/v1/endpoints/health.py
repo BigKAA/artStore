@@ -287,24 +287,20 @@ async def readiness():
     # Формирование ответа
     health_percentage = (healthy_se_count / total_se_count * 100) if total_se_count > 0 else 0
 
-    # Sprint 18 Phase 3: Информация об источниках данных (Parallel Run)
+    # Sprint 19 Phase 4: Информация об источниках данных (POLLING-only mode)
     data_sources = {
         'polling_model': {
             'enabled': settings.capacity_monitor.enabled and settings.capacity_monitor.use_for_selection,
             'description': 'AdaptiveCapacityMonitor (POLLING)',
             'redis_keys': ['capacity:{se_id}', 'health:{se_id}', 'capacity:{mode}:available']
         },
-        'push_model': {
-            'enabled': settings.capacity_monitor.fallback_to_push,
-            'description': 'HealthReporter (PUSH)',
-            'redis_keys': ['storage:elements:{se_id}', 'storage:{mode}:by_priority']
-        },
+        # Sprint 19 Phase 4: push_model УДАЛЁН - legacy HealthReporter больше не поддерживается
         'admin_module': {
-            'enabled': True,  # Всегда доступен как последний fallback
+            'enabled': True,  # Всегда доступен как fallback
             'description': 'Admin Module Fallback API',
             'endpoint': '/api/v1/internal/storage-elements/available'
         },
-        'fallback_chain': 'POLLING → PUSH → Admin Module'
+        'fallback_chain': 'POLLING → Admin Module'
     }
 
     response_data = {

@@ -1,9 +1,14 @@
 """
-Интеграционные тесты для Sprint 18 Phase 3: Parallel Run.
+Интеграционные тесты для Sprint 19 Phase 4: POLLING-only Mode.
 
-Тестирует работу POLLING и PUSH моделей в параллельном режиме:
-- Fallback chain: POLLING → PUSH → Admin Module
-- Конфигурационные флаги (use_for_selection, fallback_to_push)
+Sprint 19 Phase 4: Полный переход на HTTP POLLING модель.
+- Fallback chain: POLLING → Admin Module (PUSH модель удалена)
+- Legacy Redis HealthReporter удалён
+- Конфигурационный флаг fallback_to_push удалён
+
+Тестирует:
+- POLLING модель через AdaptiveCapacityMonitor
+- Fallback на Admin Module при недоступности POLLING
 - Метрики источника выбора
 - Health endpoint с data_sources информацией
 """
@@ -52,24 +57,13 @@ def make_capacity_info(
     )
 
 
-class TestParallelRunFallbackChain:
+class TestPollingOnlyFallbackChain:
     """
-    Тесты fallback chain: POLLING → PUSH → Admin Module.
+    Тесты fallback chain: POLLING → Admin Module.
 
-    Проверяют что StorageSelector корректно переключается между источниками
-    данных при недоступности каждого из них.
+    Sprint 19 Phase 4: PUSH модель удалена, только два источника данных.
+    Проверяют что StorageSelector корректно переключается между POLLING и Admin Module.
     """
-
-    @pytest.fixture
-    def mock_redis_client(self):
-        """Мок Redis клиента."""
-        mock = AsyncMock()
-        mock.ping = AsyncMock(return_value=True)
-        mock.get = AsyncMock(return_value=None)
-        mock.set = AsyncMock(return_value=True)
-        mock.zrange = AsyncMock(return_value=[])
-        mock.hgetall = AsyncMock(return_value={})
-        return mock
 
     @pytest.fixture
     def mock_admin_client(self):
@@ -103,17 +97,17 @@ class TestParallelRunFallbackChain:
     @pytest.mark.asyncio
     async def test_polling_model_selected_first(
         self,
-        mock_redis_client,
         mock_admin_client,
         sample_capacity_info,
     ):
         """
         Тест: POLLING модель выбирается первой когда данные доступны.
 
+        Sprint 19 Phase 4: POLLING - единственный primary источник.
+
         Сценарий:
         1. AdaptiveCapacityMonitor имеет данные о SE
-        2. Redis PUSH модель также имеет данные
-        3. StorageSelector должен выбрать SE из POLLING модели
+        2. StorageSelector должен выбрать SE из POLLING модели
         """
         # Мокируем get_capacity_monitor
         mock_monitor = AsyncMock()
@@ -123,10 +117,8 @@ class TestParallelRunFallbackChain:
             with patch("app.services.storage_selector.settings") as mock_settings:
                 mock_settings.capacity_monitor.enabled = True
                 mock_settings.capacity_monitor.use_for_selection = True
-                mock_settings.capacity_monitor.fallback_to_push = True
 
                 selector = StorageSelector()
-                selector._redis_client = mock_redis_client
                 selector._admin_client = mock_admin_client
                 selector._initialized = True
 
@@ -158,44 +150,32 @@ class TestParallelRunFallbackChain:
                 selector._select_from_adaptive_monitor.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_fallback_to_push_when_polling_empty(
+    async def test_fallback_to_admin_when_polling_empty(
         self,
-        mock_redis_client,
         mock_admin_client,
         sample_se_info,
     ):
         """
-        Тест: Fallback на PUSH модель когда POLLING не возвращает результатов.
+        Тест: Fallback на Admin Module когда POLLING не возвращает результатов.
+
+        Sprint 19 Phase 4: Прямой fallback POLLING → Admin Module (без PUSH).
 
         Сценарий:
         1. AdaptiveCapacityMonitor возвращает None (нет данных)
-        2. Redis PUSH модель имеет данные
-        3. StorageSelector должен выбрать SE из PUSH модели
+        2. Admin Module возвращает SE
+        3. StorageSelector должен выбрать SE из Admin Module
         """
-        # Настройка PUSH модели
-        mock_redis_client.zrange = AsyncMock(return_value=["se-test-01"])
-        mock_redis_client.hgetall = AsyncMock(return_value={
-            "id": "se-test-01",
-            "mode": "edit",
-            "endpoint": "http://se-01:8010",
-            "priority": "100",
-            "capacity_total": "10000000000",
-            "capacity_used": "1000000000",
-            "capacity_free": "9000000000",
-            "capacity_percent": "10.0",
-            "capacity_status": "ok",
-            "health_status": "healthy",
-            "last_updated": datetime.now(timezone.utc).isoformat()
-        })
+        # Admin Module имеет данные
+        mock_admin_client.get_available_storage_elements = AsyncMock(
+            return_value=[sample_se_info]
+        )
 
         with patch("app.services.storage_selector.get_capacity_monitor", return_value=None):
             with patch("app.services.storage_selector.settings") as mock_settings:
                 mock_settings.capacity_monitor.enabled = True
                 mock_settings.capacity_monitor.use_for_selection = True
-                mock_settings.capacity_monitor.fallback_to_push = True
 
                 selector = StorageSelector()
-                selector._redis_client = mock_redis_client
                 selector._admin_client = mock_admin_client
                 selector._initialized = True
 
@@ -209,85 +189,36 @@ class TestParallelRunFallbackChain:
 
                 assert se is not None
                 assert se.element_id == "se-test-01"
-
-    @pytest.mark.asyncio
-    async def test_fallback_to_admin_when_both_models_empty(
-        self,
-        mock_redis_client,
-        mock_admin_client,
-        sample_se_info,
-    ):
-        """
-        Тест: Fallback на Admin Module когда POLLING и PUSH пусты.
-
-        Сценарий:
-        1. AdaptiveCapacityMonitor возвращает None
-        2. Redis PUSH модель возвращает пустой список
-        3. Admin Module возвращает SE
-        4. StorageSelector должен выбрать SE из Admin Module
-        """
-        # PUSH модель пустая
-        mock_redis_client.zrange = AsyncMock(return_value=[])
-
-        # Admin Module имеет данные
-        mock_admin_client.get_available_storage_elements = AsyncMock(
-            return_value=[sample_se_info]
-        )
-
-        with patch("app.services.storage_selector.get_capacity_monitor", return_value=None):
-            with patch("app.services.storage_selector.settings") as mock_settings:
-                mock_settings.capacity_monitor.enabled = True
-                mock_settings.capacity_monitor.use_for_selection = True
-                mock_settings.capacity_monitor.fallback_to_push = True
-
-                selector = StorageSelector()
-                selector._redis_client = mock_redis_client
-                selector._admin_client = mock_admin_client
-                selector._initialized = True
-
-                # Оба локальных источника пусты
-                selector._select_from_adaptive_monitor = AsyncMock(return_value=None)
-                selector._select_from_redis = AsyncMock(return_value=None)
-
-                se = await selector.select_storage_element(
-                    file_size=1024,
-                    retention_policy=RetentionPolicy.TEMPORARY
-                )
-
-                assert se is not None
-                assert se.element_id == "se-test-01"
+                # Admin Module должен быть вызван как fallback
+                mock_admin_client.get_available_storage_elements.assert_called()
 
     @pytest.mark.asyncio
     async def test_all_sources_exhausted_returns_none(
         self,
-        mock_redis_client,
         mock_admin_client,
     ):
         """
         Тест: Возврат None когда все источники исчерпаны.
 
+        Sprint 19 Phase 4: Только два источника - POLLING и Admin Module.
+
         Сценарий:
-        1. POLLING модель пустая
-        2. PUSH модель пустая
-        3. Admin Module пустой
-        4. StorageSelector должен вернуть None
+        1. POLLING модель возвращает None
+        2. Admin Module возвращает пустой список
+        3. StorageSelector должен вернуть None
         """
-        mock_redis_client.zrange = AsyncMock(return_value=[])
         mock_admin_client.get_available_storage_elements = AsyncMock(return_value=[])
 
         with patch("app.services.storage_selector.get_capacity_monitor", return_value=None):
             with patch("app.services.storage_selector.settings") as mock_settings:
                 mock_settings.capacity_monitor.enabled = True
                 mock_settings.capacity_monitor.use_for_selection = True
-                mock_settings.capacity_monitor.fallback_to_push = True
 
                 selector = StorageSelector()
-                selector._redis_client = mock_redis_client
                 selector._admin_client = mock_admin_client
                 selector._initialized = True
 
                 selector._select_from_adaptive_monitor = AsyncMock(return_value=None)
-                selector._select_from_redis = AsyncMock(return_value=None)
                 selector._select_from_admin_module = AsyncMock(return_value=None)
 
                 se = await selector.select_storage_element(
@@ -298,12 +229,13 @@ class TestParallelRunFallbackChain:
                 assert se is None
 
 
-class TestParallelRunConfigFlags:
+class TestPollingOnlyConfigFlags:
     """
-    Тесты конфигурационных флагов для Parallel Run.
+    Тесты конфигурационных флагов для POLLING-only режима.
 
-    Проверяют что флаги use_for_selection и fallback_to_push
-    корректно влияют на поведение StorageSelector.
+    Sprint 19 Phase 4: fallback_to_push удалён, остались только:
+    - enabled: включение/выключение Capacity Monitor
+    - use_for_selection: использование POLLING для выбора SE
     """
 
     def test_use_for_selection_flag_default_true(self):
@@ -311,10 +243,10 @@ class TestParallelRunConfigFlags:
         settings = CapacityMonitorSettings()
         assert settings.use_for_selection is True
 
-    def test_fallback_to_push_flag_default_true(self):
-        """Тест: fallback_to_push по умолчанию True."""
+    def test_enabled_flag_default_true(self):
+        """Тест: enabled по умолчанию True."""
         settings = CapacityMonitorSettings()
-        assert settings.fallback_to_push is True
+        assert settings.enabled is True
 
     def test_boolean_parsing_on_off(self):
         """Тест: Парсинг boolean из on/off формата."""
@@ -325,37 +257,50 @@ class TestParallelRunConfigFlags:
         settings2 = CapacityMonitorSettings(enabled="off")
         assert settings2.enabled is False
 
+    def test_no_fallback_to_push_attribute(self):
+        """
+        Тест: fallback_to_push атрибут удалён в Sprint 19 Phase 4.
+
+        Проверяет что CapacityMonitorSettings больше не содержит
+        legacy атрибут fallback_to_push.
+        """
+        settings = CapacityMonitorSettings()
+        assert not hasattr(settings, 'fallback_to_push')
+
     @pytest.mark.asyncio
-    async def test_polling_disabled_skips_adaptive_monitor(self):
+    async def test_polling_disabled_goes_directly_to_admin(self):
         """
-        Тест: При use_for_selection=False POLLING модель пропускается.
+        Тест: При use_for_selection=False сразу fallback на Admin Module.
+
+        Sprint 19 Phase 4: Без PUSH модели, единственный fallback - Admin Module.
         """
-        mock_redis_client = AsyncMock()
-        mock_redis_client.zrange = AsyncMock(return_value=["se-01"])
-        mock_redis_client.hgetall = AsyncMock(return_value={
-            "id": "se-01",
-            "mode": "edit",
-            "endpoint": "http://se-01:8010",
-            "priority": "100",
-            "capacity_total": "10000000000",
-            "capacity_used": "1000000000",
-            "capacity_free": "9000000000",
-            "capacity_percent": "10.0",
-            "capacity_status": "ok",
-            "health_status": "healthy",
-            "last_updated": datetime.now(timezone.utc).isoformat()
-        })
+        mock_admin_client = AsyncMock()
+        mock_admin_client.get_available_storage_elements = AsyncMock(
+            return_value=[
+                StorageElementInfo(
+                    element_id="se-01",
+                    mode="edit",
+                    endpoint="http://se-01:8010",
+                    priority=100,
+                    capacity_total=10_000_000_000,
+                    capacity_used=1_000_000_000,
+                    capacity_free=9_000_000_000,
+                    capacity_percent=10.0,
+                    capacity_status=CapacityStatus.OK,
+                    health_status="healthy",
+                    last_updated=datetime.now(timezone.utc)
+                )
+            ]
+        )
 
         with patch("app.services.storage_selector.get_capacity_monitor", return_value=None):
             with patch("app.services.storage_selector.settings") as mock_settings:
                 # Отключаем POLLING
                 mock_settings.capacity_monitor.enabled = False
                 mock_settings.capacity_monitor.use_for_selection = False
-                mock_settings.capacity_monitor.fallback_to_push = True
 
                 selector = StorageSelector()
-                selector._redis_client = mock_redis_client
-                selector._admin_client = None
+                selector._admin_client = mock_admin_client
                 selector._initialized = True
 
                 # POLLING не должен вызываться
@@ -366,16 +311,21 @@ class TestParallelRunConfigFlags:
                     retention_policy=RetentionPolicy.TEMPORARY
                 )
 
-                # SE должен быть выбран из PUSH модели
+                # SE должен быть выбран из Admin Module (единственный fallback)
                 assert se is not None
+                assert se.element_id == "se-01"
+                mock_admin_client.get_available_storage_elements.assert_called()
 
 
-class TestParallelRunMetrics:
+class TestPollingOnlyMetrics:
     """
-    Тесты метрик для Parallel Run.
+    Тесты метрик для POLLING-only режима.
 
-    Проверяют что storage_selection_source_total корректно записывает
-    источник выбора SE.
+    Sprint 19 Phase 4: Метрики отражают два источника:
+    - adaptive_monitor (POLLING)
+    - admin_module (fallback)
+
+    Legacy источник 'redis_push' удалён.
     """
 
     def test_metrics_counter_exists(self):
@@ -404,6 +354,28 @@ class TestParallelRunMetrics:
         # Проверяем инкремент
         new_value = storage_selection_source_total.labels(
             source="adaptive_monitor",
+            status="success"
+        )._value.get()
+
+        assert new_value == initial_value + 1
+
+    def test_record_admin_module_fallback_metric(self):
+        """
+        Тест: Метрика admin_module fallback корректно записывается.
+
+        Sprint 19 Phase 4: admin_module - единственный fallback после POLLING.
+        """
+        from app.core.metrics import record_selection_source, storage_selection_source_total
+
+        initial_value = storage_selection_source_total.labels(
+            source="admin_module",
+            status="success"
+        )._value.get()
+
+        record_selection_source(source="admin_module", success=True)
+
+        new_value = storage_selection_source_total.labels(
+            source="admin_module",
             status="success"
         )._value.get()
 
@@ -524,3 +496,47 @@ class TestCapacityMonitorSortedSet:
         # Проверяем что zrem был вызван для удаления из sorted set
         zrem_calls = [call for call in mock_redis.zrem.call_args_list]
         assert len(zrem_calls) > 0
+
+
+class TestStorageSelectorNoRedisClient:
+    """
+    Тесты что StorageSelector больше не использует Redis client.
+
+    Sprint 19 Phase 4: _redis_client атрибут удалён, Redis используется
+    только через AdaptiveCapacityMonitor для POLLING модели.
+    """
+
+    def test_no_redis_client_attribute(self):
+        """
+        Тест: StorageSelector не имеет _redis_client атрибута.
+
+        Sprint 19 Phase 4: Legacy PUSH модель удалена.
+        """
+        selector = StorageSelector()
+        assert not hasattr(selector, '_redis_client')
+
+    def test_no_cache_attributes(self):
+        """
+        Тест: StorageSelector не имеет legacy cache атрибутов.
+
+        Sprint 19 Phase 4: Кеширование происходит в AdaptiveCapacityMonitor.
+        """
+        selector = StorageSelector()
+        assert not hasattr(selector, '_cache')
+        assert not hasattr(selector, '_cache_timestamp')
+        assert not hasattr(selector, '_cache_ttl_seconds')
+
+    @pytest.mark.asyncio
+    async def test_initialize_without_redis_client(self):
+        """
+        Тест: initialize() работает без redis_client параметра.
+
+        Sprint 19 Phase 4: redis_client deprecated, не используется.
+        """
+        mock_admin_client = AsyncMock()
+
+        selector = StorageSelector()
+        await selector.initialize(admin_client=mock_admin_client)
+
+        assert selector._initialized is True
+        assert selector._admin_client == mock_admin_client

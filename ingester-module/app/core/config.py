@@ -313,17 +313,14 @@ class CapacityMonitorSettings(BaseSettings):
         description="Процент изменения capacity для уменьшения интервала"
     )
 
-    # Sprint 18 Phase 3: Parallel Run configuration
+    # Sprint 19 Phase 4: POLLING-only mode (legacy PUSH removed)
     use_for_selection: bool = Field(
         default=True,
         description="Использовать AdaptiveCapacityMonitor как источник в StorageSelector"
     )
-    fallback_to_push: bool = Field(
-        default=True,
-        description="Fallback на Redis PUSH модель если POLLING недоступен"
-    )
+    # Sprint 19 Phase 4: fallback_to_push УДАЛЁН - legacy Redis PUSH модель больше не поддерживается
 
-    @field_validator("enabled", "use_for_selection", "fallback_to_push", mode="before")
+    @field_validator("enabled", "use_for_selection", mode="before")
     @classmethod
     def parse_bool_fields(cls, v):
         """Парсинг boolean полей из environment variables."""

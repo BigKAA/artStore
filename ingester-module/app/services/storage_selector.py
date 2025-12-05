@@ -1,20 +1,20 @@
 """
 StorageSelector - Сервис выбора Storage Element для загрузки файлов.
 
-Sprint 14-16: Redis Storage Registry & Adaptive Capacity.
+Sprint 19 Phase 4: HTTP Polling модель (AdaptiveCapacityMonitor) как основной источник.
 
 Алгоритм Sequential Fill:
-1. Получаем список доступных SE из Redis sorted set (отсортированы по priority)
+1. Получаем список доступных SE из AdaptiveCapacityMonitor (sorted set capacity:{mode}:available)
 2. Для каждого SE (в порядке priority) проверяем:
    - capacity_status != FULL
    - can_accept_file(file_size)
 3. Возвращаем первый подходящий SE
 
-Fallback Pattern (Sprint 16):
-- Redis → Admin Module HTTP API
-- Local config fallback УДАЛЁН - Service Discovery обязателен
+Fallback Pattern (Sprint 19):
+- POLLING (AdaptiveCapacityMonitor) → Admin Module HTTP API
+- Legacy Redis PUSH модель УДАЛЕНА (Phase 4 Cutover)
 
-ВАЖНО: Использует redis.asyncio (async), НЕ синхронный redis-py!
+ВАЖНО: Использует redis.asyncio (async) для кеширования внутри AdaptiveCapacityMonitor.
 """
 
 import asyncio
@@ -128,34 +128,33 @@ class StorageSelector:
     """
 
     def __init__(self):
-        """Инициализация StorageSelector."""
-        self._redis_client = None
+        """
+        Инициализация StorageSelector.
+
+        Sprint 19 Phase 4: Redis client больше не требуется.
+        Выбор SE через AdaptiveCapacityMonitor (POLLING) или Admin Module API.
+        """
         self._admin_client = None  # Admin Module HTTP клиент для fallback
         self._initialized = False
-
-        # Кеш SE для уменьшения нагрузки на Redis
-        self._cache: dict[str, StorageElementInfo] = {}
-        self._cache_timestamp: Optional[datetime] = None
-        self._cache_ttl_seconds = 5  # Кеш на 5 секунд
 
     async def initialize(self, redis_client=None, admin_client=None) -> None:
         """
         Инициализация сервиса.
 
         Args:
-            redis_client: Async Redis клиент (опционально, если None - будет создан)
+            redis_client: DEPRECATED (Sprint 19) - не используется, оставлен для совместимости
             admin_client: Admin Module HTTP клиент (опционально, для fallback)
         """
-        self._redis_client = redis_client
+        # Sprint 19 Phase 4: redis_client больше не используется
+        # Параметр оставлен для обратной совместимости сигнатуры
         self._admin_client = admin_client
         self._initialized = True
 
-        logger.info("StorageSelector initialized")
+        logger.info("StorageSelector initialized (POLLING mode)")
 
     async def close(self) -> None:
         """Закрытие ресурсов."""
         self._initialized = False
-        self._cache.clear()
         logger.info("StorageSelector closed")
 
     async def select_storage_element(
@@ -197,7 +196,8 @@ class StorageSelector:
         status = "failed"
 
         try:
-            # Sprint 18 Phase 3: Fallback chain POLLING → PUSH → Admin Module
+            # Sprint 19 Phase 4: Fallback chain POLLING → Admin Module
+            # Legacy Redis PUSH модель удалена
 
             # Попытка 1: POLLING модель (AdaptiveCapacityMonitor)
             se = await self._select_from_adaptive_monitor(file_size, required_mode, excluded_se_ids)
@@ -217,26 +217,7 @@ class StorageSelector:
                 )
                 return se
 
-            # Попытка 2: PUSH модель (Redis Registry) - fallback если POLLING пуст
-            if settings.capacity_monitor.fallback_to_push:
-                se = await self._select_from_redis(file_size, required_mode, excluded_se_ids)
-                if se:
-                    source = "redis"
-                    status = "success"
-                    logger.info(
-                        f"Selected SE from PUSH model (Redis)",
-                        extra={
-                            "se_id": se.element_id,
-                            "mode": se.mode,
-                            "file_size": file_size,
-                            "retention_policy": retention_policy.value,
-                            "source": "redis",
-                            "excluded_se_ids": list(excluded_se_ids) if excluded_se_ids else [],
-                        }
-                    )
-                    return se
-
-            # Попытка 3: Admin Module Fallback API
+            # Попытка 2: Admin Module Fallback API
             se = await self._select_from_admin_module(file_size, required_mode, excluded_se_ids)
             if se:
                 source = "admin_module"
@@ -264,8 +245,6 @@ class StorageSelector:
                     "retention_policy": retention_policy.value,
                     "required_mode": required_mode,
                     "polling_enabled": settings.capacity_monitor.use_for_selection,
-                    "push_fallback_enabled": settings.capacity_monitor.fallback_to_push,
-                    "redis_available": self._redis_client is not None,
                     "admin_available": self._admin_client is not None
                 }
             )
@@ -282,142 +261,12 @@ class StorageSelector:
                 storage_element_id=se.element_id if se else None,
                 mode=se.mode if se else None
             )
-            # Sprint 18 Phase 3: Метрика источника для parallel run мониторинга
+            # Sprint 19 Phase 4: Метрика источника для мониторинга
             record_selection_source(source=source, success=(se is not None))
 
-    async def _select_from_redis(
-        self,
-        file_size: int,
-        required_mode: str,
-        excluded_se_ids: Optional[set[str]] = None,
-    ) -> Optional[StorageElementInfo]:
-        """
-        Выбор SE из Redis Registry.
-
-        Использует sorted set storage:{mode}:by_priority для Sequential Fill.
-
-        Sprint 17: Добавлен excluded_se_ids для поддержки retry logic.
-
-        Args:
-            file_size: Размер файла в байтах
-            required_mode: Требуемый режим SE (edit или rw)
-            excluded_se_ids: Множество ID SE для исключения из выбора
-
-        Returns:
-            StorageElementInfo или None
-        """
-        if not self._redis_client:
-            logger.debug("Redis client not available for storage selection")
-            return None
-
-        try:
-            # Получаем отсортированный список SE ID из sorted set
-            sorted_set_key = f"storage:{required_mode}:by_priority"
-
-            # ZRANGE возвращает элементы в порядке возрастания score (priority)
-            se_ids = await self._redis_client.zrange(sorted_set_key, 0, -1)
-
-            if not se_ids:
-                logger.debug(
-                    f"No SE found in Redis sorted set",
-                    extra={"sorted_set_key": sorted_set_key}
-                )
-                return None
-
-            # Проверяем каждый SE в порядке priority
-            for se_id in se_ids:
-                # Sprint 17: Пропускаем excluded SE
-                if excluded_se_ids and se_id in excluded_se_ids:
-                    logger.debug(
-                        f"SE {se_id} skipped (excluded)",
-                        extra={"reason": "excluded_se_ids"}
-                    )
-                    continue
-
-                se_info = await self._get_se_info_from_redis(se_id)
-
-                if se_info is None:
-                    continue
-
-                # Проверяем что SE подходит
-                if se_info.can_accept_file(file_size):
-                    return se_info
-
-                logger.debug(
-                    f"SE {se_id} skipped",
-                    extra={
-                        "capacity_status": se_info.capacity_status.value,
-                        "capacity_free": se_info.capacity_free,
-                        "file_size": file_size
-                    }
-                )
-
-            return None
-
-        except Exception as e:
-            logger.warning(
-                f"Redis selection failed, falling back",
-                extra={"error": str(e)}
-            )
-            return None
-
-    async def _get_se_info_from_redis(self, se_id: str) -> Optional[StorageElementInfo]:
-        """
-        Получение информации о SE из Redis Hash.
-
-        Args:
-            se_id: ID Storage Element
-
-        Returns:
-            StorageElementInfo или None
-        """
-        # Проверяем кеш
-        if self._is_cache_valid() and se_id in self._cache:
-            return self._cache[se_id]
-
-        try:
-            hash_key = f"storage:elements:{se_id}"
-            data = await self._redis_client.hgetall(hash_key)
-
-            if not data:
-                return None
-
-            se_info = StorageElementInfo(
-                element_id=data.get("id", se_id),
-                mode=data.get("mode", "unknown"),
-                endpoint=data.get("endpoint", ""),
-                priority=int(data.get("priority", 100)),
-                capacity_total=int(data.get("capacity_total", 0)),
-                capacity_used=int(data.get("capacity_used", 0)),
-                capacity_free=int(data.get("capacity_free", 0)),
-                capacity_percent=float(data.get("capacity_percent", 0.0)),
-                capacity_status=CapacityStatus(data.get("capacity_status", "ok")),
-                health_status=data.get("health_status", "unknown"),
-                last_updated=datetime.fromisoformat(
-                    data.get("last_updated", datetime.now(timezone.utc).isoformat())
-                )
-            )
-
-            # Кешируем
-            self._cache[se_id] = se_info
-            self._cache_timestamp = datetime.now(timezone.utc)
-
-            return se_info
-
-        except Exception as e:
-            logger.warning(
-                f"Failed to get SE info from Redis",
-                extra={"se_id": se_id, "error": str(e)}
-            )
-            return None
-
-    def _is_cache_valid(self) -> bool:
-        """Проверка валидности кеша."""
-        if not self._cache_timestamp:
-            return False
-
-        age = (datetime.now(timezone.utc) - self._cache_timestamp).total_seconds()
-        return age < self._cache_ttl_seconds
+    # Sprint 19 Phase 4: Методы _select_from_redis, _get_se_info_from_redis, _is_cache_valid
+    # УДАЛЕНЫ - legacy Redis PUSH модель больше не используется.
+    # Используется только POLLING через AdaptiveCapacityMonitor.
 
     async def _select_from_admin_module(
         self,

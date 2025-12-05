@@ -33,16 +33,17 @@ async def lifespan(app: FastAPI):
 
     Startup:
     - Инициализация базы данных
-    - Инициализация Redis клиента
-    - Запуск HealthReporter для публикации статуса в Redis
+    - Инициализация Redis клиента (для кеширования)
     - Проверка конфигурации
     - Загрузка текущего режима из БД
 
     Shutdown:
-    - Остановка HealthReporter
     - Закрытие Redis соединений
     - Закрытие соединений с БД
     - Cleanup resources
+
+    Sprint 19 Phase 4: HealthReporter удалён - Ingester использует HTTP polling
+    через AdaptiveCapacityMonitor вместо Redis PUSH модели.
     """
     # Startup
     logger.info(
@@ -60,8 +61,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
-    # Инициализация Redis и HealthReporter (Sprint 14)
-    await _init_redis_and_health_reporter()
+    # Инициализация Redis (Sprint 19: только для кеширования, без HealthReporter)
+    await _init_redis()
 
     # Проверка доступности хранилища при старте (graceful degradation)
     await _check_storage_on_startup()
@@ -74,78 +75,63 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Storage Element")
 
-    # Остановка HealthReporter и закрытие Redis (Sprint 14)
-    await _shutdown_redis_and_health_reporter()
+    # Закрытие Redis (Sprint 19: без HealthReporter)
+    await _shutdown_redis()
 
     await close_db()
     logger.info("Database connections closed")
 
 
-async def _init_redis_and_health_reporter():
+async def _init_redis():
     """
-    Инициализация Redis клиента и запуск HealthReporter.
+    Инициализация Redis клиента для кеширования.
 
-    Sprint 14: Redis Storage Registry & Adaptive Capacity.
+    Sprint 19 Phase 4: HealthReporter удалён.
+    Ingester использует HTTP polling через AdaptiveCapacityMonitor.
+    Redis используется только для внутреннего кеширования.
 
-    Graceful degradation - при ошибке Redis сервис продолжает работу,
-    но не публикует статус в registry (локальная работа).
+    Graceful degradation - при ошибке Redis сервис продолжает работу.
     """
-    from app.core.redis import get_redis_client, close_redis_client
-    from app.services.health_reporter import init_health_reporter
+    from app.core.redis import get_redis_client
 
     try:
-        # Инициализация Redis клиента
         redis_client = await get_redis_client()
         logger.info(
             "Redis client connected",
             extra={
                 "host": settings.redis.host,
                 "port": settings.redis.port,
-            }
-        )
-
-        # Запуск HealthReporter для публикации статуса
-        await init_health_reporter(redis_client)
-        logger.info(
-            "HealthReporter started",
-            extra={
-                "element_id": settings.storage.element_id,
-                "interval": settings.storage.health_report_interval,
-                "ttl": settings.storage.health_report_ttl,
+                "purpose": "caching_only",
             }
         )
 
     except Exception as e:
         # Graceful degradation - продолжаем работу без Redis
         logger.warning(
-            "Failed to initialize Redis/HealthReporter - running in standalone mode",
+            "Failed to initialize Redis - running without cache",
             extra={
                 "error": str(e),
                 "element_id": settings.storage.element_id,
-                "action": "SE will work locally but won't be discoverable via Redis registry"
+                "action": "SE will work but without Redis caching"
             }
         )
 
 
-async def _shutdown_redis_and_health_reporter():
+async def _shutdown_redis():
     """
-    Остановка HealthReporter и закрытие Redis при shutdown.
+    Закрытие Redis соединения при shutdown.
+
+    Sprint 19 Phase 4: HealthReporter удалён.
     """
     from app.core.redis import close_redis_client
-    from app.services.health_reporter import stop_health_reporter
 
     try:
-        # Остановка HealthReporter (удаляет SE из registry)
-        await stop_health_reporter()
-        logger.info("HealthReporter stopped")
-
-        # Закрытие Redis соединения
         await close_redis_client()
         logger.info("Redis client closed")
 
     except Exception as e:
         logger.warning(
-            f"Error during Redis/HealthReporter shutdown: {e}",
+            f"Error during Redis shutdown: {e}",
             extra={"error": str(e)}
         )
 
