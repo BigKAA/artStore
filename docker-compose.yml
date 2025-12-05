@@ -224,6 +224,7 @@ services:
       # Storage Configuration - ТЕСТОВЫЙ РАЗМЕР 1GB
       STORAGE_TYPE: s3
       STORAGE_MAX_SIZE_GB: 1  # 1GB для быстрого тестирования
+      STORAGE_S3_SOFT_CAPACITY_LIMIT: 1073741824  # 1GB в байтах для capacity endpoint
 
       # Health Reporting Settings
       STORAGE_ELEMENT_ID: se-01
@@ -328,6 +329,7 @@ services:
       # Storage Configuration - ТЕСТОВЫЙ РАЗМЕР 1GB
       STORAGE_TYPE: s3
       STORAGE_MAX_SIZE_GB: 1  # 1GB для быстрого тестирования
+      STORAGE_S3_SOFT_CAPACITY_LIMIT: 1073741824  # 1GB в байтах для capacity endpoint
 
       # Health Reporting Settings
       STORAGE_ELEMENT_ID: se-02
@@ -423,6 +425,7 @@ services:
       # Storage Configuration - ТЕСТОВЫЙ РАЗМЕР 1GB
       STORAGE_TYPE: s3
       STORAGE_MAX_SIZE_GB: 1  # 1GB для быстрого тестирования
+      STORAGE_S3_SOFT_CAPACITY_LIMIT: 1073741824  # 1GB в байтах для capacity endpoint
 
       # Health Reporting Settings
       STORAGE_ELEMENT_ID: se-03

@@ -11,7 +11,7 @@ Sprint 14: Redis Storage Registry & Adaptive Capacity.
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 import httpx
 
@@ -128,7 +128,7 @@ class AdminModuleClient:
                 # Рассчитываем время истечения (с буфером в 60 секунд)
                 expires_in = data.get("expires_in", 1800)  # default 30 min
                 self._token_expires_at = datetime.now(timezone.utc) + \
-                    asyncio.get_event_loop().time() + expires_in - 60
+                    timedelta(seconds=expires_in - 60)
 
                 logger.debug("Admin Module access token obtained")
                 return self._access_token
@@ -240,8 +240,10 @@ class AdminModuleClient:
 
         for item in data:
             try:
+                # element_id может быть null в JSON - используем id как fallback
+                element_id = item.get("element_id") or str(item.get("id", ""))
                 se_info = StorageElementInfo(
-                    element_id=item.get("element_id", str(item.get("id", ""))),
+                    element_id=element_id,
                     mode=item.get("mode", "unknown"),
                     endpoint=item.get("api_url", ""),
                     priority=item.get("priority", 100),
