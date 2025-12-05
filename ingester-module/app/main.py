@@ -52,6 +52,97 @@ upload_service = UploadService(auth_service=auth_service)
 finalize_service = FinalizeService(auth_service=auth_service)
 
 
+async def _fetch_storage_endpoints_from_admin(admin_client) -> tuple[dict[str, str], dict[str, int]]:
+    """
+    Получение endpoints и priorities SE из Admin Module.
+
+    Sprint 18 Phase 3: Интеграция с Admin Module для инициализации endpoints.
+
+    Args:
+        admin_client: Инициализированный AdminClient
+
+    Returns:
+        tuple: (endpoints dict {se_id: endpoint_url}, priorities dict {se_id: priority})
+    """
+    endpoints: dict[str, str] = {}
+    priorities: dict[str, int] = {}
+
+    try:
+        # Получаем все доступные SE (edit + rw режимы)
+        storage_elements = await admin_client.get_available_storage_elements()
+
+        for se in storage_elements:
+            endpoints[se.element_id] = se.endpoint
+            priorities[se.element_id] = se.priority
+
+        logger.info(
+            "Fetched SE endpoints from Admin Module",
+            extra={
+                "count": len(endpoints),
+                "se_ids": list(endpoints.keys()),
+            }
+        )
+
+    except Exception as e:
+        logger.warning(
+            "Failed to fetch SE endpoints from Admin Module",
+            extra={"error": str(e)}
+        )
+
+    return endpoints, priorities
+
+
+async def _fetch_storage_endpoints_from_redis(redis_client) -> tuple[dict[str, str], dict[str, int]]:
+    """
+    Получение endpoints и priorities SE из Redis (PUSH модель fallback).
+
+    Sprint 18 Phase 3: Fallback на Redis PUSH модель если Admin Module недоступен.
+
+    Args:
+        redis_client: Async Redis client
+
+    Returns:
+        tuple: (endpoints dict {se_id: endpoint_url}, priorities dict {se_id: priority})
+    """
+    endpoints: dict[str, str] = {}
+    priorities: dict[str, int] = {}
+
+    try:
+        # Получаем все SE из sorted set (PUSH модель)
+        # Ключи: storage:edit:by_priority, storage:rw:by_priority
+        for mode in ("edit", "rw"):
+            sorted_set_key = f"storage:{mode}:by_priority"
+            se_ids = await redis_client.zrange(sorted_set_key, 0, -1, withscores=True)
+
+            for se_id, priority in se_ids:
+                if se_id in endpoints:
+                    continue  # Уже добавлен из другого режима
+
+                # Получаем endpoint из hash storage:elements:{se_id}
+                hash_key = f"storage:elements:{se_id}"
+                se_data = await redis_client.hgetall(hash_key)
+
+                if se_data and "endpoint" in se_data:
+                    endpoints[se_id] = se_data["endpoint"]
+                    priorities[se_id] = int(priority)
+
+        logger.info(
+            "Fetched SE endpoints from Redis PUSH model",
+            extra={
+                "count": len(endpoints),
+                "se_ids": list(endpoints.keys()),
+            }
+        )
+
+    except Exception as e:
+        logger.warning(
+            "Failed to fetch SE endpoints from Redis",
+            extra={"error": str(e)}
+        )
+
+    return endpoints, priorities
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -131,12 +222,26 @@ async def lifespan(app: FastAPI):
 
     # Sprint 17: Инициализация AdaptiveCapacityMonitor (если включен)
     capacity_monitor = None
+    storage_priorities: dict[str, int] = {}  # Sprint 18 Phase 3: Priorities для sorted set
+
     if settings.capacity_monitor.enabled and redis_client:
         try:
-            # Получаем endpoints SE из Admin Module или конфигурации
-            # TODO: Интеграция с Admin Module для получения списка SE endpoints
-            # Пока используем пустой dict - endpoints будут добавлены через API
-            storage_endpoints = {}
+            # Sprint 18 Phase 3: Получаем endpoints SE с fallback chain
+            # 1. Пробуем Admin Module
+            # 2. Fallback на Redis PUSH модель
+            storage_endpoints: dict[str, str] = {}
+
+            if admin_client:
+                storage_endpoints, storage_priorities = await _fetch_storage_endpoints_from_admin(admin_client)
+
+            if not storage_endpoints and redis_client:
+                # Fallback на Redis PUSH модель
+                storage_endpoints, storage_priorities = await _fetch_storage_endpoints_from_redis(redis_client)
+
+            if not storage_endpoints:
+                logger.warning(
+                    "No SE endpoints available - AdaptiveCapacityMonitor will start without endpoints"
+                )
 
             # Конфигурация из settings
             monitor_config = CapacityMonitorConfig(
@@ -161,6 +266,7 @@ async def lifespan(app: FastAPI):
                 redis_client=redis_client,
                 storage_endpoints=storage_endpoints,
                 config=monitor_config,
+                storage_priorities=storage_priorities,  # Sprint 18 Phase 3
             )
             logger.info(
                 "AdaptiveCapacityMonitor initialized",

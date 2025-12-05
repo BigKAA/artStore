@@ -26,7 +26,13 @@ from typing import Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.metrics import record_storage_selection
+from app.core.metrics import record_storage_selection, record_selection_source
+# Sprint 18 Phase 3: Import для POLLING модели (AdaptiveCapacityMonitor)
+from app.services.capacity_monitor import (
+    get_capacity_monitor,
+    StorageCapacityInfo,
+    HealthStatus,
+)
 
 logger = get_logger(__name__)
 
@@ -191,25 +197,46 @@ class StorageSelector:
         status = "failed"
 
         try:
-            # Попытка 1: Redis Registry
-            se = await self._select_from_redis(file_size, required_mode, excluded_se_ids)
+            # Sprint 18 Phase 3: Fallback chain POLLING → PUSH → Admin Module
+
+            # Попытка 1: POLLING модель (AdaptiveCapacityMonitor)
+            se = await self._select_from_adaptive_monitor(file_size, required_mode, excluded_se_ids)
             if se:
-                source = "redis"
+                source = "adaptive_monitor"
                 status = "success"
                 logger.info(
-                    f"Selected SE from Redis",
+                    f"Selected SE from POLLING model",
                     extra={
                         "se_id": se.element_id,
                         "mode": se.mode,
                         "file_size": file_size,
                         "retention_policy": retention_policy.value,
-                        "source": "redis",
+                        "source": "adaptive_monitor",
                         "excluded_se_ids": list(excluded_se_ids) if excluded_se_ids else [],
                     }
                 )
                 return se
 
-            # Попытка 2: Admin Module Fallback API
+            # Попытка 2: PUSH модель (Redis Registry) - fallback если POLLING пуст
+            if settings.capacity_monitor.fallback_to_push:
+                se = await self._select_from_redis(file_size, required_mode, excluded_se_ids)
+                if se:
+                    source = "redis"
+                    status = "success"
+                    logger.info(
+                        f"Selected SE from PUSH model (Redis)",
+                        extra={
+                            "se_id": se.element_id,
+                            "mode": se.mode,
+                            "file_size": file_size,
+                            "retention_policy": retention_policy.value,
+                            "source": "redis",
+                            "excluded_se_ids": list(excluded_se_ids) if excluded_se_ids else [],
+                        }
+                    )
+                    return se
+
+            # Попытка 3: Admin Module Fallback API
             se = await self._select_from_admin_module(file_size, required_mode, excluded_se_ids)
             if se:
                 source = "admin_module"
@@ -227,16 +254,17 @@ class StorageSelector:
                 )
                 return se
 
-            # Sprint 16: Local config fallback УДАЛЁН
-            # Service Discovery (Redis или Admin Module) обязателен
+            # Все источники исчерпаны
             source = "none"
             status = "failed"
             logger.error(
-                "No suitable Storage Element found - Service Discovery unavailable",
+                "No suitable Storage Element found - all sources exhausted",
                 extra={
                     "file_size": file_size,
                     "retention_policy": retention_policy.value,
                     "required_mode": required_mode,
+                    "polling_enabled": settings.capacity_monitor.use_for_selection,
+                    "push_fallback_enabled": settings.capacity_monitor.fallback_to_push,
                     "redis_available": self._redis_client is not None,
                     "admin_available": self._admin_client is not None
                 }
@@ -254,6 +282,8 @@ class StorageSelector:
                 storage_element_id=se.element_id if se else None,
                 mode=se.mode if se else None
             )
+            # Sprint 18 Phase 3: Метрика источника для parallel run мониторинга
+            record_selection_source(source=source, success=(se is not None))
 
     async def _select_from_redis(
         self,
@@ -484,6 +514,153 @@ class StorageSelector:
         self._cache.clear()
         self._cache_timestamp = None
         logger.debug("SE cache invalidated")
+
+    # ========== Sprint 18 Phase 3: POLLING модель (AdaptiveCapacityMonitor) ==========
+
+    def _convert_capacity_to_element_info(
+        self,
+        capacity_info: StorageCapacityInfo,
+        priority: int = 100
+    ) -> StorageElementInfo:
+        """
+        Конвертация StorageCapacityInfo (POLLING модель) в StorageElementInfo.
+
+        Sprint 18 Phase 3: Маппинг типов между AdaptiveCapacityMonitor и StorageSelector.
+
+        Args:
+            capacity_info: Данные из POLLING модели
+            priority: Priority SE (из Admin Module)
+
+        Returns:
+            StorageElementInfo: Конвертированный объект для Sequential Fill
+        """
+        # Конвертация percent_used в CapacityStatus
+        percent_used = capacity_info.percent_used
+        if percent_used >= 98:
+            capacity_status = CapacityStatus.FULL
+        elif percent_used >= 92:
+            capacity_status = CapacityStatus.CRITICAL
+        elif percent_used >= 85:
+            capacity_status = CapacityStatus.WARNING
+        else:
+            capacity_status = CapacityStatus.OK
+
+        # Конвертация HealthStatus enum в string
+        health_mapping = {
+            HealthStatus.HEALTHY: "healthy",
+            HealthStatus.DEGRADED: "degraded",
+            HealthStatus.UNHEALTHY: "unhealthy",
+        }
+        health_status = health_mapping.get(capacity_info.health, "unknown")
+
+        # Парсинг last_poll из ISO 8601
+        try:
+            last_updated = datetime.fromisoformat(capacity_info.last_poll.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            last_updated = datetime.now(timezone.utc)
+
+        return StorageElementInfo(
+            element_id=capacity_info.storage_id,
+            mode=capacity_info.mode,
+            endpoint=capacity_info.endpoint,
+            priority=priority,
+            capacity_total=capacity_info.total,
+            capacity_used=capacity_info.used,
+            capacity_free=capacity_info.available,
+            capacity_percent=percent_used,
+            capacity_status=capacity_status,
+            health_status=health_status,
+            last_updated=last_updated,
+        )
+
+    async def _select_from_adaptive_monitor(
+        self,
+        file_size: int,
+        required_mode: str,
+        excluded_se_ids: Optional[set[str]] = None,
+    ) -> Optional[StorageElementInfo]:
+        """
+        Выбор SE из AdaptiveCapacityMonitor (POLLING модель).
+
+        Sprint 18 Phase 3: Primary источник данных о capacity.
+
+        Использует sorted set capacity:{mode}:available для Sequential Fill.
+
+        Args:
+            file_size: Размер файла в байтах
+            required_mode: Требуемый режим SE (edit или rw)
+            excluded_se_ids: Множество ID SE для исключения из выбора
+
+        Returns:
+            StorageElementInfo или None
+        """
+        # Проверяем, включена ли POLLING модель
+        if not settings.capacity_monitor.use_for_selection:
+            logger.debug("POLLING model disabled in config")
+            return None
+
+        # Получаем CapacityMonitor
+        capacity_monitor = await get_capacity_monitor()
+        if not capacity_monitor:
+            logger.debug("AdaptiveCapacityMonitor not available")
+            return None
+
+        if not self._redis_client:
+            logger.debug("Redis not available for POLLING model")
+            return None
+
+        try:
+            # Читаем sorted set capacity:{mode}:available
+            sorted_set_key = f"capacity:{required_mode}:available"
+            se_ids_with_scores = await self._redis_client.zrange(
+                sorted_set_key, 0, -1, withscores=True
+            )
+
+            if not se_ids_with_scores:
+                logger.debug(
+                    f"No SE in POLLING sorted set",
+                    extra={"sorted_set_key": sorted_set_key}
+                )
+                return None
+
+            # Sequential Fill: перебираем по priority
+            for se_id, priority in se_ids_with_scores:
+                # Пропускаем excluded SE
+                if excluded_se_ids and se_id in excluded_se_ids:
+                    continue
+
+                # Получаем capacity данные из POLLING модели
+                capacity_info = await capacity_monitor.get_capacity(se_id)
+                if not capacity_info:
+                    continue
+
+                # Конвертируем в StorageElementInfo
+                se_info = self._convert_capacity_to_element_info(
+                    capacity_info, priority=int(priority)
+                )
+
+                # Проверяем, может ли SE принять файл
+                if se_info.can_accept_file(file_size):
+                    logger.debug(
+                        f"Selected SE from POLLING model",
+                        extra={
+                            "se_id": se_id,
+                            "priority": priority,
+                            "capacity_percent": se_info.capacity_percent,
+                            "source": "adaptive_monitor",
+                        }
+                    )
+                    return se_info
+
+            logger.debug("No suitable SE found in POLLING model")
+            return None
+
+        except Exception as e:
+            logger.warning(
+                f"POLLING model selection failed",
+                extra={"error": str(e)}
+            )
+            return None
 
 
 # Глобальный singleton экземпляр
