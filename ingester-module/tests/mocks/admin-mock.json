@@ -3,7 +3,7 @@
     {
       "httpRequest": {
         "method": "POST",
-        "path": "/api/auth/token"
+        "path": "/api/v1/auth/token"
       },
       "httpResponse": {
         "statusCode": 200,
