@@ -232,7 +232,7 @@ class AuthService:
         Получить новый JWT токен от Admin Module через OAuth 2.0 Client Credentials с metrics.
 
         Flow:
-        1. POST /api/auth/token с client_id и client_secret
+        1. POST /api/v1/auth/token с client_id и client_secret
         2. Получить access_token и expires_in
         3. Сохранить в cache с timestamp истечения
 

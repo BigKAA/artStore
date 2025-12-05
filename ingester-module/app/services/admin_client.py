@@ -114,7 +114,7 @@ class AdminModuleClient:
         # Получаем новый токен
         try:
             response = await self._http_client.post(
-                "/api/auth/token",
+                "/api/v1/auth/token",
                 json={
                     "client_id": self._client_id,
                     "client_secret": self._client_secret

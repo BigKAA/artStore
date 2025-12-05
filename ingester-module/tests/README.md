@@ -95,8 +95,8 @@ docker-compose -f docker-compose.test.yml --profile integration down -v
 - **URL**: `http://mock-admin:8000` (container) или `http://localhost:8001` (host)
 - **Config**: `tests/mocks/admin-mock.json`
 - **Endpoints**:
-  - `POST /api/auth/token` - OAuth 2.0 authentication
-  - `GET /api/storage-elements` - Storage element list
+  - `POST /api/v1/auth/token` - OAuth 2.0 authentication
+  - `GET /api/v1/internal/storage-elements/available` - Storage element list
 
 #### Mock Storage Element
 - **URL**: `http://mock-storage:8010` (container) или `http://localhost:8011` (host)
