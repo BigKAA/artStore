@@ -1,0 +1,196 @@
+# ArtStore Prometheus Alerting Rules
+# Sprint 19 Phase 4: Leader Election и Capacity Monitor alerts
+
+groups:
+  # Leader Election Alerts
+  - name: leader_election
+    interval: 15s
+    rules:
+      # Критический: Нет лидера более 2 минут
+      - alert: NoCapacityMonitorLeader
+        expr: sum(capacity_monitor_leader_state) == 0 or absent(capacity_monitor_leader_state)
+        for: 2m
+        labels:
+          severity: critical
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "No Capacity Monitor leader elected"
+          description: "No Ingester instance has acquired the leader lock for capacity monitoring. SE selection will fail."
+          runbook_url: "https://docs.artstore.io/runbooks/capacity-monitor-leader"
+
+      # Warning: Множественные лидеры (split brain)
+      - alert: MultipleCapacityMonitorLeaders
+        expr: sum(capacity_monitor_leader_state) > 1
+        for: 30s
+        labels:
+          severity: critical
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "Multiple Capacity Monitor leaders detected"
+          description: "{{ $value }} Ingester instances claim to be leader. This indicates a split-brain condition."
+          runbook_url: "https://docs.artstore.io/runbooks/capacity-monitor-split-brain"
+
+      # Warning: Частые переключения лидера
+      - alert: FrequentLeaderTransitions
+        expr: increase(capacity_monitor_leader_transitions_total{transition_type="acquired"}[5m]) > 3
+        for: 1m
+        labels:
+          severity: warning
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "Frequent leader transitions detected"
+          description: "Leader has changed {{ $value }} times in last 5 minutes. Check Redis stability."
+          runbook_url: "https://docs.artstore.io/runbooks/leader-instability"
+
+      # Warning: Долгое время захвата лока
+      - alert: SlowLeaderLockAcquisition
+        expr: histogram_quantile(0.95, rate(leader_lock_acquisition_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "Slow leader lock acquisition"
+          description: "P95 lock acquisition time is {{ $value }}s (threshold: 1s). Check Redis performance."
+
+  # Capacity Polling Alerts
+  - name: capacity_polling
+    interval: 30s
+    rules:
+      # Warning: Высокий процент ошибок polling
+      - alert: HighPollingFailureRate
+        expr: |
+          sum(rate(capacity_poll_failures_total[5m])) /
+          (sum(rate(capacity_poll_duration_seconds_count[5m])) + 0.001) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "High capacity polling failure rate"
+          description: "{{ $value | printf \"%.1f\" }}% of capacity polls are failing."
+          runbook_url: "https://docs.artstore.io/runbooks/polling-failures"
+
+      # Critical: Все SE недоступны для polling
+      - alert: AllStorageElementsUnreachable
+        expr: storage_elements_available{mode="edit"} == 0 and storage_elements_available{mode="rw"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "All Storage Elements unreachable"
+          description: "No Storage Elements available for file uploads. All polling attempts failed."
+          runbook_url: "https://docs.artstore.io/runbooks/all-se-down"
+
+      # Warning: Нет SE в edit режиме
+      - alert: NoEditModeStorageElements
+        expr: storage_elements_available{mode="edit"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "No edit-mode Storage Elements available"
+          description: "No Storage Elements in edit mode available for temporary files."
+
+      # Warning: Высокая latency polling
+      - alert: HighPollingLatency
+        expr: histogram_quantile(0.95, rate(capacity_poll_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "High capacity polling latency"
+          description: "P95 polling latency is {{ $value }}s (threshold: 5s)."
+
+  # Storage Selection Alerts
+  - name: storage_selection
+    interval: 30s
+    rules:
+      # Critical: Нет успешных выборов SE
+      - alert: StorageSelectionFailures
+        expr: |
+          sum(rate(storage_selection_source_total{status="failed",source="none"}[5m])) /
+          (sum(rate(storage_selection_source_total[5m])) + 0.001) > 0.1
+        for: 3m
+        labels:
+          severity: critical
+          service: ingester
+          component: storage_selector
+        annotations:
+          summary: "High storage selection failure rate"
+          description: "{{ $value | printf \"%.1f\" }}% of storage selections are failing."
+          runbook_url: "https://docs.artstore.io/runbooks/storage-selection-failures"
+
+      # Warning: Fallback на Admin Module активен
+      - alert: AdminModuleFallbackActive
+        expr: |
+          sum(rate(storage_selection_source_total{source="admin_module"}[5m])) /
+          (sum(rate(storage_selection_source_total[5m])) + 0.001) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: ingester
+          component: storage_selector
+        annotations:
+          summary: "Admin Module fallback active"
+          description: "{{ $value | printf \"%.1f\" }}% of selections use Admin Module fallback. Check AdaptiveCapacityMonitor."
+
+      # Info: Lazy update triggers частые
+      - alert: FrequentLazyUpdates
+        expr: sum(rate(lazy_update_triggers_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: info
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "Frequent lazy update triggers"
+          description: "{{ $value }} lazy updates per second. Consider increasing polling frequency."
+
+  # Cache Health Alerts
+  - name: cache_health
+    interval: 30s
+    rules:
+      # Warning: Низкий cache hit rate
+      - alert: LowCacheHitRate
+        expr: |
+          sum(rate(capacity_cache_hits_total{result="hit"}[5m])) /
+          (sum(rate(capacity_cache_hits_total[5m])) + 0.001) < 0.8
+        for: 10m
+        labels:
+          severity: warning
+          service: ingester
+          component: capacity_monitor
+        annotations:
+          summary: "Low capacity cache hit rate"
+          description: "Cache hit rate is {{ $value | printf \"%.1f\" }}% (threshold: 80%)."
+
+  # Redis Health Alerts (for Capacity Monitor)
+  - name: redis_capacity_monitor
+    interval: 30s
+    rules:
+      # Critical: Redis недоступен для Leader Election
+      - alert: RedisUnavailableForLeaderElection
+        expr: |
+          increase(capacity_monitor_leader_transitions_total{transition_type="lost"}[1m]) > 0
+          and
+          increase(capacity_monitor_leader_transitions_total{transition_type="acquired"}[1m]) == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: ingester
+          component: redis
+        annotations:
+          summary: "Redis unavailable for Leader Election"
+          description: "Leader lock was lost but cannot be reacquired. Check Redis connectivity."

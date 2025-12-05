@@ -1,0 +1,81 @@
+# ArtStore Prometheus Configuration
+# Sprint 19 Phase 4: Monitoring для POLLING модели
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+  external_labels:
+    monitor: 'artstore-monitor'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Rule files
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Admin Module
+  - job_name: 'admin-module'
+    static_configs:
+      - targets: ['admin-module:8000']
+    metrics_path: /metrics
+    scheme: http
+
+  # Storage Elements
+  - job_name: 'storage-element'
+    static_configs:
+      - targets:
+        - 'storage-element-01:8010'
+        - 'storage-element-02:8010'
+        - 'storage-element-03:8010'
+    metrics_path: /metrics
+    scheme: http
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+):.*'
+        replacement: '${1}'
+
+  # Ingester Module (включая Leader Election и Capacity Monitor метрики)
+  - job_name: 'ingester-module'
+    static_configs:
+      - targets:
+        - 'ingester-module-01:8020'
+        - 'ingester-module-02:8020'
+    metrics_path: /metrics
+    scheme: http
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+):.*'
+        replacement: '${1}'
+
+  # Query Module
+  - job_name: 'query-module'
+    static_configs:
+      - targets: ['query-module:8030']
+    metrics_path: /metrics
+    scheme: http
+
+  # Redis (если используется redis_exporter)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  # PostgreSQL (если используется postgres_exporter)
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
