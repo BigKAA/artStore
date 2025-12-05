@@ -19,13 +19,30 @@ Rate Limit: 1000 req/min
 
 ## Получение Access Token
 
-### Быстрая команда
+### Метод 1: Через временный файл (рекомендуется)
 
 ```bash
+# Шаг 1: Получить токен и сохранить в файл
+curl -s -X POST http://localhost:8000/api/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_de171928","client_secret":"TestPassword123!"}' \
+  | jq -r '.access_token' > /tmp/token.txt
+
+# Шаг 2: Использовать токен из файла
+curl -H "Authorization: Bearer $(cat /tmp/token.txt)" http://localhost:8000/api/v1/storage-elements/
+```
+
+### Метод 2: Через переменную окружения
+
+```bash
+# В стандартном bash терминале:
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/json" \
   -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_de171928","client_secret":"TestPassword123!"}' \
   | jq -r '.access_token')
+
+# Примечание: Этот метод может не работать в некоторых CLI инструментах
+# из-за проблем с экранированием $() синтаксиса
 ```
 
 ### Полный запрос
@@ -111,10 +128,11 @@ docker exec artstore_postgres psql -U artstore -d artstore_admin -t -c \
 
 Токен действителен 30 минут. Получите новый:
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
+# Получить новый токен и сохранить в файл
+curl -s -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/json" \
   -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_de171928","client_secret":"TestPassword123!"}' \
-  | jq -r '.access_token')
+  | jq -r '.access_token' > /tmp/token.txt
 ```
 
 ### Ошибка: HTTP 429 Too Many Requests
