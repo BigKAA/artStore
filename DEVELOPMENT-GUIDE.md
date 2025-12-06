@@ -163,6 +163,45 @@ docker-compose up -d --build --force-recreate <module-name>
 4. При исправлении ошибок импорта
 5. Если после `docker-compose build` изменения не применились
 
+## Configuration Parameters Convention
+
+### Унифицированные параметры
+
+Все модули используют единую конвенцию именования. **Перед добавлением нового параметра проверь существующие!**
+
+| Категория | Параметры | Модули |
+|-----------|-----------|--------|
+| Database | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE` | admin, storage, query |
+| Database Pool | `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_ECHO` | admin, storage, query |
+| Database SSL | `DB_SSL_ENABLED`, `DB_SSL_MODE`, `DB_SSL_CA_CERT` | все с БД |
+| Swagger | `APP_SWAGGER_ENABLED` | все |
+| Logging | `LOG_LEVEL`, `LOG_FORMAT` | все |
+| Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD` | все |
+| Storage | `STORAGE_MAX_SIZE` (в байтах) | storage-element |
+
+### Redis DB Allocation
+
+| DB | Модули | Назначение |
+|----|--------|------------|
+| 0 | Admin, Storage, Ingester | Service Discovery, Pub/Sub |
+| 1 | Query | Кеширование (изолировано) |
+
+### Boolean параметры
+
+Используй формат `on`/`off`:
+```bash
+APP_DEBUG=on
+APP_SWAGGER_ENABLED=off
+DB_SSL_ENABLED=on
+```
+
+### Добавление нового параметра
+
+1. **Проверь существующие** - найди аналогичные во всех модулях
+2. **Переиспользуй** - используй существующее имя и формат
+3. **Документируй** - обнови `.env.example` и README.md
+4. **Унифицируй** - параметр должен иметь одинаковое имя во всех модулях
+
 ## Тестирование
 
 ### Философия тестирования

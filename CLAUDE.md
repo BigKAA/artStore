@@ -285,6 +285,31 @@ async def subscribe_to_updates():
 **Production**: JSON формат ОБЯЗАТЕЛЕН (`LOG_FORMAT=json`)
 **Development**: Text формат разрешен (`LOG_FORMAT=text`)
 
+### Унифицированные параметры конфигурации
+
+Все модули используют единую конвенцию именования параметров:
+
+```bash
+# Database (все модули с БД)
+DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_DATABASE
+DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_ECHO
+DB_SSL_ENABLED, DB_SSL_MODE, DB_SSL_CA_CERT
+
+# Swagger (все модули)
+APP_SWAGGER_ENABLED=on|off
+
+# Logging (все модули)
+LOG_LEVEL=DEBUG|INFO|WARNING|ERROR|CRITICAL
+LOG_FORMAT=json|text
+
+# Redis (все модули)
+REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_PASSWORD
+# DB allocation: 0=Admin/Storage/Ingester, 1=Query
+
+# Storage (storage-element)
+STORAGE_MAX_SIZE=<bytes>  # Например: 10737418240 (10GB)
+```
+
 ## Основные команды
 
 **Полное руководство см. `DEVELOPMENT-GUIDE.md`**
