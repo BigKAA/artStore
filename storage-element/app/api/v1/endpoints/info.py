@@ -53,6 +53,10 @@ class StorageElementInfoResponse(BaseModel):
     # Статус
     status: str = Field("operational", description="Статус: operational, degraded, maintenance")
 
+    # Service Discovery (Sequential Fill)
+    priority: int = Field(100, description="Приоритет для Sequential Fill (меньше = выше)")
+    element_id: str = Field(..., description="Уникальный ID для Service Discovery")
+
     # Временные метки
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Время генерации ответа")
 
@@ -69,6 +73,8 @@ class StorageElementInfoResponse(BaseModel):
                 "used_bytes": 549755813888,
                 "file_count": 1234,
                 "status": "operational",
+                "priority": 100,
+                "element_id": "se-local-01",
                 "timestamp": "2025-01-15T10:30:00Z"
             }
         }
@@ -174,5 +180,7 @@ async def get_storage_element_info(
         capacity_bytes=settings.storage.max_size,  # Унифицированный параметр в байтах
         used_bytes=used_bytes,
         file_count=file_count,
-        status=_determine_status()
+        status=_determine_status(),
+        priority=settings.storage.priority,
+        element_id=settings.storage.element_id
     )

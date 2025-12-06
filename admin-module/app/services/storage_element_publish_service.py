@@ -48,6 +48,8 @@ class StorageElementPublishService:
                 "capacity_bytes": 10737418240,
                 "used_bytes": 1073741824,
                 "file_count": 100,
+                "priority": 100,
+                "element_id": "se-local-01",
                 "is_writable": true,
                 "is_available": true
             }
@@ -144,6 +146,9 @@ class StorageElementPublishService:
                 "used_bytes": se.used_bytes,
                 "file_count": se.file_count,
                 "retention_days": se.retention_days,
+                # Service Discovery (Sequential Fill) - Sprint 14
+                "priority": se.priority,
+                "element_id": se.element_id,
                 "is_writable": is_writable,
                 "is_available": is_available,
                 "last_health_check": se.last_health_check.isoformat() if se.last_health_check else None

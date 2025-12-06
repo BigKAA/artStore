@@ -48,6 +48,10 @@ class StorageElementDiscoveryResult:
     # Статус
     status: str
 
+    # Service Discovery (Sequential Fill)
+    priority: int
+    element_id: str
+
     # URL источника
     api_url: str
 
@@ -70,7 +74,8 @@ class StorageDiscoveryService:
     REQUIRED_FIELDS = {
         "name", "display_name", "version", "mode",
         "storage_type", "base_path", "capacity_bytes",
-        "used_bytes", "file_count", "status"
+        "used_bytes", "file_count", "status",
+        "priority", "element_id"  # Service Discovery (Sequential Fill)
     }
 
     def __init__(self, timeout_seconds: Optional[int] = None):
@@ -144,6 +149,7 @@ class StorageDiscoveryService:
             int(data["capacity_bytes"])
             int(data["used_bytes"])
             int(data["file_count"])
+            int(data["priority"])
         except (ValueError, TypeError) as e:
             raise StorageElementInvalidResponseError(
                 api_url=api_url,
@@ -225,6 +231,8 @@ class StorageDiscoveryService:
                     used_bytes=int(data["used_bytes"]),
                     file_count=int(data["file_count"]),
                     status=str(data["status"]),
+                    priority=int(data["priority"]),
+                    element_id=str(data["element_id"]),
                     api_url=normalized_url
                 )
 

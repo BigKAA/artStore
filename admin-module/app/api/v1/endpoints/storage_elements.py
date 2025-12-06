@@ -579,6 +579,9 @@ async def create_storage_element(
             capacity_bytes=discovery_result.capacity_bytes,
             used_bytes=discovery_result.used_bytes,
             file_count=discovery_result.file_count,
+            # Service Discovery (Sequential Fill) - Sprint 14
+            priority=discovery_result.priority,
+            element_id=discovery_result.element_id,
             # Данные из запроса
             api_url=discovery_result.api_url,  # Нормализованный URL
             api_key=request.api_key,
