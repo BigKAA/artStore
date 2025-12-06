@@ -69,7 +69,7 @@ class AuthSettings(BaseSettings):
 class DatabaseSettings(BaseSettings):
     """0AB@>9:8 ?>4:;NG5=8O : PostgreSQL (async)."""
 
-    model_config = SettingsConfigDict(env_prefix="DATABASE_")
+    model_config = SettingsConfigDict(env_prefix="DB_", case_sensitive=False)
 
     host: str = Field(default="localhost", description="PostgreSQL E>AB")
     port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL ?>@B")
@@ -122,7 +122,7 @@ class DatabaseSettings(BaseSettings):
         valid_modes = ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"]
         if v not in valid_modes:
             raise ValueError(
-                f"Invalid DATABASE_SSL_MODE: {v}. "
+                f"Invalid DB_SSL_MODE: {v}. "
                 f"Valid modes: {', '.join(valid_modes)}"
             )
         return v

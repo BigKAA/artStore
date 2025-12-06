@@ -588,15 +588,15 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       LOG_FORMAT: json
 
-      # Database
-      DATABASE_HOST: postgres
-      DATABASE_PORT: 5432
-      DATABASE_USERNAME: ${DB_USERNAME:-artstore}
-      DATABASE_PASSWORD: ${DB_PASSWORD:-password}
-      DATABASE_DATABASE: artstore
+      # Database (унифицированный префикс DB_*)
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-artstore}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_DATABASE: artstore
 
       # PostgreSQL SSL
-      DATABASE_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
+      DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
 
       # Redis
       REDIS_URL: redis://redis:6379/1
