@@ -95,9 +95,21 @@ async def _fetch_storage_endpoints_from_admin(admin_client) -> tuple[dict[str, s
 
 async def _fetch_storage_endpoints_from_redis(redis_client) -> tuple[dict[str, str], dict[str, int]]:
     """
-    Получение endpoints и priorities SE из Redis (PUSH модель fallback).
+    Получение endpoints и priorities SE из Redis Service Discovery.
 
-    Sprint 18 Phase 3: Fallback на Redis PUSH модель если Admin Module недоступен.
+    Sprint 20: Читает данные из ключа artstore:storage_elements,
+    куда Admin Module публикует конфигурацию Storage Elements.
+
+    Формат данных в Redis (JSON):
+    {
+        "version": 1,
+        "timestamp": "...",
+        "count": N,
+        "storage_elements": [
+            {"element_id": "se-01", "api_url": "http://...", "priority": 100, "mode": "edit", ...},
+            ...
+        ]
+    }
 
     Args:
         redis_client: Async Redis client
@@ -105,40 +117,71 @@ async def _fetch_storage_endpoints_from_redis(redis_client) -> tuple[dict[str, s
     Returns:
         tuple: (endpoints dict {se_id: endpoint_url}, priorities dict {se_id: priority})
     """
+    import json
+
     endpoints: dict[str, str] = {}
     priorities: dict[str, int] = {}
 
+    # Ключ, куда Admin Module публикует конфигурацию SE
+    # Соответствует settings.service_discovery.storage_element_config_key в Admin Module
+    redis_key = "artstore:storage_elements"
+
     try:
-        # Получаем все SE из sorted set (PUSH модель)
-        # Ключи: storage:edit:by_priority, storage:rw:by_priority
-        for mode in ("edit", "rw"):
-            sorted_set_key = f"storage:{mode}:by_priority"
-            se_ids = await redis_client.zrange(sorted_set_key, 0, -1, withscores=True)
+        # Читаем JSON конфигурацию из Redis
+        config_json = await redis_client.get(redis_key)
 
-            for se_id, priority in se_ids:
-                if se_id in endpoints:
-                    continue  # Уже добавлен из другого режима
+        if not config_json:
+            logger.debug(
+                "No SE config found in Redis",
+                extra={"redis_key": redis_key}
+            )
+            return endpoints, priorities
 
-                # Получаем endpoint из hash storage:elements:{se_id}
-                hash_key = f"storage:elements:{se_id}"
-                se_data = await redis_client.hgetall(hash_key)
+        # Парсим JSON
+        config = json.loads(config_json)
+        storage_elements = config.get("storage_elements", [])
 
-                if se_data and "endpoint" in se_data:
-                    endpoints[se_id] = se_data["endpoint"]
-                    priorities[se_id] = int(priority)
+        for se in storage_elements:
+            element_id = se.get("element_id")
+            api_url = se.get("api_url")
+            priority = se.get("priority", 100)
+            mode = se.get("mode")
+            is_available = se.get("is_available", True)
+            is_writable = se.get("is_writable", False)
+
+            # Фильтруем только writable SE (edit, rw) которые доступны
+            if not element_id or not api_url:
+                continue
+
+            if not is_available:
+                continue
+
+            # Включаем только SE с режимами edit/rw
+            if mode not in ("edit", "rw"):
+                continue
+
+            endpoints[element_id] = api_url
+            priorities[element_id] = priority
 
         logger.info(
-            "Fetched SE endpoints from Redis PUSH model",
+            "Fetched SE endpoints from Redis Service Discovery",
             extra={
                 "count": len(endpoints),
                 "se_ids": list(endpoints.keys()),
+                "config_version": config.get("version"),
+                "redis_key": redis_key,
             }
         )
 
+    except json.JSONDecodeError as e:
+        logger.warning(
+            "Failed to parse SE config from Redis - invalid JSON",
+            extra={"error": str(e), "redis_key": redis_key}
+        )
     except Exception as e:
         logger.warning(
             "Failed to fetch SE endpoints from Redis",
-            extra={"error": str(e)}
+            extra={"error": str(e), "redis_key": redis_key}
         )
 
     return endpoints, priorities

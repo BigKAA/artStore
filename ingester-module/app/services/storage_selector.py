@@ -66,7 +66,8 @@ class StorageElementInfo:
     """
     Информация о Storage Element для выбора.
 
-    Получается из Redis Hash storage:elements:{se_id}
+    Sprint 20: Получается из AdaptiveCapacityMonitor (POLLING модель)
+    или Admin Module API (fallback).
     """
     element_id: str
     mode: str  # edit, rw, ro, ar
@@ -330,35 +331,40 @@ class StorageSelector:
         """
         Получение списка всех доступных SE.
 
+        Sprint 20: Использует AdaptiveCapacityMonitor (POLLING модель)
+        для получения актуальной информации о Storage Elements.
+
         Args:
-            mode: Фильтр по режиму (опционально)
+            mode: Фильтр по режиму (edit/rw, опционально)
 
         Returns:
             Список StorageElementInfo
         """
         result = []
 
-        if not self._redis_client:
+        # Sprint 20: Используем AdaptiveCapacityMonitor вместо legacy Redis ключей
+        if not settings.capacity_monitor.use_for_selection:
+            logger.debug("POLLING model disabled, returning empty list")
+            return result
+
+        capacity_monitor = await get_capacity_monitor()
+        if not capacity_monitor:
+            logger.debug("AdaptiveCapacityMonitor not available")
             return result
 
         try:
-            # Если mode указан, берем только из соответствующего sorted set
-            if mode:
-                sorted_set_key = f"storage:{mode}:by_priority"
-                se_ids = await self._redis_client.zrange(sorted_set_key, 0, -1)
-            else:
-                # Собираем из обоих sorted sets
-                edit_ids = await self._redis_client.zrange("storage:edit:by_priority", 0, -1)
-                rw_ids = await self._redis_client.zrange("storage:rw:by_priority", 0, -1)
-                se_ids = list(set(edit_ids + rw_ids))
+            # Получаем SE из AdaptiveCapacityMonitor
+            available_se = await capacity_monitor.get_available_storage_elements(mode=mode)
 
-            for se_id in se_ids:
-                se_info = await self._get_se_info_from_redis(se_id)
-                if se_info:
-                    result.append(se_info)
+            for capacity_info in available_se:
+                # Конвертируем в StorageElementInfo
+                se_info = self._convert_capacity_to_element_info(
+                    capacity_info, priority=100
+                )
+                result.append(se_info)
 
         except Exception as e:
-            logger.error(f"Failed to get all SE: {e}")
+            logger.error(f"Failed to get all SE from POLLING model: {e}")
 
         return result
 
