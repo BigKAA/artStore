@@ -171,6 +171,22 @@ class StorageSyncService:
                 new_value=str(discovery_result.file_count)
             ))
 
+        # Проверяем priority (Service Discovery - Sequential Fill)
+        if storage_element.priority != discovery_result.priority:
+            changes.append(SyncChange(
+                field="priority",
+                old_value=str(storage_element.priority),
+                new_value=str(discovery_result.priority)
+            ))
+
+        # Проверяем element_id (Service Discovery - Sequential Fill)
+        if storage_element.element_id != discovery_result.element_id:
+            changes.append(SyncChange(
+                field="element_id",
+                old_value=str(storage_element.element_id),
+                new_value=str(discovery_result.element_id)
+            ))
+
         return changes
 
     def _apply_changes(
@@ -190,6 +206,9 @@ class StorageSyncService:
         storage_element.capacity_bytes = discovery_result.capacity_bytes
         storage_element.used_bytes = discovery_result.used_bytes
         storage_element.file_count = discovery_result.file_count
+        # Service Discovery (Sequential Fill) - Sprint 14
+        storage_element.priority = discovery_result.priority
+        storage_element.element_id = discovery_result.element_id
         storage_element.last_health_check = datetime.now(timezone.utc)
 
     async def sync_storage_element(
