@@ -583,7 +583,7 @@ services:
     environment:
       # Application
       APP_NAME: artstore-query-module
-      SWAGGER_ENABLED: "on"
+      APP_SWAGGER_ENABLED: "on"
       LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       LOG_FORMAT: json
 

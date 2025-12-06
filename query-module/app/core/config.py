@@ -449,7 +449,7 @@ class QueryModuleSettings(BaseSettings):
     # A=>2=K5 =0AB@>9:8
     app_name: str = Field(default="query-module", description="0720=85 ?@8;>65=8O")
     debug: bool = Field(default=False, description="Debug @568<")
-    swagger_enabled: bool = Field(default=False, description="Swagger UI (production-first: >B:;NG5=> ?> C<>;G0=8N)")
+    swagger_enabled: bool = Field(default=False, alias="APP_SWAGGER_ENABLED", description="Swagger UI (production-first: отключен по умолчанию)")
     host: str = Field(default="0.0.0.0", description="%>AB 4;O 70?CA:0")
     port: int = Field(default=8030, ge=1024, le=65535, description=">@B 4;O 70?CA:0")
 
