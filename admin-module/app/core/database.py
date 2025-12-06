@@ -178,6 +178,27 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         # В development режиме можно создавать таблицы автоматически
         if settings.debug:
+            # Создаём ENUM types перед таблицами (asyncpg требует явного создания)
+            # retention_policy_enum для File model
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'retention_policy_enum') THEN
+                        CREATE TYPE retention_policy_enum AS ENUM ('temporary', 'permanent');
+                    END IF;
+                END$$;
+            """))
+            # finalize_transaction_status_enum для FileFinalizeTransaction model
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'finalize_transaction_status_enum') THEN
+                        CREATE TYPE finalize_transaction_status_enum AS ENUM ('copying', 'copied', 'verifying', 'completed', 'failed', 'rolled_back');
+                    END IF;
+                END$$;
+            """))
+            logger.info("PostgreSQL ENUM types created")
+
             await conn.run_sync(Base.metadata.create_all)
             logger.info("Database tables created (debug mode)")
         else:

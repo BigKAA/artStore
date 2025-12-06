@@ -592,7 +592,7 @@ services:
       DB_PORT: 5432
       DB_USERNAME: ${DB_USERNAME:-artstore}
       DB_PASSWORD: ${DB_PASSWORD:-password}
-      DB_DATABASE: artstore
+      DB_DATABASE: artstore-query
 
       # PostgreSQL SSL
       DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
