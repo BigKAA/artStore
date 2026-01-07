@@ -147,6 +147,9 @@ class DatabaseSettings(BaseSettings):
 
             if ssl_params:
                 base_url += "?" + "&".join(ssl_params)
+        else:
+            # Явно отключаем SSL, если не включён
+            base_url += "?ssl=disable"
 
         return base_url
 
