@@ -255,8 +255,8 @@ services:
       JWT_ALGORITHM: RS256
 
       # Service Account для взаимодействия с Admin Module
-      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_66e7f458
-      SERVICE_ACCOUNT_CLIENT_SECRET: "D#^Cj)h3e,Ih%Fnf"
+      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_cb7559ec
+      SERVICE_ACCOUNT_CLIENT_SECRET: "Test-Password123"
       SERVICE_ACCOUNT_ADMIN_MODULE_URL: http://admin-module:8000
 
       # Database
@@ -361,8 +361,8 @@ services:
       JWT_ALGORITHM: RS256
 
       # Service Account для взаимодействия с Admin Module
-      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_66e7f458
-      SERVICE_ACCOUNT_CLIENT_SECRET: "D#^Cj)h3e,Ih%Fnf"
+      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_cb7559ec
+      SERVICE_ACCOUNT_CLIENT_SECRET: "Test-Password123"
       SERVICE_ACCOUNT_ADMIN_MODULE_URL: http://admin-module:8000
 
       # Database
@@ -458,8 +458,8 @@ services:
       JWT_ALGORITHM: RS256
 
       # Service Account для взаимодействия с Admin Module
-      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_66e7f458
-      SERVICE_ACCOUNT_CLIENT_SECRET: "D#^Cj)h3e,Ih%Fnf"
+      SERVICE_ACCOUNT_CLIENT_ID: sa_prod_admin_service_cb7559ec
+      SERVICE_ACCOUNT_CLIENT_SECRET: "Test-Password123"
       SERVICE_ACCOUNT_ADMIN_MODULE_URL: http://admin-module:8000
 
       # Database
