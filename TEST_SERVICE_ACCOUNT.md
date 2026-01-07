@@ -8,8 +8,8 @@
 
 ```yaml
 Name: admin-service
-Client ID: sa_prod_admin_service_de171928
-Client Secret: TestPassword123!
+Client ID: sa_prod_admin_service_cb7559ec
+Client Secret: Test-Password123
 Role: ADMIN
 Rate Limit: 1000 req/min
 ```
@@ -25,7 +25,7 @@ Rate Limit: 1000 req/min
 # Шаг 1: Получить токен и сохранить в файл
 curl -s -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/json" \
-  -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_de171928","client_secret":"TestPassword123!"}' \
+  -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_cb7559ec","client_secret":"Test-Password123"}' \
   | jq -r '.access_token' > /tmp/token.txt
 
 # Шаг 2: Использовать токен из файла
@@ -38,7 +38,7 @@ curl -H "Authorization: Bearer $(cat /tmp/token.txt)" http://localhost:8000/api/
 # В стандартном bash терминале:
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/json" \
-  -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_de171928","client_secret":"TestPassword123!"}' \
+  -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_cb7559ec","client_secret":"Test-Password123"}' \
   | jq -r '.access_token')
 
 # Примечание: Этот метод может не работать в некоторых CLI инструментах
@@ -54,8 +54,8 @@ curl -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/json" \
   -d '{
     "grant_type": "client_credentials",
-    "client_id": "sa_prod_admin_service_de171928",
-    "client_secret": "TestPassword123!"
+    "client_id": "sa_prod_admin_service_cb7559ec",
+    "client_secret": "Test-Password123"
   }'
 ```
 
@@ -131,7 +131,7 @@ docker exec artstore_postgres psql -U artstore -d artstore_admin -t -c \
 # Получить новый токен и сохранить в файл
 curl -s -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/json" \
-  -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_de171928","client_secret":"TestPassword123!"}' \
+  -d '{"grant_type":"client_credentials","client_id":"sa_prod_admin_service_cb7559ec","client_secret":"Test-Password123"}' \
   | jq -r '.access_token' > /tmp/token.txt
 ```
 
