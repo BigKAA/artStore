@@ -173,7 +173,7 @@ services:
       INITIAL_ACCOUNT_ENABLED: "on"
       INITIAL_ACCOUNT_NAME: admin-service
       INITIAL_ACCOUNT_ROLE: ADMIN
-      INITIAL_ACCOUNT_PASSWORD: TestPassword123!
+      INITIAL_ACCOUNT_PASSWORD: Test-Password123
 
       # Scheduler
       SCHEDULER_ENABLED: "on"
