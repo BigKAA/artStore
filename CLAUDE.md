@@ -144,9 +144,6 @@ docker-compose up -d [module-name]
 
 # Остановка
 docker-compose down
-
-# Мониторинг (опционально)
-docker-compose -f docker-compose.monitoring.yml up -d
 ```
 
 ### Python Virtual Environment
