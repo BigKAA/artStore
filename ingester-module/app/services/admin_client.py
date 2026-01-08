@@ -302,6 +302,235 @@ class AdminModuleClient:
         except httpx.RequestError as e:
             return False, f"Connection failed: {e}"
 
+    # ==================== Sprint 15.2: File Registry Methods ====================
+
+    async def register_file(self, file_data: dict) -> dict:
+        """
+        Регистрация нового файла в file registry.
+
+        Sprint 15.2: POST /api/v1/files
+
+        Args:
+            file_data: Данные файла для регистрации (FileRegisterRequest schema)
+
+        Returns:
+            dict: Зарегистрированный файл (FileResponse)
+
+        Raises:
+            AdminClientAuthError: Authentication failed
+            AdminClientError: Registration failed
+            AdminClientConnectionError: Connection failed
+        """
+        if not self._initialized:
+            raise AdminClientError("Client not initialized")
+
+        logger.info(
+            "Registering file in Admin Module",
+            extra={
+                "file_id": file_data.get("file_id"),
+                "filename": file_data.get("original_filename")
+            }
+        )
+
+        try:
+            token = await self._ensure_authenticated()
+
+            response = await self._http_client.post(
+                "/api/v1/files",
+                json=file_data,
+                headers={"Authorization": f"Bearer {token}"}
+            )
+
+            if response.status_code == 201:
+                result = response.json()
+                logger.info(
+                    "File registered successfully",
+                    extra={"file_id": result.get("file_id")}
+                )
+                return result
+
+            elif response.status_code == 401:
+                # Token expired, retry with new token
+                logger.warning("Token expired during file registration, refreshing")
+                self._access_token = None
+                token = await self._ensure_authenticated()
+
+                response = await self._http_client.post(
+                    "/api/v1/files",
+                    json=file_data,
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+
+                if response.status_code == 201:
+                    result = response.json()
+                    return result
+
+                raise AdminClientAuthError(f"Auth retry failed: {response.text}")
+
+            elif response.status_code == 400:
+                # Validation error или файл уже существует
+                error_detail = response.json().get("detail", "Validation error")
+                raise AdminClientError(f"File registration failed: {error_detail}")
+
+            else:
+                raise AdminClientError(
+                    f"Failed to register file: {response.status_code} - {response.text}"
+                )
+
+        except httpx.RequestError as e:
+            raise AdminClientConnectionError(
+                f"Failed to connect to Admin Module: {e}"
+            )
+
+    async def update_file(self, file_id: str, file_data: dict) -> dict:
+        """
+        Обновление файла (финализация).
+
+        Sprint 15.2: PUT /api/v1/files/{file_id}
+
+        Args:
+            file_id: UUID файла
+            file_data: Данные для обновления (FileUpdateRequest schema)
+
+        Returns:
+            dict: Обновленный файл (FileResponse)
+
+        Raises:
+            AdminClientAuthError: Authentication failed
+            AdminClientError: Update failed
+            AdminClientConnectionError: Connection failed
+        """
+        if not self._initialized:
+            raise AdminClientError("Client not initialized")
+
+        logger.info(
+            "Updating file in Admin Module",
+            extra={
+                "file_id": file_id,
+                "retention_policy": file_data.get("retention_policy")
+            }
+        )
+
+        try:
+            token = await self._ensure_authenticated()
+
+            response = await self._http_client.put(
+                f"/api/v1/files/{file_id}",
+                json=file_data,
+                headers={"Authorization": f"Bearer {token}"}
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(
+                    "File updated successfully",
+                    extra={"file_id": result.get("file_id")}
+                )
+                return result
+
+            elif response.status_code == 401:
+                # Token expired, retry with new token
+                logger.warning("Token expired during file update, refreshing")
+                self._access_token = None
+                token = await self._ensure_authenticated()
+
+                response = await self._http_client.put(
+                    f"/api/v1/files/{file_id}",
+                    json=file_data,
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    return result
+
+                raise AdminClientAuthError(f"Auth retry failed: {response.text}")
+
+            elif response.status_code == 404:
+                raise AdminClientError(f"File {file_id} not found")
+
+            elif response.status_code == 400:
+                error_detail = response.json().get("detail", "Validation error")
+                raise AdminClientError(f"File update failed: {error_detail}")
+
+            else:
+                raise AdminClientError(
+                    f"Failed to update file: {response.status_code} - {response.text}"
+                )
+
+        except httpx.RequestError as e:
+            raise AdminClientConnectionError(
+                f"Failed to connect to Admin Module: {e}"
+            )
+
+    async def get_file(self, file_id: str) -> Optional[dict]:
+        """
+        Получение метаданных файла по ID.
+
+        Sprint 15.2: GET /api/v1/files/{file_id}
+
+        Args:
+            file_id: UUID файла
+
+        Returns:
+            dict или None: FileResponse или None если не найден
+
+        Raises:
+            AdminClientAuthError: Authentication failed
+            AdminClientConnectionError: Connection failed
+        """
+        if not self._initialized:
+            raise AdminClientError("Client not initialized")
+
+        logger.debug(
+            "Fetching file metadata from Admin Module",
+            extra={"file_id": file_id}
+        )
+
+        try:
+            token = await self._ensure_authenticated()
+
+            response = await self._http_client.get(
+                f"/api/v1/files/{file_id}",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+
+            if response.status_code == 200:
+                return response.json()
+
+            elif response.status_code == 404:
+                logger.debug("File not found", extra={"file_id": file_id})
+                return None
+
+            elif response.status_code == 401:
+                # Token expired, retry with new token
+                logger.warning("Token expired during file fetch, refreshing")
+                self._access_token = None
+                token = await self._ensure_authenticated()
+
+                response = await self._http_client.get(
+                    f"/api/v1/files/{file_id}",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+
+                if response.status_code == 200:
+                    return response.json()
+
+                if response.status_code == 404:
+                    return None
+
+                raise AdminClientAuthError(f"Auth retry failed: {response.text}")
+
+            else:
+                raise AdminClientError(
+                    f"Failed to get file: {response.status_code} - {response.text}"
+                )
+
+        except httpx.RequestError as e:
+            raise AdminClientConnectionError(
+                f"Failed to connect to Admin Module: {e}"
+            )
+
 
 # Глобальный singleton экземпляр
 _admin_client: Optional[AdminModuleClient] = None

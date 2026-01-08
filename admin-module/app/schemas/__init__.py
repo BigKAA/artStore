@@ -31,6 +31,13 @@ from .admin_user import (
     AdminUserDeleteResponse,
     AdminUserPasswordResetResponse,
 )
+from .file import (
+    FileRegisterRequest,
+    FileUpdateRequest,
+    FileResponse,
+    FileListResponse,
+    FileDeleteResponse,
+)
 
 __all__ = [
     # Auth
@@ -59,4 +66,10 @@ __all__ = [
     "AdminUserListResponse",
     "AdminUserDeleteResponse",
     "AdminUserPasswordResetResponse",
+    # File Registry
+    "FileRegisterRequest",
+    "FileUpdateRequest",
+    "FileResponse",
+    "FileListResponse",
+    "FileDeleteResponse",
 ]
