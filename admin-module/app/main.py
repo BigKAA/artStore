@@ -83,6 +83,16 @@ async def lifespan(app: FastAPI):
         from app.core.scheduler import readiness_health_check_async
         await readiness_health_check_async()
 
+        # Запуск JWT key file watcher для hot-reload (Sprint: JWT Hot-Reload Implementation)
+        try:
+            from app.core.jwt_key_manager import get_jwt_key_manager
+            jwt_key_manager = get_jwt_key_manager()
+            jwt_key_manager.start_watching()
+            logger.info("JWT key file watcher started successfully")
+        except Exception as e:
+            logger.error(f"Failed to start JWT key file watcher: {e}")
+            # Не останавливаем приложение - hot-reload опциональная функция
+
         logger.info("Application startup complete")
 
     except Exception as e:
@@ -95,6 +105,15 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down application")
 
     try:
+        # Остановка JWT key file watcher (Sprint: JWT Hot-Reload Implementation)
+        try:
+            from app.core.jwt_key_manager import get_jwt_key_manager
+            jwt_key_manager = get_jwt_key_manager()
+            await jwt_key_manager.stop_watching()
+            logger.info("JWT key file watcher stopped")
+        except Exception as e:
+            logger.warning(f"Failed to stop JWT key file watcher: {e}")
+
         # Остановка APScheduler (с ожиданием завершения running jobs)
         shutdown_scheduler()
         logger.info("APScheduler shut down")

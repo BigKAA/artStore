@@ -2,6 +2,10 @@
 JWT Token Service для аутентификации.
 Использует RS256 алгоритм с ротацией ключей.
 Поддерживает multi-version JWT validation через database-backed keys.
+
+Sprint: JWT Hot-Reload Implementation (2026-01-08)
+- Интеграция с JWTKeyManager для автоматического hot-reload ключей
+- Zero-downtime rotation через file watching
 """
 
 from datetime import datetime, timedelta, timezone
@@ -30,72 +34,22 @@ class TokenService:
     - Валидация токенов
     - Декодирование payload
     - Поддержка ротации ключей
+    - Hot-reload ключей через JWTKeyManager (Sprint: JWT Hot-Reload)
     """
 
     def __init__(self):
-        """Инициализация сервиса токенов."""
-        self._private_key: Optional[str] = None
-        self._public_key: Optional[str] = None
-        self._load_keys()
-
-    def _load_keys(self) -> None:
         """
-        Загрузка JWT ключей из файлов или прямого PEM содержимого.
+        Инициализация сервиса токенов с hot-reload support.
 
-        Поддерживает два варианта:
-        1. File path - путь к PEM файлу (традиционный способ)
-        2. Direct PEM content - полное PEM содержимое (для Kubernetes Secrets)
-
-        Автоматически определяет тип по наличию "-----BEGIN" в начале строки.
-
-        Raises:
-            FileNotFoundError: Если ключи-файлы не найдены
-            ValueError: Если ключи повреждены
+        Sprint: JWT Hot-Reload Implementation (2026-01-08)
+        - Удален метод _load_keys()
+        - Использует JWTKeyManager singleton для доступа к ключам
+        - Автоматический hot-reload ключей без перезапуска
         """
-        try:
-            # Загрузка private key
-            private_key_value = settings.jwt.private_key_path
+        from app.core.jwt_key_manager import get_jwt_key_manager
 
-            if private_key_value.strip().startswith("-----BEGIN"):
-                # Direct PEM content (из Kubernetes Secret или env variable)
-                self._private_key = private_key_value
-                logger.info("JWT private key loaded from direct PEM content")
-            else:
-                # File path (традиционный способ)
-                private_key_path = Path(private_key_value)
+        self._key_manager = get_jwt_key_manager()
 
-                if not private_key_path.exists():
-                    raise FileNotFoundError(f"Private key file not found: {private_key_path}")
-
-                with open(private_key_path, "r") as f:
-                    self._private_key = f.read()
-
-                logger.info(f"JWT private key loaded from file: {private_key_path}")
-
-            # Загрузка public key
-            public_key_value = settings.jwt.public_key_path
-
-            if public_key_value.strip().startswith("-----BEGIN"):
-                # Direct PEM content (из Kubernetes Secret или env variable)
-                self._public_key = public_key_value
-                logger.info("JWT public key loaded from direct PEM content")
-            else:
-                # File path (традиционный способ)
-                public_key_path = Path(public_key_value)
-
-                if not public_key_path.exists():
-                    raise FileNotFoundError(f"Public key file not found: {public_key_path}")
-
-                with open(public_key_path, "r") as f:
-                    self._public_key = f.read()
-
-                logger.info(f"JWT public key loaded from file: {public_key_path}")
-
-            logger.info("JWT keys loaded successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to load JWT keys: {e}")
-            raise
 
     # ПРИМЕЧАНИЕ: Старые методы create_access_token, create_refresh_token, create_token_pair
     # для User модели удалены в Sprint 21. Используйте вместо них:
@@ -148,13 +102,12 @@ class TokenService:
             "nbf": now
         }
 
-        # Используем file-based ключ (для Admin Users DB keys не используются)
-        if not self._private_key:
-            raise ValueError("No private key available")
+        # Используем JWTKeyManager для получения ключа (Sprint: JWT Hot-Reload)
+        private_key = self._key_manager.get_private_key_sync()
 
         token = jwt.encode(
             claims,
-            self._private_key,
+            private_key,
             algorithm=settings.jwt.algorithm
         )
 
@@ -224,25 +177,26 @@ class TokenService:
                 logger.warning(f"Failed to load keys from database: {e}")
                 errors.append(f"Database: {str(e)}")
 
-        # Попытка 2: Fallback на file-based ключ
-        if self._public_key:
-            try:
-                payload = jwt.decode(
-                    token,
-                    self._public_key,
-                    algorithms=[settings.jwt.algorithm]
-                )
-                logger.debug("Token validated successfully with file-based key")
-                return payload
+        # Попытка 2: Fallback на file-based ключ (Sprint: JWT Hot-Reload)
+        try:
+            public_key = self._key_manager.get_public_key_sync()
 
-            except ExpiredSignatureError:
-                logger.warning("Token has expired")
-                raise
+            payload = jwt.decode(
+                token,
+                public_key,
+                algorithms=[settings.jwt.algorithm]
+            )
+            logger.debug("Token validated successfully with file-based key")
+            return payload
 
-            except JWTError as e:
-                errors.append(f"File-based key: {str(e)}")
-        else:
-            errors.append("File-based key: not loaded")
+        except ExpiredSignatureError:
+            logger.warning("Token has expired")
+            raise
+
+        except JWTError as e:
+            errors.append(f"File-based key: {str(e)}")
+        except ValueError as e:
+            errors.append(f"File-based key: {str(e)}")
 
         # Если ни один ключ не подошел
         error_msg = f"Token validation failed with all available keys. Errors: {'; '.join(errors)}"
