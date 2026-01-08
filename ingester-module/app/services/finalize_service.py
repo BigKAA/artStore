@@ -249,6 +249,48 @@ class FinalizeService:
             completed_at = datetime.now(timezone.utc)
             cleanup_scheduled_at = completed_at + timedelta(hours=CLEANUP_SAFETY_MARGIN_HOURS)
 
+            # Sprint 15.2: Обновление файла в Admin Module (финализация)
+            try:
+                from app.services.admin_client import get_admin_client, AdminClientError
+
+                admin_client = await get_admin_client()
+
+                # Подготовка данных для обновления
+                file_update_data = {
+                    "retention_policy": "permanent",  # temporary → permanent
+                    "storage_element_id": target_se_id,
+                    "storage_path": f"/files/{file_id}",
+                    "finalized_at": completed_at.isoformat(),
+                }
+
+                # Обновление в file registry
+                registry_result = await admin_client.update_file(str(file_id), file_update_data)
+
+                logger.info(
+                    "File updated in Admin Module registry (finalized)",
+                    extra={
+                        "file_id": str(file_id),
+                        "retention_policy": "permanent",
+                        "storage_element_id": target_se_id,
+                    }
+                )
+
+            except AdminClientError as e:
+                # CRITICAL: Финализация частично выполнена
+                # Файл скопирован в target SE, но registry не обновлен
+                logger.error(
+                    "Failed to update file in Admin Module registry",
+                    extra={
+                        "file_id": str(file_id),
+                        "error": str(e),
+                        "transaction_id": str(transaction_id)
+                    }
+                )
+
+                # TODO Sprint 15.3: Добавить в reconciliation queue
+                # Пока продолжаем - финализация технически успешна
+                # Registry будет обновлен через reconciliation job
+
             self._transactions[transaction_id]["status"] = FinalizeTransactionStatus.COMPLETED
             self._transactions[transaction_id]["completed_at"] = completed_at
 
