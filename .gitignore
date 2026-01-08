@@ -218,4 +218,5 @@ data/
 claudedocs/
 .archive/
 scripts/
+!scripts/test-jwt-hot-reload.sh
 query-module/keys/

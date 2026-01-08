@@ -56,6 +56,12 @@ async def lifespan(app: FastAPI):
 
         # HTTP client для download service инициализируется lazy
 
+        # Запуск JWT key file watcher для hot-reload
+        from app.core.jwt_key_manager import get_jwt_key_manager
+        jwt_key_manager = get_jwt_key_manager()
+        jwt_key_manager.start_watching()
+        logger.info("JWT key file watcher started for hot-reload support")
+
     except Exception as e:
         logger.error(
             "Failed to initialize Query Module",
