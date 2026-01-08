@@ -329,10 +329,11 @@ class TokenService:
                 logger.warning(f"Failed to use database key: {e}, falling back to file-based key")
 
         # Попытка 2: Fallback на file-based ключ
-        if self._private_key:
+        private_key = self._key_manager.get_private_key_sync()
+        if private_key:
             token = jwt.encode(
                 claims,
-                self._private_key,
+                private_key,
                 algorithm=settings.jwt.algorithm
             )
             logger.info(
@@ -404,10 +405,11 @@ class TokenService:
                 logger.warning(f"Failed to use database key: {e}, falling back to file-based key")
 
         # Попытка 2: Fallback на file-based ключ
-        if self._private_key:
+        private_key = self._key_manager.get_private_key_sync()
+        if private_key:
             token = jwt.encode(
                 claims,
-                self._private_key,
+                private_key,
                 algorithm=settings.jwt.algorithm
             )
             logger.info(
