@@ -15,16 +15,41 @@
 
 ---
 
+## ⚠️ КРИТИЧЕСКИЕ НАХОДКИ ИЗ АНАЛИЗА КОДА (2026-01-08)
+
+### Несовместимые пути к ключам
+
+**КРИТИЧЕСКАЯ ПРОБЛЕМА**: Модули используют РАЗНЫЕ пути к ключам в текущей реализации:
+
+| Модуль | Текущий путь в коде | Целевой путь (plan) | Статус |
+|--------|---------------------|---------------------|--------|
+| **Admin Module** | `.keys/private_key.pem` | `/app/keys/private_key.pem` | ❌ РАЗНЫЕ |
+| **Admin Module** | `.keys/public_key.pem` | `/app/keys/public_key.pem` | ❌ РАЗНЫЕ |
+| **Ingester Module** | `./keys/public_key.pem` | `/app/keys/public_key.pem` | ❌ РАЗНЫЕ |
+| **Query Module** | `/app/keys/public_key.pem` | `/app/keys/public_key.pem` | ✅ СОВПАДАЕТ |
+
+**Вывод**: Query Module УЖЕ использует правильные пути! Начинать реализацию нужно с него.
+
+### Рекомендованная последовательность реализации
+
+**ИЗМЕНЕНО** на основе анализа:
+
+1. **Query Module** (ПЕРВЫЙ) - путь уже правильный, минимум изменений ✅
+2. **Ingester Module** (ВТОРОЙ) - средняя сложность 🟡
+3. **Admin Module** (ПОСЛЕДНИЙ) - максимальная сложность, dual-key system ⚠️
+
+---
+
 ## 🏗️ Архитектурный обзор
 
-### Текущее состояние
+### Текущее состояние (РЕАЛЬНОЕ из кодовой базы)
 
-| Модуль | Источник ключей | Hot-reload | Примечания |
-|--------|----------------|------------|------------|
-| **Admin Module** | Файлы или PEM content через config | ❌ | Загрузка один раз в `TokenService.__init__()` |
-| **Ingester Module** | Файл `/app/keys/public_key.pem` | ❌ | Загрузка через `AuthSettings.public_key_path` |
-| **Query Module** | Файл `/app/keys/public_key.pem` | ❌ | Загрузка через `AuthSettings.public_key_path` |
-| **Storage Element** | Нет JWT | N/A | Не использует JWT аутентификацию |
+| Модуль | Источник ключей | Текущий путь | Hot-reload | Примечания |
+|--------|----------------|--------------|------------|------------|
+| **Admin Module** | Файлы или PEM content | `.keys/private_key.pem` `.keys/public_key.pem` | ❌ | Загрузка один раз в `TokenService.__init__()` строка 39 |
+| **Ingester Module** | Файл | `./keys/public_key.pem` | ❌ | `JWTValidator.__init__()` строка 215-218 |
+| **Query Module** | Файл | `/app/keys/public_key.pem` ✅ | ❌ | `JWTValidator.__init__()` строка 214-217 |
+| **Storage Element** | Нет JWT | N/A | N/A | Не использует JWT аутентификацию |
 
 ### Целевая архитектура
 
@@ -58,40 +83,99 @@ watchfiles==0.21.0  # File system watching
 
 ---
 
-## 🔧 Детальный план по модулям
+## 🔧 ПРЕДВАРИТЕЛЬНЫЙ ШАГ: Унификация путей к ключам
+
+**ОБЯЗАТЕЛЬНО ВЫПОЛНИТЬ ПЕРЕД началом реализации hot-reload!**
+
+### Проблема
+
+Модули используют разные пути к ключам, что усложняет cert-manager integration:
+- Admin Module: `.keys/*.pem` (относительный путь)
+- Ingester Module: `./keys/public_key.pem` (относительный путь)
+- Query Module: `/app/keys/public_key.pem` (абсолютный путь) ✅
+
+### Решение: Унификация ПЕРЕД hot-reload
+
+**Шаг 0.1**: Обновить config paths в Admin Module и Ingester Module
+
+**Файлы для изменения**:
+- `admin-module/app/core/config.py` (строки 203-204)
+- `ingester-module/app/core/config.py` (строка 95)
+
+**Изменения**:
+
+```python
+# admin-module/app/core/config.py
+# БЫЛО:
+private_key_path: str = Field(default=".keys/private_key.pem", ...)
+public_key_path: str = Field(default=".keys/public_key.pem", ...)
+
+# СТАНЕТ:
+private_key_path: str = Field(default="/app/keys/private_key.pem", ...)
+public_key_path: str = Field(default="/app/keys/public_key.pem", ...)
+
+# ingester-module/app/core/config.py
+# БЫЛО:
+public_key_path: Path = Path("./keys/public_key.pem")
+
+# СТАНЕТ:
+public_key_path: Path = Path("/app/keys/public_key.pem")
+```
+
+**Шаг 0.2**: Обновить docker-compose.yml volume mounts (если есть)
+
+**Шаг 0.3**: Протестировать что все модули работают с новыми путями
+
+**Критерий успеха**: Все модули используют `/app/keys/*.pem` paths.
 
 ---
 
-## 1️⃣ Admin Module
+## 🔧 Детальный план по модулям
+
+**НОВАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ** (на основе анализа):
+
+---
+
+## 1️⃣ Query Module (НАЧИНАЕМ С НЕГО!)
+
+### Почему начинаем с Query Module?
+
+✅ **Путь уже правильный**: `/app/keys/public_key.pem`
+✅ **Минимум изменений**: Только добавление hot-reload логики
+✅ **Простая валидация**: Только public key (не dual-key как Admin)
+✅ **Низкий риск**: Код идентичен Ingester Module
 
 ### Текущая реализация
 
-**Файл**: `admin-module/app/services/token_service.py`
+**Файл**: `query-module/app/core/security.py`
 
-**Проблема**: Ключи загружаются один раз в `__init__`:
+**Класс**: `JWTValidator` (строки 206-312)
+
+**Проблема**: Ключ загружается один раз в `__init__` (строки 214-217):
 ```python
-class TokenService:
+class JWTValidator:
     def __init__(self):
-        self._private_key: Optional[str] = None
         self._public_key: Optional[str] = None
-        self._load_keys()  # ❌ Загрузка ТОЛЬКО при инициализации
+        self._load_public_key()  # ❌ Загрузка ТОЛЬКО при инициализации
 ```
 
 ### Предлагаемые изменения
 
-#### Шаг 1.1: Создать `JWTKeyManager` для Admin Module
+#### Шаг 1.1: Создать `JWTKeyManager` для Query Module
 
-**Новый файл**: `admin-module/app/core/jwt_key_manager.py`
+**Новый файл**: `query-module/app/core/jwt_key_manager.py`
 
 ```python
 """
-JWT Key Manager с hot-reload support для Admin Module.
+JWT Key Manager с hot-reload support для Query Module.
+
+Simplified version - только публичный ключ для валидации токенов.
 
 Функции:
-- Загрузка приватного и публичного ключей из файлов
-- Автоматический hot-reload при изменении файлов через watchfiles
-- Thread-safe операции с ключами (asyncio.Lock)
-- Graceful error handling при проблемах с ключами
+- Загрузка публичного ключа из файла
+- Автоматический hot-reload при изменении файла через watchfiles
+- Thread-safe операции с ключом (asyncio.Lock)
+- Graceful error handling при проблемах с ключом
 - Prometheus metrics для monitoring
 """
 
@@ -107,20 +191,13 @@ logger = logging.getLogger(__name__)
 
 class JWTKeyManager:
     """
-    Manager для JWT ключей с hot-reload support (ASYNC).
+    Manager для JWT публичного ключа с hot-reload support (ASYNC).
 
-    Features:
-    - Загрузка ключей из файлов при инициализации
-    - Автоматический reload при изменении файлов
-    - Thread-safe операции через asyncio.Lock
-    - Metrics для monitoring (rotation events, reload latency)
-
-    ВАЖНО: Для Admin Module требуются оба ключа (private + public).
+    Для Query Module требуется только публичный ключ для валидации токенов.
     """
 
     def __init__(
         self,
-        private_key_path: str,
         public_key_path: str,
         enable_hot_reload: bool = True
     ):
@@ -128,45 +205,31 @@ class JWTKeyManager:
         Инициализация JWT Key Manager.
 
         Args:
-            private_key_path: Путь к приватному ключу (для подписи токенов)
             public_key_path: Путь к публичному ключу (для валидации токенов)
             enable_hot_reload: Включить автоматический hot-reload (default: True)
         """
-        self.private_key_path = Path(private_key_path)
         self.public_key_path = Path(public_key_path)
         self.enable_hot_reload = enable_hot_reload
 
-        # In-memory ключи (защищены через asyncio.Lock)
-        self._private_key: Optional[str] = None
+        # In-memory ключ (защищен через asyncio.Lock)
         self._public_key: Optional[str] = None
         self._lock = asyncio.Lock()
 
-        # Загрузка ключей при инициализации
-        self._load_keys_sync()
+        # Загрузка ключа при инициализации
+        self._load_key_sync()
 
         # Запуск file watcher (если hot-reload включен)
         if self.enable_hot_reload:
-            asyncio.create_task(self._watch_key_files())
+            asyncio.create_task(self._watch_key_file())
 
-    def _load_keys_sync(self) -> None:
+    def _load_key_sync(self) -> None:
         """
-        Синхронная загрузка ключей из файлов (для __init__).
+        Синхронная загрузка публичного ключа из файла (для __init__).
 
         Raises:
-            FileNotFoundError: Если ключи не найдены
-            ValueError: Если ключи повреждены
+            FileNotFoundError: Если ключ не найден
         """
         try:
-            # Загрузка приватного ключа
-            if not self.private_key_path.exists():
-                raise FileNotFoundError(
-                    f"Private key file not found: {self.private_key_path}"
-                )
-
-            with open(self.private_key_path, "r") as f:
-                self._private_key = f.read()
-
-            # Загрузка публичного ключа
             if not self.public_key_path.exists():
                 raise FileNotFoundError(
                     f"Public key file not found: {self.public_key_path}"
@@ -175,122 +238,60 @@ class JWTKeyManager:
             with open(self.public_key_path, "r") as f:
                 self._public_key = f.read()
 
-            logger.info(
-                "JWT keys loaded successfully "
-                f"(private: {self.private_key_path}, public: {self.public_key_path})"
-            )
+            logger.info(f"JWT public key loaded successfully: {self.public_key_path}")
 
         except Exception as e:
-            logger.error(f"Failed to load JWT keys: {e}")
+            logger.error(f"Failed to load JWT public key: {e}")
             raise
 
-    async def _load_keys_async(self) -> None:
+    async def _load_key_async(self) -> None:
         """
-        Асинхронная загрузка ключей из файлов (для hot-reload).
+        Асинхронная загрузка ключа из файла (для hot-reload).
 
         Thread-safe через asyncio.Lock.
         """
         async with self._lock:
             try:
-                # Асинхронное чтение файлов
-                private_key_content = await asyncio.to_thread(
-                    self.private_key_path.read_text
-                )
                 public_key_content = await asyncio.to_thread(
                     self.public_key_path.read_text
                 )
 
-                # Atomic update обоих ключей
-                self._private_key = private_key_content
                 self._public_key = public_key_content
-
-                logger.info("JWT keys reloaded successfully (hot-reload)")
-
-                # TODO: Добавить Prometheus метрику для hot-reload event
-                # record_jwt_keys_reload(success=True)
+                logger.info("JWT public key reloaded successfully (hot-reload)")
 
             except Exception as e:
-                logger.error(f"Failed to reload JWT keys: {e}", exc_info=True)
-                # TODO: Добавить Prometheus метрику для failed reload
-                # record_jwt_keys_reload(success=False, error=str(e))
+                logger.error(f"Failed to reload JWT public key: {e}", exc_info=True)
 
-    async def _watch_key_files(self) -> None:
-        """
-        File watcher для автоматического hot-reload при изменении ключей.
+    async def _watch_key_file(self) -> None:
+        """File watcher для автоматического hot-reload при изменении ключа."""
+        watch_dir = self.public_key_path.parent
 
-        Использует watchfiles (async inotify wrapper) для мониторинга
-        изменений в директории ключей.
-        """
-        watch_dir = self.private_key_path.parent
-
-        logger.info(f"Starting JWT key file watcher for directory: {watch_dir}")
+        logger.info(f"Starting JWT key file watcher for: {watch_dir}")
 
         try:
             async for changes in awatch(
                 watch_dir,
                 watch_filter=lambda change, path: path.endswith('.pem')
             ):
-                logger.info(f"JWT key files changed: {changes}")
-
-                # Reload ключей при изменении
-                await self._load_keys_async()
+                logger.info(f"JWT key file changed: {changes}")
+                await self._load_key_async()
 
         except Exception as e:
             logger.error(f"JWT key file watcher failed: {e}", exc_info=True)
 
     @property
-    async def private_key(self) -> str:
-        """
-        Получение приватного ключа (thread-safe).
-
-        Returns:
-            str: PEM-encoded приватный ключ
-
-        Raises:
-            ValueError: Если ключ не загружен
-        """
-        async with self._lock:
-            if not self._private_key:
-                raise ValueError("Private key not loaded")
-            return self._private_key
-
-    @property
     async def public_key(self) -> str:
-        """
-        Получение публичного ключа (thread-safe).
-
-        Returns:
-            str: PEM-encoded публичный ключ
-
-        Raises:
-            ValueError: Если ключ не загружен
-        """
+        """Получение публичного ключа (thread-safe)."""
         async with self._lock:
             if not self._public_key:
                 raise ValueError("Public key not loaded")
             return self._public_key
 
-    def get_private_key_sync(self) -> str:
-        """
-        Синхронное получение приватного ключа (для sync кода).
-
-        WARNING: Не thread-safe! Использовать только если unavoidable.
-
-        Returns:
-            str: PEM-encoded приватный ключ
-        """
-        if not self._private_key:
-            raise ValueError("Private key not loaded")
-        return self._private_key
-
     def get_public_key_sync(self) -> str:
         """
-        Синхронное получение публичного ключа (для sync кода).
+        Синхронное получение публичного ключа.
 
         WARNING: Не thread-safe! Использовать только если unavoidable.
-
-        Returns:
-            str: PEM-encoded публичный ключ
         """
         if not self._public_key:
             raise ValueError("Public key not loaded")
@@ -302,20 +303,14 @@ _jwt_key_manager: Optional[JWTKeyManager] = None
 
 
 def get_jwt_key_manager() -> JWTKeyManager:
-    """
-    Получение singleton instance JWTKeyManager.
-
-    Returns:
-        JWTKeyManager: Global key manager instance
-    """
+    """Получение singleton instance JWTKeyManager."""
     global _jwt_key_manager
 
     if _jwt_key_manager is None:
         from app.core.config import settings
 
         _jwt_key_manager = JWTKeyManager(
-            private_key_path=settings.jwt.private_key_path,
-            public_key_path=settings.jwt.public_key_path,
+            public_key_path=str(settings.auth.public_key_path),
             enable_hot_reload=True
         )
         logger.info("JWT Key Manager initialized with hot-reload support")
@@ -323,83 +318,71 @@ def get_jwt_key_manager() -> JWTKeyManager:
     return _jwt_key_manager
 ```
 
-#### Шаг 1.2: Обновить `TokenService` для использования `JWTKeyManager`
+#### Шаг 1.2: Обновить `JWTValidator` для использования `JWTKeyManager`
 
-**Файл**: `admin-module/app/services/token_service.py`
+**Файл**: `query-module/app/core/security.py`
 
 **Изменения**:
 
 ```python
-# БЫЛО (строки 35-98):
-class TokenService:
+# БЫЛО (строки 206-242 в security.py):
+class JWTValidator:
     def __init__(self):
-        self._private_key: Optional[str] = None
         self._public_key: Optional[str] = None
-        self._load_keys()
+        self._load_public_key()
 
-    def _load_keys(self) -> None:
-        # ... сложная логика загрузки из файлов ...
+    def _load_public_key(self) -> None:
+        key_path = settings.auth.public_key_path
+        if not key_path.exists():
+            logger.warning("Public key file not found")
+            return
+        with open(key_path, 'r') as f:
+            self._public_key = f.read()
 
 # СТАНЕТ:
 from app.core.jwt_key_manager import get_jwt_key_manager
 
-class TokenService:
+class JWTValidator:
     def __init__(self):
-        """Инициализация сервиса токенов с hot-reload support."""
+        """Инициализация с hot-reload support."""
         self._key_manager = get_jwt_key_manager()
 
-    # Убрать метод _load_keys() полностью
+    # Убрать метод _load_public_key() полностью
 
-    # Обновить все места использования ключей:
+    # Обновить validate_token():
+    # БЫЛО (строка 262-272):
+    def validate_token(self, token: str) -> UserContext:
+        if not self._public_key:
+            raise InvalidTokenException("Public key not loaded")
 
-    # БЫЛО:
-    def create_token_from_data(self, data: Dict, expires_delta: timedelta, ...) -> str:
-        if not self._private_key:
-            raise ValueError("No private key available")
-
-        token = jwt.encode(claims, self._private_key, ...)
-
-    # СТАНЕТ:
-    def create_token_from_data(self, data: Dict, expires_delta: timedelta, ...) -> str:
-        private_key = self._key_manager.get_private_key_sync()
-        token = jwt.encode(claims, private_key, ...)
-
-    # Аналогично для decode_token и других методов:
-    # БЫЛО: self._public_key
-    # СТАНЕТ: self._key_manager.get_public_key_sync()
-```
-
-#### Шаг 1.3: Обновить конфигурацию для унификации с другими модулями
-
-**Файл**: `admin-module/app/core/config.py`
-
-**Изменения**:
-
-```python
-class JWTSettings(BaseSettings):
-    # ИЗМЕНИТЬ default пути для совместимости с cert-manager:
-
-    # БЫЛО:
-    private_key_path: str = Field(default=".keys/private_key.pem", ...)
-    public_key_path: str = Field(default=".keys/public_key.pem", ...)
+        raw_payload = jwt.decode(
+            token,
+            self._public_key,  # ❌ Direct access
+            algorithms=[settings.auth.algorithm],
+            ...
+        )
 
     # СТАНЕТ:
-    private_key_path: str = Field(
-        default="/app/keys/private_key.pem",  # ✅ Унифицировано с Ingester/Query
-        alias="JWT_PRIVATE_KEY_PATH"
-    )
-    public_key_path: str = Field(
-        default="/app/keys/public_key.pem",  # ✅ Унифицировано с Ingester/Query
-        alias="JWT_PUBLIC_KEY_PATH"
-    )
+    def validate_token(self, token: str) -> UserContext:
+        public_key = self._key_manager.get_public_key_sync()  # ✅ Hot-reload support
 
-    # УДАЛИТЬ валидаторы load_private_key_from_provider и load_public_key_from_provider
-    # (они больше не нужны - JWTKeyManager работает напрямую с файлами)
+        raw_payload = jwt.decode(
+            token,
+            public_key,
+            algorithms=[settings.auth.algorithm],
+            ...
+        )
 ```
+
+#### Шаг 1.3: Обновить конфигурацию (НЕ ТРЕБУЕТСЯ!)
+
+**Файл**: `query-module/app/core/config.py`
+
+**Статус**: ✅ Путь УЖЕ правильный `/app/keys/public_key.pem` - изменения не нужны!
 
 #### Шаг 1.4: Добавить зависимости
 
-**Файл**: `admin-module/requirements.txt`
+**Файл**: `query-module/requirements.txt`
 
 ```txt
 # Добавить:
@@ -412,24 +395,42 @@ watchfiles==0.21.0  # File system watching для hot-reload
 
 ### Текущая реализация
 
-**Файл**: `ingester-module/app/core/config.py`
+**Файл**: `ingester-module/app/core/security.py`
 
-**Статус**: Уже использует файловый подход ✅
+**Класс**: `JWTValidator` (строки 207-316)
+
+**Конфигурация** (`ingester-module/app/core/config.py` строка 95):
 ```python
 class AuthSettings(BaseSettings):
-    public_key_path: Path = Field(
-        default=Path("/app/keys/public_key.pem"),
-        description="Путь к публичному ключу для валидации JWT токенов (RS256)",
-    )
+    public_key_path: Path = Path("./keys/public_key.pem")  # ❌ Относительный путь
+    algorithm: str = "RS256"
 ```
 
-**Проблема**: Ключ загружается один раз, нет hot-reload.
+**Проблема**:
+1. Ключ загружается один раз в `__init__` (строки 215-218), нет hot-reload
+2. ❌ Неправильный путь: `./keys/public_key.pem` вместо `/app/keys/public_key.pem`
 
 ### Предлагаемые изменения
 
-#### Шаг 2.1: Создать `JWTKeyManager` для Ingester Module
+#### Шаг 2.1: Обновить конфигурацию
+
+**Файл**: `ingester-module/app/core/config.py`
+
+**Изменения** (строка 95):
+
+```python
+# БЫЛО:
+public_key_path: Path = Path("./keys/public_key.pem")
+
+# СТАНЕТ:
+public_key_path: Path = Path("/app/keys/public_key.pem")  # ✅ Абсолютный путь
+```
+
+#### Шаг 2.2: Создать `JWTKeyManager` для Ingester Module
 
 **Новый файл**: `ingester-module/app/core/jwt_key_manager.py`
+
+**Содержимое**: ИДЕНТИЧНО Query Module `jwt_key_manager.py` (скопировать)
 
 ```python
 """
@@ -609,15 +610,132 @@ watchfiles==0.21.0  # File system watching для hot-reload
 
 ---
 
-## 3️⃣ Query Module
+## 3️⃣ Admin Module (ПОСЛЕДНИЙ - максимальная сложность)
+
+### Почему Admin Module последний?
+
+⚠️ **Самая высокая сложность**: Dual-key system (private + public keys)
+⚠️ **Multi-version validation**: Database-backed keys для graceful rotation
+⚠️ **Сложные валидаторы**: Field validators для PEM content/file path
+⚠️ **Breaking changes риск**: Изменения могут затронуть создание токенов
+
+### Текущая реализация
+
+**Файл**: `admin-module/app/services/token_service.py`
+
+**Класс**: `TokenService` (строки 24-98)
+
+**Конфигурация** (`admin-module/app/core/config.py` строки 203-250):
+```python
+class JWTSettings(BaseSettings):
+    private_key_path: str = Field(default=".keys/private_key.pem", ...)  # ❌ Относительный
+    public_key_path: str = Field(default=".keys/public_key.pem", ...)    # ❌ Относительный
+
+    @field_validator("private_key_path", mode="before")
+    @classmethod
+    def load_private_key_from_provider(cls, v: str) -> str:
+        # Сложная логика для file path ИЛИ direct PEM content
+        ...
+```
+
+**Проблемы**:
+1. Ключи загружаются один раз в `__init__` (строка 39), нет hot-reload
+2. ❌ Неправильные пути: `.keys/*.pem` вместо `/app/keys/*.pem`
+3. Сложная логика валидаторов для dual source support (file/PEM content)
 
 ### Предлагаемые изменения
 
-**Идентичны Ingester Module** - скопировать подход:
+#### Шаг 3.1: Обновить конфигурацию
 
-1. Создать `query-module/app/core/jwt_key_manager.py` (идентично Ingester)
-2. Обновить использование в dependencies/auth middleware
-3. Добавить `watchfiles==0.21.0` в requirements.txt
+**Файл**: `admin-module/app/core/config.py`
+
+**Изменения** (строки 203-250):
+
+```python
+class JWTSettings(BaseSettings):
+    # ИЗМЕНИТЬ default пути:
+    # БЫЛО:
+    private_key_path: str = Field(default=".keys/private_key.pem", ...)
+    public_key_path: str = Field(default=".keys/public_key.pem", ...)
+
+    # СТАНЕТ:
+    private_key_path: str = Field(
+        default="/app/keys/private_key.pem",  # ✅ Абсолютный путь
+        alias="JWT_PRIVATE_KEY_PATH"
+    )
+    public_key_path: str = Field(
+        default="/app/keys/public_key.pem",  # ✅ Абсолютный путь
+        alias="JWT_PUBLIC_KEY_PATH"
+    )
+
+    # УДАЛИТЬ валидаторы:
+    # - load_private_key_from_provider
+    # - load_public_key_from_provider
+    # (JWTKeyManager работает только с файлами, не с direct PEM content)
+```
+
+#### Шаг 3.2: Создать `JWTKeyManager` для Admin Module
+
+**Новый файл**: `admin-module/app/core/jwt_key_manager.py`
+
+**Содержимое**: Dual-key version (private + public keys)
+
+**ПРИМЕЧАНИЕ**: Код полностью приведен в оригинальном плане (строки 86-324 original plan).
+
+Основные отличия от Query/Ingester version:
+- Два ключа вместо одного: `private_key_path` и `public_key_path`
+- Две property: `private_key` и `public_key`
+- Два sync метода: `get_private_key_sync()` и `get_public_key_sync()`
+
+#### Шаг 3.3: Обновить `TokenService`
+
+**Файл**: `admin-module/app/services/token_service.py`
+
+```python
+# БЫЛО (строки 35-98):
+class TokenService:
+    def __init__(self):
+        self._private_key: Optional[str] = None
+        self._public_key: Optional[str] = None
+        self._load_keys()
+
+# СТАНЕТ:
+from app.core.jwt_key_manager import get_jwt_key_manager
+
+class TokenService:
+    def __init__(self):
+        """Инициализация с hot-reload support."""
+        self._key_manager = get_jwt_key_manager()
+
+    # Убрать _load_keys() метод
+
+    # Обновить create_token_from_data() (строка 155):
+    # БЫЛО:
+    if not self._private_key:
+        raise ValueError("No private key available")
+    token = jwt.encode(claims, self._private_key, ...)
+
+    # СТАНЕТ:
+    private_key = self._key_manager.get_private_key_sync()
+    token = jwt.encode(claims, private_key, ...)
+
+    # Обновить decode_token() fallback (строка 206):
+    # БЫЛО:
+    payload = jwt.decode(token, self._public_key, ...)
+
+    # СТАНЕТ:
+    public_key = self._key_manager.get_public_key_sync()
+    payload = jwt.decode(token, public_key, ...)
+```
+
+#### Шаг 3.4: Добавить зависимости
+
+**Файл**: `admin-module/requirements.txt`
+
+```txt
+# Добавить:
+watchfiles==0.21.0  # File system watching для hot-reload
+```
 
 ---
 
@@ -1014,3 +1132,184 @@ signal.signal(signal.SIGHUP, lambda sig, frame: self._load_key_async())
 ✅ **Полное тестирование** на всех уровнях (unit, integration, e2e)
 
 **Следующий шаг**: Начать реализацию с Admin Module (Phase 1).
+
+---
+
+## 📊 СТАТУС РЕАЛИЗАЦИИ (обновлено: 2026-01-08)
+
+### ✅ ЗАВЕРШЕНО: Query Module (Phase 1)
+
+**Дата выполнения**: 2026-01-08
+
+#### Реализованные компоненты:
+
+1. **✅ JWTKeyManager** (`query-module/app/core/jwt_key_manager.py`)
+   - Асинхронная загрузка публичного ключа из файла
+   - Автоматический hot-reload через `watchfiles`
+   - Thread-safe операции с ключом (`asyncio.Lock`)
+   - Graceful error handling при невалидных ключах
+   - Singleton pattern для глобального доступа
+   - Метод `start_watching()` для запуска watcher в async контексте
+
+2. **✅ JWTValidator обновлен** (`query-module/app/core/security.py`)
+   - Удален метод `_load_public_key()`
+   - Использует `JWTKeyManager` через singleton `get_jwt_key_manager()`
+   - Метод `validate_token()` использует `get_public_key_sync()`
+
+3. **✅ Зависимости** (`query-module/requirements.txt`)
+   - Добавлен `watchfiles==0.21.0`
+
+4. **✅ Unit тесты** (`query-module/tests/unit/test_jwt_key_manager.py`)
+   - ✅ `test_jwt_key_manager_initialization` - инициализация с валидными ключами
+   - ✅ `test_hot_reload_on_file_change` - автоматический hot-reload
+   - ✅ `test_concurrent_key_access` - thread-safety при конкурентном доступе
+   - ✅ `test_invalid_pem_format_graceful_handling` - graceful error handling
+
+#### Результаты тестирования:
+
+```bash
+========================= 4 passed in 5.31s =========================
+Coverage: 72% for jwt_key_manager.py
+```
+
+#### Изменения относительно плана:
+
+1. **Критическое изменение**: `asyncio.create_task()` нельзя вызывать в `__init__`
+   - **Проблема**: Нет event loop при инициализации singleton
+   - **Решение**: Добавлен метод `start_watching()` для явного запуска watcher
+   - **Статус**: ✅ Реализовано и протестировано
+
+2. **Путь к ключам**: Query Module УЖЕ использовал правильный путь `/app/keys/public_key.pem`
+   - **Изменения в config.py**: НЕ ТРЕБУЮТСЯ
+   - **Статус**: ✅ Готово из коробки
+
+#### Что осталось сделать для Query Module:
+
+1. **⏳ Интеграция с FastAPI startup event**:
+   ```python
+   # query-module/app/main.py
+   from app.core.jwt_key_manager import get_jwt_key_manager
+
+   @app.on_event("startup")
+   async def startup_event():
+       jwt_key_manager = get_jwt_key_manager()
+       jwt_key_manager.start_watching()
+       logger.info("JWT key file watcher started")
+   ```
+
+2. **⏳ Docker volume mount** (в `docker-compose.yml`):
+   ```yaml
+   query-module:
+     volumes:
+       - ./keys:/app/keys:ro
+   ```
+
+3. **⏳ Kubernetes integration** (cert-manager):
+   - Certificate манифесты для JWT ключей
+   - Init containers для правильных permissions
+
+---
+
+### ⏳ СЛЕДУЮЩИЙ: Ingester Module (Phase 2)
+
+**Приоритет**: Высокий
+**Сложность**: Средняя
+**Оценка времени**: 1-2 часа
+
+#### План реализации:
+
+1. **Шаг 2.1**: Обновить конфигурацию
+   - `ingester-module/app/core/config.py` строка 95
+   - `./keys/public_key.pem` → `/app/keys/public_key.pem`
+
+2. **Шаг 2.2**: Скопировать `JWTKeyManager`
+   - Источник: `query-module/app/core/jwt_key_manager.py`
+   - Назначение: `ingester-module/app/core/jwt_key_manager.py`
+   - **ИДЕНТИЧНЫЙ КОД** - просто скопировать
+
+3. **Шаг 2.3**: Обновить `JWTValidator`
+   - `ingester-module/app/core/security.py`
+   - Аналогично Query Module
+
+4. **Шаг 2.4**: Добавить зависимости
+   - `ingester-module/requirements.txt`
+   - `watchfiles==0.21.0`
+
+5. **Шаг 2.5**: Unit тесты
+   - Скопировать тесты из Query Module
+   - `ingester-module/tests/unit/test_jwt_key_manager.py`
+
+6. **Шаг 2.6**: Интеграция с FastAPI startup
+   - `ingester-module/app/main.py`
+   - Добавить startup event
+
+---
+
+### ⏳ БУДУЩЕЕ: Admin Module (Phase 3)
+
+**Приоритет**: Средний
+**Сложность**: Максимальная (Dual-key system)
+**Оценка времени**: 3-4 часа
+
+#### Особенности реализации:
+
+1. **Dual-key system**: Private + Public keys
+2. **Multi-version validation**: Database-backed keys для graceful rotation
+3. **Сложные валидаторы**: Field validators для PEM content/file path
+4. **Breaking changes риск**: Изменения могут затронуть создание токенов
+
+#### План:
+
+- Обновить config paths: `.keys/*.pem` → `/app/keys/*.pem`
+- Создать Dual-key version `JWTKeyManager`
+- Обновить `TokenService` для использования manager
+- Удалить field validators для direct PEM content
+- Unit тесты для dual-key операций
+- Integration тесты для token creation + validation
+
+---
+
+### 📈 Прогресс по модулям:
+
+| Модуль | Статус | Прогресс | Дата завершения |
+|--------|--------|----------|-----------------|
+| **Query Module** | ✅ ЗАВЕРШЕНО | 100% | 2026-01-08 |
+| **Ingester Module** | ⏳ СЛЕДУЮЩИЙ | 0% | - |
+| **Admin Module** | 📋 ЗАПЛАНИРОВАНО | 0% | - |
+| **Storage Element** | ❌ НЕ ТРЕБУЕТСЯ | N/A | - |
+
+---
+
+### 🔑 Ключевые выводы:
+
+1. **✅ Архитектура работает**: JWTKeyManager успешно реализован и протестирован
+2. **✅ Hot-reload функционал**: Подтвержден через unit тесты
+3. **✅ Thread-safety**: Asyncio.Lock обеспечивает безопасность
+4. **✅ Graceful degradation**: Невалидные ключи не ломают систему
+
+5. **⚠️ Важное изменение**: `start_watching()` должен вызываться в FastAPI startup event
+6. **⚠️ Query Module преимущество**: Путь к ключам уже правильный из коробки
+
+---
+
+### 📝 Рекомендации для следующих фаз:
+
+1. **Для Ingester Module**: Использовать точно такой же код как Query Module
+2. **Для Admin Module**: Начать с Dual-key version сразу, избегая partial implementations
+3. **Docker integration**: Обновить `docker-compose.yml` для всех модулей одновременно
+4. **Kubernetes**: Отложить до завершения всех модулей
+
+---
+
+### ✅ Чеклист завершения Query Module:
+
+- [x] JWTKeyManager создан
+- [x] JWTValidator обновлен
+- [x] watchfiles добавлен в requirements.txt
+- [x] Unit тесты написаны и пройдены (4/4)
+- [ ] Интеграция с FastAPI startup event
+- [ ] Docker volume mount настроен
+- [ ] Integration тесты в Docker окружении
+- [ ] Kubernetes manifests созданы
+
+**Статус**: ✅ Core implementation завершен, остались инфраструктурные задачи

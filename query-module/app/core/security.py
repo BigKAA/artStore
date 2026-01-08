@@ -212,33 +212,10 @@ class JWTValidator:
     """
 
     def __init__(self):
-        """=8F80;870F8O A 703@C7:>9 ?C1;8G=>3> :;NG0"""
-        self._public_key: Optional[str] = None
-        self._load_public_key()
+        """Initialization with hot-reload support via JWTKeyManager."""
+        from app.core.jwt_key_manager import get_jwt_key_manager
 
-    def _load_public_key(self) -> None:
-        """
-        03@C7:0 ?C1;8G=>3> :;NG0 87 D09;0.
-
-        Raises:
-            FileNotFoundError: A;8 D09; A :;NG>< =5 =0945=
-        """
-        key_path = settings.auth.public_key_path
-
-        if not key_path.exists():
-            logger.warning(
-                "Public key file not found",
-                extra={"key_path": str(key_path)}
-            )
-            return
-
-        with open(key_path, 'r') as f:
-            self._public_key = f.read()
-
-        logger.info(
-            "Public key loaded successfully",
-            extra={"key_path": str(key_path)}
-        )
+        self._key_manager = get_jwt_key_manager()
 
     def validate_token(self, token: str) -> UserContext:
         """
@@ -254,14 +231,14 @@ class JWTValidator:
             InvalidTokenException: 520;84=K9 B>:5=
             TokenExpiredException: ">:5= 8AB5:
         """
-        if not self._public_key:
-            raise InvalidTokenException("Public key not loaded")
-
         try:
+            # Get public key from manager (hot-reload support)
+            public_key = self._key_manager.get_public_key_sync()
+
             # 5:>48@>20=85 8 20;840F8O B>:5=0
             payload = jwt.decode(
                 token,
-                self._public_key,
+                public_key,
                 algorithms=[settings.auth.algorithm],
                 options={
                     "verify_signature": True,

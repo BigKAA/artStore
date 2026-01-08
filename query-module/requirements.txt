@@ -16,6 +16,7 @@ redis==5.2.1
 # JWT authentication (RS256)
 PyJWT[crypto]==2.10.1
 cryptography==44.0.0
+watchfiles==0.21.0  # File system watching для JWT key hot-reload
 
 # Pydantic для валидации
 pydantic==2.10.3
