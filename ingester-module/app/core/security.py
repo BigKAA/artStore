@@ -206,40 +206,21 @@ class UserContext(BaseModel):
 
 class JWTValidator:
     """
-    Валидатор JWT токенов (RS256).
+    Валидатор JWT токенов (RS256) с hot-reload support.
 
     Использует публичный ключ от Admin Module для проверки подписи.
     Не требует сетевых запросов - валидация полностью локальная.
+
+    Sprint: JWT Hot-Reload Implementation
+    - Автоматическая перезагрузка ключа при изменении файла
+    - Thread-safe операции через JWTKeyManager
     """
 
     def __init__(self):
-        """Инициализация с загрузкой публичного ключа"""
-        self._public_key: Optional[str] = None
-        self._load_public_key()
+        """Инициализация с hot-reload support через JWTKeyManager."""
+        from app.core.jwt_key_manager import get_jwt_key_manager
 
-    def _load_public_key(self) -> None:
-        """
-        Загрузка публичного ключа из файла.
-
-        Raises:
-            FileNotFoundError: Если файл с ключом не найден
-        """
-        key_path = settings.auth.public_key_path
-
-        if not key_path.exists():
-            logger.warning(
-                "Public key file not found",
-                extra={"key_path": str(key_path)}
-            )
-            return
-
-        with open(key_path, 'r') as f:
-            self._public_key = f.read()
-
-        logger.info(
-            "Public key loaded successfully",
-            extra={"key_path": str(key_path)}
-        )
+        self._key_manager = get_jwt_key_manager()
 
     def validate_token(self, token: str) -> UserContext:
         """
@@ -259,14 +240,14 @@ class JWTValidator:
             InvalidTokenException: Невалидный токен
             TokenExpiredException: Токен истек
         """
-        if not self._public_key:
-            raise InvalidTokenException("Public key not loaded")
-
         try:
+            # Получение публичного ключа из JWTKeyManager (hot-reload support)
+            public_key = self._key_manager.get_public_key_sync()
+
             # Декодирование и валидация токена
             raw_payload = jwt.decode(
                 token,
-                self._public_key,
+                public_key,
                 algorithms=[settings.auth.algorithm],
                 options={
                     "verify_signature": True,
