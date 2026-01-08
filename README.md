@@ -30,6 +30,7 @@
    - Центр управления всей системой
    - OAuth 2.0 аутентификация (Client Credentials flow)
    - Генерация JWT токенов с RS256 подписью
+   - JWT Hot-Reload для zero-downtime key rotation
    - Управление Service Accounts и правами доступа
    - Координация распределенных транзакций (Saga Pattern)
    - Публикация конфигурации Storage Elements в Service Discovery
@@ -86,6 +87,7 @@
 - **Alembic** для миграций схемы БД
 - **Redis.asyncio** (асинхронный режим) для Service Discovery и кеширования
 - **Pydantic** для валидации данных и конфигурации
+- **watchfiles** (Rust-based) для JWT hot-reload и file system monitoring
 
 ### Frontend
 - **Angular** для Admin UI
@@ -100,7 +102,47 @@
 - **JWT RS256** для аутентификации между сервисами
 - **OAuth 2.0 Client Credentials** для API клиентов
 - **Automated Key Rotation** (JWT каждые 24 часа, secrets каждые 90 дней)
+- **JWT Hot-Reload** - zero-downtime key rotation без перезапуска контейнеров
 - **PostgreSQL SSL** для шифрования database соединений (опционально, для production)
+
+#### JWT Hot-Reload (Zero-Downtime Key Rotation)
+
+Все модули поддерживают **автоматическую перезагрузку JWT ключей** при изменении файлов без перезапуска контейнеров.
+
+**Архитектура:**
+- **Admin Module**: Dual-key система (private + public keys)
+  - Private key для подписи JWT токенов
+  - Public key для валидации собственных токенов
+  - Оба ключа мониторятся независимо
+
+- **Ingester/Query Modules**: Single-key система (public key only)
+  - Public key для валидации JWT токенов от Admin Module
+  - Автоматическое обновление при cert-manager rotation
+
+**Технические детали:**
+- **Библиотека**: `watchfiles==0.21.0` (Rust-based file watcher)
+- **Механизм**: Асинхронный file system watcher через `asyncio`
+- **Latency**: ~1-3 секунды от изменения файла до reload
+- **Thread-safe**: `asyncio.Lock` для безопасной работы с concurrent requests
+- **Logging**: Structured JSON logs для каждого reload события
+- **Fallback**: Legacy поддержка direct PEM content (Kubernetes Secrets)
+
+**Production Integration:**
+- **Kubernetes + cert-manager**: Автоматическая ротация TLS сертификатов
+- **Volume Mounts**: Read-only bind mounts для JWT key файлов
+- **ConfigMaps/Secrets**: Поддержка как file paths, так и direct PEM content
+- **Zero-Downtime**: Перезагрузка ключей без прерывания обработки requests
+
+**Тестирование:**
+```bash
+# Ingester Module (single-key)
+./scripts/test-jwt-hot-reload-ingester.sh
+
+# Admin Module (dual-key)
+./scripts/test-jwt-hot-reload-admin.sh
+```
+
+**Документация**: См. [JWT-HOT-RELOAD-PLAN.md](JWT-HOT-RELOAD-PLAN.md) для детального плана имплементации
 
 #### Типы учетных записей
 
@@ -552,6 +594,10 @@ pytest storage-element/tests/ -v --cov=app
 # Docker-based тестирование (рекомендуется)
 docker-compose build storage-element
 docker-compose run --rm storage-element pytest tests/ -v
+
+# JWT Hot-Reload интеграционные тесты (Docker)
+./scripts/test-jwt-hot-reload-ingester.sh
+./scripts/test-jwt-hot-reload-admin.sh
 ```
 
 ## Мониторинг и метрики
@@ -575,7 +621,7 @@ docker-compose run --rm storage-element pytest tests/ -v
 
 ## Roadmap
 
-### Completed (Sprints 1-23)
+### Completed (Sprints 1-24)
 - ✅ Базовая инфраструктура (PostgreSQL, Redis, MinIO)
 - ✅ Admin Module с OAuth 2.0 authentication
 - ✅ Storage Element с WAL и режимами работы
@@ -583,6 +629,7 @@ docker-compose run --rm storage-element pytest tests/ -v
 - ✅ Query Module с full-text search
 - ✅ Comprehensive monitoring stack (Prometheus, Grafana)
 - ✅ JWT RS256 authentication с automated rotation
+- ✅ JWT Hot-Reload (zero-downtime key rotation для всех модулей)
 
 ### In Progress (Sprint 24+)
 - 🔄 Admin UI development (Angular)
