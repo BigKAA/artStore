@@ -328,7 +328,7 @@ class AdminModuleClient:
             "Registering file in Admin Module",
             extra={
                 "file_id": file_data.get("file_id"),
-                "filename": file_data.get("original_filename")
+                "original_filename": file_data.get("original_filename")
             }
         )
 

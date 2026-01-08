@@ -20,7 +20,7 @@ import logging
 from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -129,9 +129,9 @@ def require_admin_role(
 )
 async def register_file(
     request: FileRegisterRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    file_service: Annotated[FileService, Depends(get_file_service)],
-    current_account: Annotated[ServiceAccount, Depends(require_admin_or_user_role)]
+    db: AsyncSession = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
+    current_account: ServiceAccount = Depends(require_admin_or_user_role)
 ) -> FileResponse:
     """
     Регистрация нового файла в file registry.
@@ -224,14 +224,14 @@ async def register_file(
     """
 )
 async def get_file_by_id(
-    file_id: UUID,
+    file_id: UUID = Path(..., description="UUID файла"),
     include_deleted: bool = Query(
         False,
         description="Включать ли удаленные файлы (требуется ADMIN роль)"
     ),
-    db: Annotated[AsyncSession, Depends(get_db)],
-    file_service: Annotated[FileService, Depends(get_file_service)],
-    current_account: Annotated[ServiceAccount, Depends(get_current_service_account)]
+    db: AsyncSession = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
+    current_account: ServiceAccount = Depends(get_current_service_account)
 ) -> FileResponse:
     """
     Получение метаданных файла по ID.
@@ -323,11 +323,11 @@ async def get_file_by_id(
     """
 )
 async def update_file(
-    file_id: UUID,
     request: FileUpdateRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    file_service: Annotated[FileService, Depends(get_file_service)],
-    current_account: Annotated[ServiceAccount, Depends(require_admin_or_user_role)]
+    file_id: UUID = Path(..., description="UUID файла"),
+    db: AsyncSession = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
+    current_account: ServiceAccount = Depends(require_admin_or_user_role)
 ) -> FileResponse:
     """
     Обновление метаданных файла (финализация).
@@ -444,15 +444,15 @@ async def update_file(
     """
 )
 async def delete_file(
-    file_id: UUID,
+    file_id: UUID = Path(..., description="UUID файла"),
     deletion_reason: str = Query(
         "manual",
         max_length=255,
         description="Причина удаления: manual, ttl_expired, gc_cleanup, finalized"
     ),
-    db: Annotated[AsyncSession, Depends(get_db)],
-    file_service: Annotated[FileService, Depends(get_file_service)],
-    current_account: Annotated[ServiceAccount, Depends(require_admin_role)]
+    db: AsyncSession = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
+    current_account: ServiceAccount = Depends(require_admin_role)
 ) -> FileDeleteResponse:
     """
     Мягкое удаление файла.
@@ -567,9 +567,9 @@ async def list_files(
         False,
         description="Включать ли удаленные файлы (требуется ADMIN роль)"
     ),
-    db: Annotated[AsyncSession, Depends(get_db)],
-    file_service: Annotated[FileService, Depends(get_file_service)],
-    current_account: Annotated[ServiceAccount, Depends(get_current_service_account)]
+    db: AsyncSession = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
+    current_account: ServiceAccount = Depends(get_current_service_account)
 ) -> FileListResponse:
     """
     Получение списка файлов с pagination.
