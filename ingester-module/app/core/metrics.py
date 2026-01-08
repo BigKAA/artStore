@@ -676,6 +676,165 @@ def record_cache_access(hit: bool) -> None:
     capacity_cache_hits.labels(result="hit" if hit else "miss").inc()
 
 
+# ============================================================================
+# SE CONFIG RELOAD METRICS (Sprint 21)
+# ============================================================================
+
+se_config_reload_total = Counter(
+    "ingester_se_config_reload_total",
+    "Total SE config reload attempts",
+    ["source", "status"]
+)
+"""
+Количество попыток перезагрузки SE конфигурации.
+
+Labels:
+    source: "redis", "admin_module", "pubsub", "none"
+    status: "success", "failed"
+
+PromQL:
+    # Reload success rate
+    rate(ingester_se_config_reload_total{status="success"}[5m])
+    /
+    rate(ingester_se_config_reload_total[5m])
+
+    # Reload by source
+    sum(rate(ingester_se_config_reload_total[5m])) by (source)
+"""
+
+se_config_reload_duration_seconds = Histogram(
+    "ingester_se_config_reload_duration_seconds",
+    "SE config reload duration in seconds",
+    ["source"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+)
+"""
+Время перезагрузки SE конфигурации.
+
+Labels:
+    source: "redis", "admin_module", "lazy_redis", "lazy_admin_module"
+
+PromQL:
+    # p95 reload latency
+    histogram_quantile(0.95, rate(ingester_se_config_reload_duration_seconds_bucket[5m]))
+
+    # Average reload duration by source
+    rate(ingester_se_config_reload_duration_seconds_sum[5m])
+    /
+    rate(ingester_se_config_reload_duration_seconds_count[5m])
+"""
+
+se_endpoints_count = Gauge(
+    "ingester_se_endpoints_count",
+    "Current number of SE endpoints known to Ingester"
+)
+"""
+Текущее количество SE endpoints в конфигурации.
+
+PromQL:
+    # Current SE count
+    ingester_se_endpoints_count
+
+    # Alert: SE count dropped to zero
+    ingester_se_endpoints_count == 0
+"""
+
+se_config_changes_total = Counter(
+    "ingester_se_config_changes_total",
+    "Total SE config changes detected",
+    ["change_type"]  # added, removed, updated
+)
+"""
+Количество изменений в SE конфигурации.
+
+Labels:
+    change_type: "added", "removed", "updated"
+
+PromQL:
+    # Change rate by type
+    sum(rate(ingester_se_config_changes_total[5m])) by (change_type)
+
+    # Total changes per hour
+    increase(ingester_se_config_changes_total[1h])
+"""
+
+lazy_se_config_reload_total = Counter(
+    "ingester_lazy_se_config_reload_total",
+    "Lazy SE config reload attempts triggered by errors",
+    ["reason", "status"]  # reason: insufficient_storage, not_found, connection_error
+)
+"""
+Lazy reload triggers (immediate reload при ошибках).
+
+Labels:
+    reason: "insufficient_storage" (507), "not_found" (404), "connection_error"
+    status: "success", "failed", "error"
+
+PromQL:
+    # Lazy reload rate by reason
+    sum(rate(ingester_lazy_se_config_reload_total[5m])) by (reason)
+
+    # Alert: frequent lazy reloads indicate stale cache
+    rate(ingester_lazy_se_config_reload_total{reason="insufficient_storage"}[5m]) > 0.1
+"""
+
+
+def record_se_config_reload(source: str, status: str) -> None:
+    """
+    Запись метрики SE config reload attempt.
+
+    Args:
+        source: Источник данных (redis, admin_module, pubsub, none)
+        status: Статус (success, failed)
+    """
+    se_config_reload_total.labels(source=source, status=status).inc()
+    logger.debug(f"SE config reload recorded: source={source}, status={status}")
+
+
+def record_se_config_reload_duration(source: str, duration_seconds: float) -> None:
+    """
+    Запись метрики длительности SE config reload.
+
+    Args:
+        source: Источник данных
+        duration_seconds: Длительность в секундах
+    """
+    se_config_reload_duration_seconds.labels(source=source).observe(duration_seconds)
+
+
+def update_se_endpoints_count(count: int) -> None:
+    """
+    Обновление gauge количества SE endpoints.
+
+    Args:
+        count: Текущее количество SE endpoints
+    """
+    se_endpoints_count.set(count)
+
+
+def record_se_config_change(change_type: str, count: int = 1) -> None:
+    """
+    Запись метрики изменения SE конфигурации.
+
+    Args:
+        change_type: Тип изменения (added, removed, updated)
+        count: Количество изменений (default: 1)
+    """
+    se_config_changes_total.labels(change_type=change_type).inc(count)
+
+
+def record_lazy_se_config_reload(reason: str, status: str) -> None:
+    """
+    Запись метрики lazy reload (triggered by errors).
+
+    Args:
+        reason: Причина reload (insufficient_storage, not_found, connection_error)
+        status: Статус (success, failed, error)
+    """
+    lazy_se_config_reload_total.labels(reason=reason, status=status).inc()
+    logger.debug(f"Lazy SE config reload: reason={reason}, status={status}")
+
+
 def record_upload(
     retention_policy: str,
     status: str,

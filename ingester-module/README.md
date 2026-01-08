@@ -654,6 +654,206 @@ pytest ingester-module/tests/integration/ -v
 - `artstore.ingester.storage_selection` - Выбор Storage Element
 - `artstore.ingester.transfer` - Перенос файла между Storage Elements
 
+### 3. Dynamic SE Configuration Management (Sprint 21)
+
+#### Проблема
+
+До Sprint 21 Ingester Module загружал конфигурацию Storage Elements **ОДИН РАЗ** при старте из Redis или Admin Module API. При добавлении новых SE, удалении старых или изменении endpoints требовался полный restart всех Ingester instances, что вызывало:
+
+- **Downtime** при добавлении новых Storage Elements
+- **Balancing issues** при изменении priorities
+- **Stale data** при недоступности SE (неактуальный cache)
+- **Operational overhead** требующий координации restarts
+
+#### Решение: Dual-Reload Механизм
+
+Sprint 21 реализует **два независимых механизма** обновления SE конфигурации:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│              SE Configuration Reload Mechanism                  │
+├────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  📅 1. PERIODIC RELOAD (Background Task)                       │
+│     ┌──────────────────────────────────────────────────┐      │
+│     │  Interval: 60s (default, configurable 10-600s)   │      │
+│     │  Source: Redis → Admin Module (fallback)         │      │
+│     │  Process:                                         │      │
+│     │    1. Fetch SE config from Redis Registry        │      │
+│     │    2. If Redis unavailable → Admin Module API    │      │
+│     │    3. Call capacity_monitor.reload_storage_endpoints() │
+│     │    4. Detect & log: added, removed, updated SE   │      │
+│     │    5. Clear Redis cache for removed SE           │      │
+│     │    6. Record Prometheus metrics                  │      │
+│     └──────────────────────────────────────────────────┘      │
+│                                                                 │
+│  ⚡ 2. LAZY RELOAD (Error-Triggered)                           │
+│     ┌──────────────────────────────────────────────────┐      │
+│     │  Triggers:                                        │      │
+│     │    - 507 Insufficient Storage (capacity stale)   │      │
+│     │    - 404 Not Found (SE moved/removed)            │      │
+│     │    - Connection errors (SE unavailable)          │      │
+│     │  Process:                                         │      │
+│     │    1. Upload error detected                      │      │
+│     │    2. Immediate fetch from Redis/Admin Module    │      │
+│     │    3. Call capacity_monitor.reload_storage_endpoints() │
+│     │    4. Retry upload with fresh SE config          │      │
+│     │    5. Record Prometheus metrics (reason=error_type)    │
+│     └──────────────────────────────────────────────────┘      │
+│                                                                 │
+│  🔄 Update Flow:                                               │
+│     AdaptiveCapacityMonitor.reload_storage_endpoints()         │
+│       ├─ Update _storage_endpoints dict                       │
+│       ├─ Update _storage_priorities dict                      │
+│       ├─ Clear Redis cache for removed SE                     │
+│       │   ├─ DELETE capacity:{se_id}                          │
+│       │   ├─ DELETE health:{se_id}                            │
+│       │   └─ ZREM capacity:{mode}:available {se_id}           │
+│       └─ Record metrics (added/removed/updated counts)        │
+│                                                                 │
+└────────────────────────────────────────────────────────────────┘
+```
+
+#### Configuration Parameters
+
+**Environment Variables** (ingester-module/.env):
+
+```bash
+# Sprint 21: AdaptiveCapacityMonitor SE Config Reload
+# Periodic Reload: background task обновляет SE endpoints каждые N секунд
+# Lazy Reload: немедленное обновление при ошибках (507, 404, connection errors)
+
+# Включить периодическое обновление SE конфигурации (on/off)
+CAPACITY_MONITOR_CONFIG_RELOAD_ENABLED=on
+
+# Интервал обновления в секундах (диапазон: 10-600)
+# Рекомендуемые значения:
+# - 60s (1 минута) - production default, баланс актуальности и нагрузки
+# - 30s - для high-availability сценариев с частыми SE changes
+# - 120s (2 минуты) - для стабильных окружений с редкими изменениями
+CAPACITY_MONITOR_CONFIG_RELOAD_INTERVAL=60
+```
+
+**Docker Compose** (docker-compose.yml):
+
+```yaml
+services:
+  ingester-module:
+    environment:
+      CAPACITY_MONITOR_CONFIG_RELOAD_ENABLED: "on"
+      CAPACITY_MONITOR_CONFIG_RELOAD_INTERVAL: 60
+```
+
+#### Prometheus Metrics
+
+Sprint 21 добавляет **5 новых метрик** для мониторинга SE config reload:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `ingester_se_config_reload_total` | Counter | Общее количество reload attempts<br>Labels: `source` (redis/admin), `status` (success/failed) |
+| `ingester_se_config_reload_duration_seconds` | Histogram | Длительность reload операции<br>Labels: `source` (redis/admin)<br>Buckets: 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0 |
+| `ingester_se_endpoints_count` | Gauge | Текущее количество SE endpoints known to Ingester |
+| `ingester_se_config_changes_total` | Counter | Количество изменений конфигурации<br>Labels: `change_type` (added/removed/updated) |
+| `ingester_lazy_se_config_reload_total` | Counter | Lazy reload attempts triggered by errors<br>Labels: `reason` (insufficient_storage/not_found/connection_error), `status` (success/failed) |
+
+**Example Grafana Query**:
+
+```promql
+# SE config reload success rate
+rate(ingester_se_config_reload_total{status="success"}[5m])
+/
+rate(ingester_se_config_reload_total[5m]) * 100
+
+# Lazy reload frequency by error type
+rate(ingester_lazy_se_config_reload_total[5m]) by (reason)
+
+# Current SE endpoints count
+ingester_se_endpoints_count
+
+# SE changes over time
+rate(ingester_se_config_changes_total[1h]) by (change_type)
+```
+
+#### Alerting Rules
+
+**Prometheus Alerts** (Sprint 21):
+
+```yaml
+groups:
+  - name: ingester_se_config_reload
+    rules:
+      # High periodic reload failure rate
+      - alert: IngesterSEConfigReloadFailed
+        expr: |
+          rate(ingester_se_config_reload_total{status="failed"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingester SE config reload failing"
+          description: "Ingester failed to reload SE config {{ $value }} times/sec"
+
+      # Frequent lazy reloads (potential SE issues)
+      - alert: IngesterFrequentLazyReloads
+        expr: |
+          rate(ingester_lazy_se_config_reload_total[5m]) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frequent lazy SE config reloads detected"
+          description: "Ingester triggering lazy reloads {{ $value }} times/sec (reason={{ $labels.reason }})"
+
+      # No SE endpoints available
+      - alert: IngesterNoSEEndpoints
+        expr: |
+          ingester_se_endpoints_count == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ingester has no SE endpoints"
+          description: "Ingester SE endpoints count is 0 - uploads will fail"
+```
+
+#### Operational Benefits
+
+1. **Zero-Downtime SE Management**
+   - Добавление новых SE: автоматическое обнаружение за 60s (или мгновенно при lazy reload)
+   - Удаление SE: graceful removal с очисткой cache
+   - Endpoint changes: автоматическое переключение без restart
+
+2. **Self-Healing**
+   - Lazy reload при ошибках автоматически обновляет stale data
+   - Fallback chain (Redis → Admin Module) обеспечивает надёжность
+   - Circuit breaker + reload = быстрое восстановление
+
+3. **Improved Observability**
+   - Prometheus metrics для track SE changes в реальном времени
+   - Alerting на проблемы с reload (failed attempts, frequent lazy reloads)
+   - Structured logging всех изменений (added/removed/updated)
+
+4. **Reduced Operational Overhead**
+   - Нет необходимости координировать restarts Ingester instances
+   - Автоматическая синхронизация со всеми Ingester replicas через Redis
+   - Graceful degradation при недоступности Redis (Admin Module fallback)
+
+#### Implementation Details
+
+**Core Components**:
+
+- **AdaptiveCapacityMonitor.reload_storage_endpoints()**: Атомарное обновление SE config с cache invalidation
+- **main.py/_periodic_se_config_reload()**: Background task для periodic reload
+- **UploadService.trigger_se_config_reload()**: Lazy reload при upload errors
+- **Redis Cache Cleanup**: Автоматическая очистка для removed SE (capacity, health, sorted sets)
+
+**Safety Mechanisms**:
+
+- **Atomic Updates**: `_storage_endpoints` и `_storage_priorities` обновляются одновременно
+- **Graceful Fallback**: Redis unavailable → Admin Module API → продолжить с cached config
+- **Non-Blocking**: Reload failures не прерывают работу Ingester (graceful degradation)
+- **Metrics Recording**: Все reload operations tracked в Prometheus для monitoring
+
 ## Troubleshooting
 
 ### Проблемы с Service Discovery (Sprint 16)

@@ -187,6 +187,131 @@ async def _fetch_storage_endpoints_from_redis(redis_client) -> tuple[dict[str, s
     return endpoints, priorities
 
 
+async def _periodic_se_config_reload(
+    capacity_monitor,
+    redis_client,
+    admin_client,
+    interval: int = 60
+) -> None:
+    """
+    Background task для периодического обновления SE конфигурации.
+
+    Sprint 21: Читает данные из Redis (или Admin Module fallback) каждые `interval` секунд
+    и обновляет AdaptiveCapacityMonitor через reload_storage_endpoints().
+
+    Источники данных (fallback chain):
+    1. Redis: artstore:storage_elements (primary)
+    2. Admin Module API: /api/v1/internal/storage-elements/available (fallback)
+
+    Graceful degradation:
+    - Redis недоступен → Admin Module API
+    - Оба недоступны → используется last known config
+    - Ошибки логируются, но task продолжает работать
+
+    Args:
+        capacity_monitor: AdaptiveCapacityMonitor instance для обновления
+        redis_client: Async Redis client для чтения конфигурации
+        admin_client: Admin Module HTTP client (fallback source)
+        interval: Интервал обновления в секундах (default: 60)
+    """
+    import asyncio
+    import time
+
+    logger.info(
+        "SE config reload task started",
+        extra={
+            "interval_seconds": interval,
+            "reload_enabled": True,
+        }
+    )
+
+    while True:
+        try:
+            # Ждём интервал перед следующим обновлением
+            await asyncio.sleep(interval)
+
+            reload_start = time.perf_counter()
+            endpoints: dict[str, str] = {}
+            priorities: dict[str, int] = {}
+            source = "unknown"
+
+            # Попытка 1: Redis (primary source)
+            if redis_client:
+                try:
+                    endpoints, priorities = await _fetch_storage_endpoints_from_redis(redis_client)
+                    if endpoints:
+                        source = "redis"
+                except Exception as e:
+                    logger.warning(
+                        "Failed to fetch SE from Redis",
+                        extra={"error": str(e)}
+                    )
+
+            # Попытка 2: Admin Module API (fallback)
+            if not endpoints and admin_client:
+                try:
+                    endpoints, priorities = await _fetch_storage_endpoints_from_admin(admin_client)
+                    if endpoints:
+                        source = "admin_module"
+                except Exception as e:
+                    logger.warning(
+                        "Failed to fetch SE from Admin Module",
+                        extra={"error": str(e)}
+                    )
+
+            # Применяем обновления если есть данные
+            if endpoints and capacity_monitor:
+                await capacity_monitor.reload_storage_endpoints(endpoints, priorities)
+
+                reload_duration = time.perf_counter() - reload_start
+
+                # Метрики
+                from app.core.metrics import (
+                    record_se_config_reload,
+                    record_se_config_reload_duration,
+                )
+                record_se_config_reload(source, "success")
+                record_se_config_reload_duration(source, reload_duration)
+
+                logger.debug(
+                    "SE config reload completed",
+                    extra={
+                        "source": source,
+                        "se_count": len(endpoints),
+                        "duration_ms": round(reload_duration * 1000, 2),
+                    }
+                )
+            else:
+                # Нет данных от источников
+                logger.warning(
+                    "No SE endpoints available from any source",
+                    extra={
+                        "redis_available": redis_client is not None,
+                        "admin_available": admin_client is not None,
+                    }
+                )
+
+                # Метрики
+                from app.core.metrics import record_se_config_reload
+                record_se_config_reload("none", "failed")
+
+        except asyncio.CancelledError:
+            logger.info("SE config reload task cancelled")
+            break
+        except Exception as e:
+            logger.error(
+                "SE config reload task error",
+                extra={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+
+            # Метрики
+            from app.core.metrics import record_se_config_reload
+            record_se_config_reload("unknown", "failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -330,6 +455,28 @@ async def lifespan(app: FastAPI):
                 extra={"error": str(e)}
             )
 
+    # Sprint 21: Background task для периодического reload SE config
+    reload_task = None
+
+    if capacity_monitor and settings.capacity_monitor.config_reload_enabled:
+        import asyncio
+
+        reload_task = asyncio.create_task(
+            _periodic_se_config_reload(
+                capacity_monitor=capacity_monitor,
+                redis_client=redis_client,
+                admin_client=admin_client,
+                interval=settings.capacity_monitor.config_reload_interval
+            )
+        )
+        logger.info(
+            "SE config reload task started",
+            extra={
+                "interval": settings.capacity_monitor.config_reload_interval,
+                "enabled": settings.capacity_monitor.config_reload_enabled,
+            }
+        )
+
     # JWT Hot-Reload: Запуск file watcher для автоматической перезагрузки ключей
     try:
         from app.core.jwt_key_manager import get_jwt_key_manager
@@ -347,6 +494,17 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Ingester Module")
+
+    # Sprint 21: Остановка reload task
+    if reload_task:
+        import asyncio
+
+        reload_task.cancel()
+        try:
+            await reload_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("SE config reload task stopped")
 
     # Закрытие в обратном порядке
     # Sprint 17: Остановка AdaptiveCapacityMonitor
