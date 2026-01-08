@@ -155,7 +155,7 @@ async def register_file(
         "File registration request received",
         extra={
             "file_id": str(request.file_id),
-            "filename": request.original_filename,
+            "original_filename": request.original_filename,
             "retention_policy": request.retention_policy.value,
             "storage_element_id": request.storage_element_id,
             "client_id": current_account.client_id
@@ -169,7 +169,7 @@ async def register_file(
             "File registered successfully",
             extra={
                 "file_id": str(file.file_id),
-                "filename": file.original_filename,
+                "original_filename": file.original_filename,
                 "client_id": current_account.client_id
             }
         )

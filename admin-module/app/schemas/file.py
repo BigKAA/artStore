@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.file import RetentionPolicy
 
@@ -148,32 +148,30 @@ class FileRegisterRequest(BaseModel):
             raise ValueError('Checksum must be valid hexadecimal string')
         return v.lower()
 
-    @field_validator('retention_policy')
-    @classmethod
-    def validate_retention_policy_with_ttl(cls, v: RetentionPolicy, info) -> RetentionPolicy:
+    @model_validator(mode='after')
+    def validate_retention_policy_with_ttl(self) -> 'FileRegisterRequest':
         """
         Валидация consistency между retention_policy и ttl_*.
 
         Правила:
         - temporary → ttl_expires_at и ttl_days ОБЯЗАТЕЛЬНЫ
         - permanent → ttl_expires_at и ttl_days должны быть None
-        """
-        # Note: В Pydantic v2 используем info.data вместо values
-        ttl_expires_at = info.data.get('ttl_expires_at')
-        ttl_days = info.data.get('ttl_days')
 
-        if v == RetentionPolicy.TEMPORARY:
-            if not ttl_expires_at or not ttl_days:
+        Note: model_validator с mode='after' выполняется ПОСЛЕ парсинга всех полей,
+        поэтому ttl_expires_at уже datetime объект, а не строка.
+        """
+        if self.retention_policy == RetentionPolicy.TEMPORARY:
+            if not self.ttl_expires_at or not self.ttl_days:
                 raise ValueError(
                     'ttl_expires_at and ttl_days are required for temporary files'
                 )
-        elif v == RetentionPolicy.PERMANENT:
-            if ttl_expires_at or ttl_days:
+        elif self.retention_policy == RetentionPolicy.PERMANENT:
+            if self.ttl_expires_at or self.ttl_days:
                 raise ValueError(
                     'ttl_expires_at and ttl_days must be None for permanent files'
                 )
 
-        return v
+        return self
 
     model_config = {
         "json_schema_extra": {
