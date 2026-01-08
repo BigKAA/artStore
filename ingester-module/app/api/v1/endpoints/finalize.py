@@ -121,58 +121,86 @@ async def finalize_file(
     if request is None:
         request = FinalizeRequest()
 
-    # TODO: Sprint 15.2 - Получить информацию о файле из Admin Module file registry
-    # Для MVP используем заглушку - в production нужно получить:
-    # - source_se_id: ID Edit SE где хранится файл
-    # - source_se_endpoint: URL Edit SE
-    # - file_size: Размер файла
-    # - checksum: SHA-256 checksum
-    # - retention_policy: Проверить что файл temporary
-
-    # Sprint 16: Получение данных о файле через Service Discovery
-    # TODO Sprint 15.2: Реализовать получение данных из Admin Module file registry
-    # В production эти данные должны приходить из Admin Module /api/v1/files/{file_id}
+    # Sprint 15.2: Получение информации о файле из Admin Module file registry
     try:
-        # Получаем source SE через StorageSelector (первый доступный Edit SE)
-        # ВАЖНО: В production нужно получить реальные данные файла из file registry
-        from app.services.storage_selector import (
-            get_storage_selector,
-            RetentionPolicy as SelectorRetentionPolicy
-        )
+        from app.services.admin_client import get_admin_client, AdminClientError
+
+        admin_client = await get_admin_client()
+
+        # Получить метаданные файла из registry
+        file_metadata = await admin_client.get_file(str(file_id))
+
+        if not file_metadata:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"File {file_id} not found in registry"
+            )
+
+        # Валидация: файл должен быть temporary
+        if file_metadata.get("retention_policy") != "temporary":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File {file_id} is not temporary (retention_policy={file_metadata.get('retention_policy')})"
+            )
+
+        # Валидация: файл не должен быть уже финализирован
+        if file_metadata.get("finalized_at"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File {file_id} is already finalized"
+            )
+
+        # Извлечение данных из registry
+        source_se_id = file_metadata.get("storage_element_id")
+        source_se_endpoint = None  # Получить из StorageSelector
+        file_size = file_metadata.get("file_size")
+        checksum = file_metadata.get("checksum_sha256")
+
+        # Получить endpoint для source SE через StorageSelector
+        from app.services.storage_selector import get_storage_selector
 
         storage_selector = await get_storage_selector()
         if not storage_selector._initialized:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="StorageSelector not initialized - Service Discovery required"
+                detail="StorageSelector not initialized"
             )
 
-        # MVP: Получаем первый доступный Edit SE для source
-        # В production нужно получить конкретный SE где хранится файл
-        source_se_info = await storage_selector.select_storage_element(
-            file_size=0,  # TODO: получить из file registry
-            retention_policy=SelectorRetentionPolicy.TEMPORARY
-        )
-
-        if not source_se_info:
+        # Найти source SE endpoint
+        se_endpoints = storage_selector._endpoints
+        if source_se_id not in se_endpoints:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="No available Edit Storage Element for finalization source"
+                detail=f"Source SE {source_se_id} not available"
             )
 
-        source_se_id = source_se_info.element_id
-        source_se_endpoint = source_se_info.endpoint
-        file_size = 0  # TODO: получить из file registry
-        checksum = ""  # TODO: получить из file registry
+        source_se_endpoint = se_endpoints[source_se_id]
 
-        logger.warning(
-            "Using MVP placeholder for file metadata",
+        logger.info(
+            "File metadata retrieved from registry",
             extra={
                 "file_id": str(file_id),
                 "source_se_id": source_se_id,
-                "note": "TODO Sprint 15.2: Implement file registry lookup"
+                "file_size": file_size,
+                "retention_policy": file_metadata.get("retention_policy")
             }
         )
+
+    except AdminClientError as e:
+        logger.error(
+            "Failed to get file metadata from Admin Module",
+            extra={
+                "file_id": str(file_id),
+                "error": str(e)
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to retrieve file metadata: {str(e)}"
+        )
+
+    # Запуск финализации с данными из file registry
+    try:
 
         response = await finalize_svc.finalize_file(
             file_id=file_id,

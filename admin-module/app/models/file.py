@@ -121,8 +121,14 @@ class File(Base, TimestampMixin):
 
     # Retention Policy
     # create_type=True для автоматического создания ENUM при create_all
+    # values_callable используется для передачи ЗНАЧЕНИЙ enum (lowercase), а не имен (UPPERCASE)
     retention_policy: Mapped[RetentionPolicy] = mapped_column(
-        ENUM(RetentionPolicy, name='retention_policy_enum', create_type=True),
+        ENUM(
+            RetentionPolicy,
+            name='retention_policy_enum',
+            create_type=False,  # ENUM уже создан вручную в БД
+            values_callable=lambda enum: [e.value for e in enum]  # Используем .value вместо .name
+        ),
         nullable=False,
         server_default='permanent',
         comment="Политика хранения: temporary или permanent"

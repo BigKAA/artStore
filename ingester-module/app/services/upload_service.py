@@ -331,6 +331,59 @@ class UploadService:
                     }
                 )
 
+                # Sprint 15.2: Регистрация файла в Admin Module file registry
+                try:
+                    from app.services.admin_client import get_admin_client, AdminClientError
+
+                    admin_client = await get_admin_client()
+
+                    # Подготовка данных для регистрации
+                    file_register_data = {
+                        "file_id": str(result['file_id']),
+                        "original_filename": file.filename or "unknown",
+                        "storage_filename": result.get('storage_filename', result['file_id']),
+                        "file_size": file_size,
+                        "checksum_sha256": result.get('checksum', checksum),
+                        "content_type": file.content_type,
+                        "description": request.description,
+                        "retention_policy": request.retention_policy.value,
+                        "ttl_expires_at": ttl_expires_at.isoformat() if ttl_expires_at else None,
+                        "ttl_days": request.ttl_days,
+                        "storage_element_id": result["storage_element_id"],
+                        "storage_path": f"/files/{result['file_id']}",
+                        "compressed": request.compress,
+                        "compression_algorithm": request.compression_algorithm.value if request.compress else None,
+                        "original_size": file_size if request.compress else None,
+                        "uploaded_by": user_id,
+                        "upload_source_ip": None,  # TODO: extract from request
+                        "user_metadata": request.metadata,
+                    }
+
+                    # Регистрация в file registry
+                    registry_result = await admin_client.register_file(file_register_data)
+
+                    logger.info(
+                        "File registered in Admin Module registry",
+                        extra={
+                            "file_id": str(result['file_id']),
+                            "registry_file_id": registry_result.get('file_id'),
+                        }
+                    )
+
+                except AdminClientError as e:
+                    # NON-CRITICAL: Файл загружен в SE, но не зарегистрирован в Admin Module
+                    # Может быть зарегистрирован позже через reconciliation job
+                    logger.error(
+                        "Failed to register file in Admin Module registry",
+                        extra={
+                            "file_id": str(result['file_id']),
+                            "error": str(e),
+                            "user_id": user_id
+                        }
+                    )
+                    # Не прерываем операцию - файл уже в SE
+                    # TODO Sprint 15.3: Implement reconciliation job для retry
+
                 # Sprint 15: Формирование ответа с retention policy info
                 return UploadResponse(
                     file_id=UUID(result['file_id']),
