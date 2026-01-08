@@ -889,6 +889,153 @@ class AdaptiveCapacityMonitor:
 
         return result
 
+    # ========== SE Configuration Reload (Sprint 21) ==========
+
+    async def reload_storage_endpoints(
+        self,
+        new_endpoints: dict[str, str],
+        new_priorities: dict[str, int]
+    ) -> None:
+        """
+        Обновление списка Storage Elements endpoints.
+
+        Sprint 21: Периодическое обновление SE конфигурации для динамического
+        обнаружения изменений без перезапуска Ingester.
+
+        Вызывается периодически (каждые 60s) или по требованию (lazy reload).
+
+        Определяет изменения:
+        - added: новые SE в конфигурации
+        - removed: SE удалены из конфигурации
+        - updated: SE endpoint или priority изменён
+
+        Применяет обновления:
+        - Обновляет self._storage_endpoints и self._storage_priorities
+        - Очищает Redis cache для removed SE
+        - Логирует все изменения
+
+        Args:
+            new_endpoints: Обновлённый словарь {se_id: endpoint_url}
+            new_priorities: Обновлённый словарь {se_id: priority}
+        """
+        # Определяем изменения
+        old_se_ids = set(self._storage_endpoints.keys())
+        new_se_ids = set(new_endpoints.keys())
+
+        added = new_se_ids - old_se_ids
+        removed = old_se_ids - new_se_ids
+
+        # Определяем updated SE (изменился endpoint или priority)
+        updated = set()
+        for se_id in old_se_ids & new_se_ids:
+            endpoint_changed = self._storage_endpoints[se_id] != new_endpoints[se_id]
+            priority_changed = self._storage_priorities.get(se_id) != new_priorities.get(se_id)
+
+            if endpoint_changed or priority_changed:
+                updated.add(se_id)
+
+        # Логируем изменения если есть
+        if added or removed or updated:
+            logger.info(
+                "Storage endpoints configuration updated",
+                extra={
+                    "added": list(added),
+                    "removed": list(removed),
+                    "updated": list(updated),
+                    "total_before": len(self._storage_endpoints),
+                    "total_after": len(new_endpoints),
+                    "instance_id": self._instance_id,
+                    "role": self._role.value,
+                }
+            )
+
+            # Детальное логирование для каждого типа изменений
+            for se_id in added:
+                logger.info(
+                    f"SE added: {se_id}",
+                    extra={
+                        "se_id": se_id,
+                        "endpoint": new_endpoints[se_id],
+                        "priority": new_priorities.get(se_id, 100),
+                    }
+                )
+
+            for se_id in removed:
+                logger.info(
+                    f"SE removed: {se_id}",
+                    extra={
+                        "se_id": se_id,
+                        "old_endpoint": self._storage_endpoints[se_id],
+                    }
+                )
+
+            for se_id in updated:
+                logger.info(
+                    f"SE updated: {se_id}",
+                    extra={
+                        "se_id": se_id,
+                        "old_endpoint": self._storage_endpoints.get(se_id),
+                        "new_endpoint": new_endpoints[se_id],
+                        "old_priority": self._storage_priorities.get(se_id),
+                        "new_priority": new_priorities.get(se_id),
+                    }
+                )
+
+            # Метрики
+            from app.core.metrics import record_se_config_change
+            record_se_config_change("added", len(added))
+            record_se_config_change("removed", len(removed))
+            record_se_config_change("updated", len(updated))
+
+        # Применяем обновления
+        self._storage_endpoints = new_endpoints
+        self._storage_priorities = new_priorities
+
+        # Очищаем cache для removed SE
+        for se_id in removed:
+            await self._clear_se_cache(se_id)
+
+        # Обновляем метрику общего количества SE
+        from app.core.metrics import update_se_endpoints_count
+        update_se_endpoints_count(len(new_endpoints))
+
+    async def _clear_se_cache(self, se_id: str) -> None:
+        """
+        Очистка Redis cache для удалённого Storage Element.
+
+        Sprint 21: Вызывается при reload_storage_endpoints() для removed SE.
+
+        Удаляет:
+        - capacity:{se_id} - capacity данные
+        - health:{se_id} - health status
+        - se_id из sorted sets capacity:{mode}:available
+
+        Args:
+            se_id: ID Storage Element для очистки
+        """
+        try:
+            # Удаляем capacity и health cache
+            await self._redis.delete(f"capacity:{se_id}")
+            await self._redis.delete(f"health:{se_id}")
+
+            # Удаляем из sorted sets для всех режимов
+            for mode in ("edit", "rw"):
+                await self._redis.zrem(f"capacity:{mode}:available", se_id)
+
+            logger.debug(
+                f"Cleared cache for removed SE",
+                extra={"se_id": se_id}
+            )
+
+        except RedisError as e:
+            logger.warning(
+                f"Failed to clear cache for removed SE",
+                extra={
+                    "se_id": se_id,
+                    "error": str(e),
+                }
+            )
+
     # ========== Adaptive Polling Logic ==========
 
     def _record_poll_success(

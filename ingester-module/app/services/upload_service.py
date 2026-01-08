@@ -45,6 +45,7 @@ from app.schemas.upload import (
     DEFAULT_TTL_DAYS  # Sprint 15
 )
 from app.services.auth_service import AuthService
+from app.core.metrics import record_lazy_se_config_reload  # Sprint 21
 
 # TYPE_CHECKING для избежания circular imports
 if TYPE_CHECKING:
@@ -471,6 +472,9 @@ class UploadService:
 
             # Sprint 17: Проверка на 507 Insufficient Storage
             if response.status_code == 507:
+                # Sprint 21 Phase 2: Trigger lazy reload on 507
+                await self.trigger_se_config_reload(reason="insufficient_storage")
+
                 raise InsufficientStorageException(
                     message=f"Storage Element {storage_element_id} has insufficient storage",
                     storage_element_id=storage_element_id,
@@ -489,11 +493,18 @@ class UploadService:
         except httpx.HTTPStatusError as e:
             # Sprint 17: Проверка на 507 через HTTPStatusError
             if e.response.status_code == 507:
+                # Sprint 21 Phase 2: Trigger lazy reload on 507
+                await self.trigger_se_config_reload(reason="insufficient_storage")
+
                 raise InsufficientStorageException(
                     message=f"Storage Element {storage_element_id} has insufficient storage",
                     storage_element_id=storage_element_id,
                     required_bytes=file_size,
                 )
+
+            # Sprint 21 Phase 2: Trigger lazy reload on 404 Not Found
+            if e.response.status_code == 404:
+                await self.trigger_se_config_reload(reason="not_found")
 
             logger.error(
                 "Storage Element HTTP error",
@@ -509,6 +520,9 @@ class UploadService:
             )
 
         except httpx.RequestError as e:
+            # Sprint 21 Phase 2: Trigger lazy reload on connection error
+            await self.trigger_se_config_reload(reason="connection_error")
+
             logger.error(
                 "Storage Element connection error",
                 extra={
@@ -640,3 +654,243 @@ class UploadService:
 
         url, _ = await self._select_storage_element_with_id(file_size, retention_policy)
         return url
+
+    async def trigger_se_config_reload(self, reason: str = "manual") -> None:
+        """
+        Принудительное обновление SE конфигурации.
+
+        Sprint 21 Phase 2: Lazy Reload для немедленного обновления при ошибках.
+
+        Вызывается при обнаружении проблем:
+        - 507 Insufficient Storage (capacity cache stale)
+        - 404 Not Found (SE удалён/переехал)
+        - Connection errors (SE недоступен)
+
+        Процесс:
+        1. Fetch fresh SE endpoints from Redis (primary)
+        2. Fallback to Admin Module API if Redis unavailable
+        3. Call capacity_monitor.reload_storage_endpoints()
+        4. Record metrics for monitoring
+
+        Args:
+            reason: Причина reload (insufficient_storage, not_found, connection_error, manual)
+        """
+        if not self._capacity_monitor:
+            logger.warning(
+                "Cannot trigger SE config reload: CapacityMonitor not configured",
+                extra={"reason": reason}
+            )
+            record_lazy_se_config_reload(reason=reason, status="skipped_no_monitor")
+            return
+
+        logger.info(
+            "Triggering lazy SE config reload",
+            extra={"reason": reason}
+        )
+
+        import time
+        start_time = time.time()
+
+        try:
+            # Попытка 1: Redis (primary source)
+            endpoints, priorities = await self._fetch_from_redis()
+
+            if endpoints:
+                logger.info(
+                    "SE config fetched from Redis",
+                    extra={
+                        "reason": reason,
+                        "se_count": len(endpoints),
+                        "source": "redis"
+                    }
+                )
+
+                # Применяем обновления через CapacityMonitor
+                await self._capacity_monitor.reload_storage_endpoints(
+                    new_endpoints=endpoints,
+                    new_priorities=priorities
+                )
+
+                duration = time.time() - start_time
+                record_lazy_se_config_reload(reason=reason, status="success_redis")
+
+                logger.info(
+                    "Lazy SE config reload completed",
+                    extra={
+                        "reason": reason,
+                        "source": "redis",
+                        "se_count": len(endpoints),
+                        "duration_seconds": round(duration, 3)
+                    }
+                )
+                return
+
+            # Попытка 2: Admin Module API (fallback)
+            logger.warning(
+                "Redis unavailable for SE config, trying Admin Module fallback",
+                extra={"reason": reason}
+            )
+
+            endpoints, priorities = await self._fetch_from_admin_module()
+
+            if endpoints:
+                logger.info(
+                    "SE config fetched from Admin Module",
+                    extra={
+                        "reason": reason,
+                        "se_count": len(endpoints),
+                        "source": "admin_module"
+                    }
+                )
+
+                # Применяем обновления через CapacityMonitor
+                await self._capacity_monitor.reload_storage_endpoints(
+                    new_endpoints=endpoints,
+                    new_priorities=priorities
+                )
+
+                duration = time.time() - start_time
+                record_lazy_se_config_reload(reason=reason, status="success_admin")
+
+                logger.info(
+                    "Lazy SE config reload completed",
+                    extra={
+                        "reason": reason,
+                        "source": "admin_module",
+                        "se_count": len(endpoints),
+                        "duration_seconds": round(duration, 3)
+                    }
+                )
+                return
+
+            # Оба источника недоступны
+            logger.error(
+                "Failed to fetch SE config from all sources",
+                extra={"reason": reason}
+            )
+            record_lazy_se_config_reload(reason=reason, status="failed_all_sources")
+
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(
+                "Lazy SE config reload failed with exception",
+                extra={
+                    "reason": reason,
+                    "error": str(e),
+                    "duration_seconds": round(duration, 3)
+                },
+                exc_info=True
+            )
+            record_lazy_se_config_reload(reason=reason, status="error")
+
+    async def _fetch_from_redis(self) -> tuple[dict[str, str], dict[str, int]]:
+        """
+        Получение SE configuration из Redis.
+
+        Sprint 21 Phase 2: Helper для trigger_se_config_reload().
+
+        Returns:
+            tuple: (endpoints dict, priorities dict) или ({}, {}) при ошибке
+        """
+        try:
+            # Получаем Redis client из StorageSelector
+            if not self._storage_selector:
+                logger.warning("StorageSelector not configured for Redis fetch")
+                return {}, {}
+
+            # StorageSelector имеет доступ к Redis через ServiceDiscovery
+            # Используем его метод для получения свежих данных
+            redis_client = getattr(self._storage_selector, '_redis_client', None)
+
+            if not redis_client:
+                logger.warning("Redis client not available in StorageSelector")
+                return {}, {}
+
+            # Читаем SE configuration из Redis
+            # Format: storage:elements:registry - Hash {se_id → endpoint}
+            #         storage:elements:priorities - Hash {se_id → priority}
+            endpoints_raw = await redis_client.hgetall("storage:elements:registry")
+            priorities_raw = await redis_client.hgetall("storage:elements:priorities")
+
+            if not endpoints_raw:
+                logger.warning("No SE endpoints found in Redis")
+                return {}, {}
+
+            # Конвертация Redis strings to dict
+            endpoints = {k: v for k, v in endpoints_raw.items()}
+            priorities = {k: int(v) for k, v in priorities_raw.items()}
+
+            logger.debug(
+                "SE config fetched from Redis",
+                extra={
+                    "se_count": len(endpoints),
+                    "se_ids": list(endpoints.keys())
+                }
+            )
+
+            return endpoints, priorities
+
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch SE config from Redis",
+                extra={"error": str(e)}
+            )
+            return {}, {}
+
+    async def _fetch_from_admin_module(self) -> tuple[dict[str, str], dict[str, int]]:
+        """
+        Получение SE configuration из Admin Module API.
+
+        Sprint 21 Phase 2: Fallback для trigger_se_config_reload().
+
+        Returns:
+            tuple: (endpoints dict, priorities dict) или ({}, {}) при ошибке
+        """
+        try:
+            # Admin Module URL из конфигурации
+            admin_url = settings.auth.admin_module_url
+
+            # Получаем JWT токен для аутентификации
+            access_token = await self.auth_service.get_access_token()
+
+            # Запрос к Admin Module API
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{admin_url}/api/v1/storage-elements",
+                    headers={'Authorization': f'Bearer {access_token}'},
+                    timeout=10.0
+                )
+
+                response.raise_for_status()
+                data = response.json()
+
+            # Парсинг ответа
+            # Expected format: {"storage_elements": [{"id": "...", "endpoint": "...", "priority": 1}, ...]}
+            storage_elements = data.get("storage_elements", [])
+
+            if not storage_elements:
+                logger.warning("No SE found in Admin Module response")
+                return {}, {}
+
+            endpoints = {se["id"]: se["endpoint"] for se in storage_elements}
+            priorities = {se["id"]: se.get("priority", 1) for se in storage_elements}
+
+            logger.debug(
+                "SE config fetched from Admin Module",
+                extra={
+                    "se_count": len(endpoints),
+                    "se_ids": list(endpoints.keys())
+                }
+            )
+
+            return endpoints, priorities
+
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch SE config from Admin Module",
+                extra={
+                    "admin_url": settings.auth.admin_module_url,
+                    "error": str(e)
+                }
+            )
+            return {}, {}

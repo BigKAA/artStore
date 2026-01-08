@@ -959,3 +959,283 @@ class TestAdaptivePollingState:
         capacity_monitor._record_poll_failure("se-01")
 
         assert capacity_monitor._failure_counts["se-01"] == 3
+
+
+# ============================================================================
+# SPRINT 21: SE CONFIG RELOAD TESTS
+# ============================================================================
+
+class TestReloadStorageEndpoints:
+    """
+    Sprint 21 Phase 1: Тесты для динамического обновления SE конфигурации.
+
+    Проверяет:
+    - reload_storage_endpoints(): обновление endpoints и priorities
+    - _clear_se_cache(): очистка Redis cache для удалённых SE
+    - Обработка added, removed, updated SE
+    - Логирование изменений
+    - Metrics recording
+    """
+
+    @pytest.mark.asyncio
+    async def test_reload_storage_endpoints_added(self, capacity_monitor, mock_redis):
+        """
+        Тест добавления новых Storage Elements.
+
+        Сценарий:
+        - Исходные SE: se-01, se-02, se-03
+        - Новые SE: se-01, se-02, se-03, se-04 (добавлен se-04)
+        - Проверяем обновление _storage_endpoints и _storage_priorities
+        """
+        # Initial state
+        initial_endpoints = {
+            "se-01": "http://storage-01:8010",
+            "se-02": "http://storage-02:8010",
+            "se-03": "http://storage-03:8010",
+        }
+        initial_priorities = {"se-01": 1, "se-02": 2, "se-03": 3}
+
+        capacity_monitor._storage_endpoints = initial_endpoints.copy()
+        capacity_monitor._storage_priorities = initial_priorities.copy()
+
+        # New configuration (added se-04)
+        new_endpoints = {
+            "se-01": "http://storage-01:8010",
+            "se-02": "http://storage-02:8010",
+            "se-03": "http://storage-03:8010",
+            "se-04": "http://storage-04:8010",  # NEW
+        }
+        new_priorities = {"se-01": 1, "se-02": 2, "se-03": 3, "se-04": 4}
+
+        # Reload configuration
+        with patch("app.services.capacity_monitor.record_se_config_change") as mock_metric:
+            await capacity_monitor.reload_storage_endpoints(new_endpoints, new_priorities)
+
+            # Verify endpoints updated
+            assert capacity_monitor._storage_endpoints == new_endpoints
+            assert capacity_monitor._storage_priorities == new_priorities
+
+            # Verify metrics recorded
+            mock_metric.assert_any_call("added", count=1)
+
+    @pytest.mark.asyncio
+    async def test_reload_storage_endpoints_removed(self, capacity_monitor, mock_redis):
+        """
+        Тест удаления Storage Elements и очистки cache.
+
+        Сценарий:
+        - Исходные SE: se-01, se-02, se-03
+        - Новые SE: se-01, se-02 (удалён se-03)
+        - Проверяем удаление из _storage_endpoints и очистку Redis cache
+        """
+        # Initial state
+        initial_endpoints = {
+            "se-01": "http://storage-01:8010",
+            "se-02": "http://storage-02:8010",
+            "se-03": "http://storage-03:8010",
+        }
+        initial_priorities = {"se-01": 1, "se-02": 2, "se-03": 3}
+
+        capacity_monitor._storage_endpoints = initial_endpoints.copy()
+        capacity_monitor._storage_priorities = initial_priorities.copy()
+
+        # New configuration (removed se-03)
+        new_endpoints = {
+            "se-01": "http://storage-01:8010",
+            "se-02": "http://storage-02:8010",
+        }
+        new_priorities = {"se-01": 1, "se-02": 2}
+
+        # Reload configuration
+        with patch("app.services.capacity_monitor.record_se_config_change") as mock_metric:
+            await capacity_monitor.reload_storage_endpoints(new_endpoints, new_priorities)
+
+            # Verify endpoints updated
+            assert capacity_monitor._storage_endpoints == new_endpoints
+            assert capacity_monitor._storage_priorities == new_priorities
+            assert "se-03" not in capacity_monitor._storage_endpoints
+
+            # Verify Redis cache cleared for removed SE
+            mock_redis.delete.assert_any_call("capacity:se-03")
+            mock_redis.delete.assert_any_call("health:se-03")
+            mock_redis.zrem.assert_any_call("capacity:edit:available", "se-03")
+            mock_redis.zrem.assert_any_call("capacity:rw:available", "se-03")
+
+            # Verify metrics recorded
+            mock_metric.assert_any_call("removed", count=1)
+
+    @pytest.mark.asyncio
+    async def test_reload_storage_endpoints_updated(self, capacity_monitor, mock_redis):
+        """
+        Тест обновления endpoint URL и priority.
+
+        Сценарий:
+        - Исходные SE: se-01 (http://storage-01:8010, priority=1)
+        - Новые SE: se-01 (http://storage-01-new:8010, priority=5)
+        - Проверяем обновление endpoint и priority
+        """
+        # Initial state
+        initial_endpoints = {
+            "se-01": "http://storage-01:8010",
+            "se-02": "http://storage-02:8010",
+        }
+        initial_priorities = {"se-01": 1, "se-02": 2}
+
+        capacity_monitor._storage_endpoints = initial_endpoints.copy()
+        capacity_monitor._storage_priorities = initial_priorities.copy()
+
+        # New configuration (updated se-01 endpoint and priority)
+        new_endpoints = {
+            "se-01": "http://storage-01-new:8010",  # UPDATED URL
+            "se-02": "http://storage-02:8010",
+        }
+        new_priorities = {"se-01": 5, "se-02": 2}  # UPDATED priority
+
+        # Reload configuration
+        with patch("app.services.capacity_monitor.record_se_config_change") as mock_metric:
+            await capacity_monitor.reload_storage_endpoints(new_endpoints, new_priorities)
+
+            # Verify endpoints updated
+            assert capacity_monitor._storage_endpoints["se-01"] == "http://storage-01-new:8010"
+            assert capacity_monitor._storage_priorities["se-01"] == 5
+
+            # Verify metrics recorded (updated counts for endpoint or priority changes)
+            mock_metric.assert_any_call("updated", count=1)
+
+    @pytest.mark.asyncio
+    async def test_reload_storage_endpoints_empty_data(self, capacity_monitor, mock_redis):
+        """
+        Тест обработки пустых данных (все SE удалены).
+
+        Edge case:
+        - Новые endpoints и priorities пусты
+        - Все SE должны быть удалены и cache очищен
+        """
+        # Initial state
+        initial_endpoints = {
+            "se-01": "http://storage-01:8010",
+            "se-02": "http://storage-02:8010",
+        }
+        initial_priorities = {"se-01": 1, "se-02": 2}
+
+        capacity_monitor._storage_endpoints = initial_endpoints.copy()
+        capacity_monitor._storage_priorities = initial_priorities.copy()
+
+        # New configuration (empty - all SE removed)
+        new_endpoints = {}
+        new_priorities = {}
+
+        # Reload configuration
+        with patch("app.services.capacity_monitor.record_se_config_change") as mock_metric:
+            await capacity_monitor.reload_storage_endpoints(new_endpoints, new_priorities)
+
+            # Verify all endpoints removed
+            assert capacity_monitor._storage_endpoints == {}
+            assert capacity_monitor._storage_priorities == {}
+
+            # Verify Redis cache cleared for all removed SE
+            assert mock_redis.delete.call_count >= 4  # 2 SE × (capacity + health)
+            assert mock_redis.zrem.call_count >= 4  # 2 SE × (edit + rw)
+
+            # Verify metrics recorded
+            mock_metric.assert_any_call("removed", count=2)
+
+    @pytest.mark.asyncio
+    async def test_clear_se_cache_success(self, capacity_monitor, mock_redis):
+        """
+        Тест успешной очистки Redis cache для удалённого SE.
+
+        Проверяет:
+        - Удаление capacity cache (capacity:se_id)
+        - Удаление health cache (health:se_id)
+        - Удаление из sorted sets (capacity:edit:available, capacity:rw:available)
+        """
+        # Mock successful Redis operations
+        mock_redis.delete = AsyncMock(return_value=1)
+        mock_redis.zrem = AsyncMock(return_value=1)
+
+        # Clear cache for se-01
+        await capacity_monitor._clear_se_cache("se-01")
+
+        # Verify Redis operations called
+        mock_redis.delete.assert_any_call("capacity:se-01")
+        mock_redis.delete.assert_any_call("health:se-01")
+        mock_redis.zrem.assert_any_call("capacity:edit:available", "se-01")
+        mock_redis.zrem.assert_any_call("capacity:rw:available", "se-01")
+
+    @pytest.mark.asyncio
+    async def test_clear_se_cache_redis_error(self, capacity_monitor, mock_redis):
+        """
+        Тест обработки Redis ошибок при очистке cache.
+
+        Сценарий:
+        - Redis.delete() выбрасывает RedisError
+        - Метод должен логировать warning и продолжить работу (graceful degradation)
+        """
+        # Mock Redis error
+        mock_redis.delete = AsyncMock(side_effect=RedisError("Connection lost"))
+        mock_redis.zrem = AsyncMock(return_value=1)
+
+        # Clear cache should not raise exception
+        try:
+            await capacity_monitor._clear_se_cache("se-01")
+        except RedisError:
+            pytest.fail("_clear_se_cache() should handle RedisError gracefully")
+
+        # Verify Redis delete was attempted
+        mock_redis.delete.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_reload_storage_endpoints_complex_scenario(self, capacity_monitor, mock_redis):
+        """
+        Тест комплексного сценария: одновременно added, removed, updated SE.
+
+        Сценарий:
+        - Исходные SE: se-01, se-02, se-03
+        - Новые SE: se-01 (updated endpoint), se-02, se-04 (added), se-05 (added)
+        - Удалён: se-03
+        - Обновлён: se-01 (endpoint и priority)
+        - Добавлены: se-04, se-05
+        """
+        # Initial state
+        initial_endpoints = {
+            "se-01": "http://storage-01:8010",
+            "se-02": "http://storage-02:8010",
+            "se-03": "http://storage-03:8010",
+        }
+        initial_priorities = {"se-01": 1, "se-02": 2, "se-03": 3}
+
+        capacity_monitor._storage_endpoints = initial_endpoints.copy()
+        capacity_monitor._storage_priorities = initial_priorities.copy()
+
+        # New configuration (complex changes)
+        new_endpoints = {
+            "se-01": "http://storage-01-new:8010",  # UPDATED
+            "se-02": "http://storage-02:8010",  # NO CHANGE
+            "se-04": "http://storage-04:8010",  # ADDED
+            "se-05": "http://storage-05:8010",  # ADDED
+        }
+        new_priorities = {
+            "se-01": 10,  # UPDATED priority
+            "se-02": 2,
+            "se-04": 4,
+            "se-05": 5,
+        }
+
+        # Reload configuration
+        with patch("app.services.capacity_monitor.record_se_config_change") as mock_metric:
+            await capacity_monitor.reload_storage_endpoints(new_endpoints, new_priorities)
+
+            # Verify final state
+            assert capacity_monitor._storage_endpoints == new_endpoints
+            assert capacity_monitor._storage_priorities == new_priorities
+
+            # Verify removed SE cache cleared
+            mock_redis.delete.assert_any_call("capacity:se-03")
+            mock_redis.delete.assert_any_call("health:se-03")
+
+            # Verify metrics recorded
+            # added=2 (se-04, se-05), removed=1 (se-03), updated=1 (se-01)
+            mock_metric.assert_any_call("added", count=2)
+            mock_metric.assert_any_call("removed", count=1)
+            mock_metric.assert_any_call("updated", count=1)

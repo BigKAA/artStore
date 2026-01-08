@@ -320,7 +320,19 @@ class CapacityMonitorSettings(BaseSettings):
     )
     # Sprint 19 Phase 4: fallback_to_push УДАЛЁН - legacy Redis PUSH модель больше не поддерживается
 
-    @field_validator("enabled", "use_for_selection", mode="before")
+    # Sprint 21: Config Reload
+    config_reload_enabled: bool = Field(
+        default=True,
+        description="Включить периодическое обновление SE конфигурации"
+    )
+    config_reload_interval: int = Field(
+        default=60,
+        ge=10,
+        le=600,
+        description="Интервал обновления SE конфигурации в секундах (10-600)"
+    )
+
+    @field_validator("enabled", "use_for_selection", "config_reload_enabled", mode="before")
     @classmethod
     def parse_bool_fields(cls, v):
         """Парсинг boolean полей из environment variables."""
