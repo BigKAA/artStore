@@ -42,3 +42,6 @@ apscheduler==3.10.4
 # Utilities
 python-dotenv==1.0.0
 pyyaml==6.0.1
+
+# JWT Hot-Reload (Sprint: JWT Hot-Reload Implementation 2026-01-08)
+watchfiles==0.21.0  # File system watching для автоматического hot-reload JWT ключей
