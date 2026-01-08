@@ -57,12 +57,16 @@ def require_admin_or_user_role(
     Raises:
         HTTPException 403: Insufficient permissions
     """
-    if current_account.role not in [ServiceAccountRole.ADMIN, ServiceAccountRole.USER]:
+    # Материализуем атрибуты для избежания MissingGreenlet
+    client_id = current_account.client_id
+    role = current_account.role
+
+    if role not in [ServiceAccountRole.ADMIN, ServiceAccountRole.USER]:
         logger.warning(
             "Access denied: insufficient permissions",
             extra={
-                "client_id": current_account.client_id,
-                "role": current_account.role.value,
+                "client_id": client_id,
+                "role": role.value,
                 "required_roles": ["ADMIN", "USER"]
             }
         )
@@ -88,12 +92,16 @@ def require_admin_role(
     Raises:
         HTTPException 403: Insufficient permissions
     """
-    if current_account.role != ServiceAccountRole.ADMIN:
+    # Материализуем атрибуты для избежания MissingGreenlet
+    client_id = current_account.client_id
+    role = current_account.role
+
+    if role != ServiceAccountRole.ADMIN:
         logger.warning(
             "Access denied: admin role required",
             extra={
-                "client_id": current_account.client_id,
-                "role": current_account.role.value
+                "client_id": client_id,
+                "role": role.value
             }
         )
         raise HTTPException(
@@ -151,6 +159,9 @@ async def register_file(
         HTTPException 400: File already exists или validation error
         HTTPException 500: Internal server error
     """
+    # Материализуем client_id сразу для избежания MissingGreenlet в error handlers
+    client_id = current_account.client_id
+
     logger.info(
         "File registration request received",
         extra={
@@ -158,7 +169,7 @@ async def register_file(
             "original_filename": request.original_filename,
             "retention_policy": request.retention_policy.value,
             "storage_element_id": request.storage_element_id,
-            "client_id": current_account.client_id
+            "client_id": client_id
         }
     )
 
@@ -170,7 +181,7 @@ async def register_file(
             extra={
                 "file_id": str(file.file_id),
                 "original_filename": file.original_filename,
-                "client_id": current_account.client_id
+                "client_id": client_id
             }
         )
 
@@ -182,7 +193,7 @@ async def register_file(
             extra={
                 "file_id": str(request.file_id),
                 "error": str(e),
-                "client_id": current_account.client_id
+                "client_id": client_id
             }
         )
         raise HTTPException(
@@ -196,7 +207,7 @@ async def register_file(
             extra={
                 "file_id": str(request.file_id),
                 "error": str(e),
-                "client_id": current_account.client_id
+                "client_id": client_id
             },
             exc_info=True
         )
@@ -250,14 +261,18 @@ async def get_file_by_id(
         HTTPException 403: Недостаточно прав для include_deleted=True
         HTTPException 404: Файл не найден
     """
+    # Материализуем атрибуты для избежания MissingGreenlet
+    client_id = current_account.client_id
+    role = current_account.role
+
     # Проверка прав для include_deleted
-    if include_deleted and current_account.role != ServiceAccountRole.ADMIN:
+    if include_deleted and role != ServiceAccountRole.ADMIN:
         logger.warning(
             "Access denied: admin role required for include_deleted=True",
             extra={
                 "file_id": str(file_id),
-                "client_id": current_account.client_id,
-                "role": current_account.role.value
+                "client_id": client_id,
+                "role": role.value
             }
         )
         raise HTTPException(
@@ -270,7 +285,7 @@ async def get_file_by_id(
         extra={
             "file_id": str(file_id),
             "include_deleted": include_deleted,
-            "client_id": current_account.client_id
+            "client_id": client_id
         }
     )
 
@@ -281,7 +296,7 @@ async def get_file_by_id(
             "File not found",
             extra={
                 "file_id": str(file_id),
-                "client_id": current_account.client_id
+                "client_id": client_id
             }
         )
         raise HTTPException(
@@ -349,13 +364,16 @@ async def update_file(
         HTTPException 404: Файл не найден
         HTTPException 500: Internal server error
     """
+    # Материализуем client_id для избежания MissingGreenlet
+    client_id = current_account.client_id
+
     logger.info(
         "File update request received",
         extra={
             "file_id": str(file_id),
             "retention_policy": request.retention_policy.value if request.retention_policy else None,
             "storage_element_id": request.storage_element_id,
-            "client_id": current_account.client_id
+            "client_id": client_id
         }
     )
 
@@ -367,7 +385,7 @@ async def update_file(
                 "File not found for update",
                 extra={
                     "file_id": str(file_id),
-                    "client_id": current_account.client_id
+                    "client_id": client_id
                 }
             )
             raise HTTPException(
@@ -381,7 +399,7 @@ async def update_file(
                 "file_id": str(file.file_id),
                 "retention_policy": file.retention_policy.value,
                 "finalized": file.is_finalized,
-                "client_id": current_account.client_id
+                "client_id": client_id
             }
         )
 
@@ -393,7 +411,7 @@ async def update_file(
             extra={
                 "file_id": str(file_id),
                 "error": str(e),
-                "client_id": current_account.client_id
+                "client_id": client_id
             }
         )
         raise HTTPException(
@@ -407,7 +425,7 @@ async def update_file(
             extra={
                 "file_id": str(file_id),
                 "error": str(e),
-                "client_id": current_account.client_id
+                "client_id": client_id
             },
             exc_info=True
         )
@@ -473,12 +491,15 @@ async def delete_file(
         HTTPException 404: Файл не найден
         HTTPException 500: Internal server error
     """
+    # Материализуем client_id для избежания MissingGreenlet
+    client_id = current_account.client_id
+
     logger.info(
         "File deletion request received",
         extra={
             "file_id": str(file_id),
             "deletion_reason": deletion_reason,
-            "client_id": current_account.client_id
+            "client_id": client_id
         }
     )
 
@@ -490,7 +511,7 @@ async def delete_file(
                 "File not found for deletion",
                 extra={
                     "file_id": str(file_id),
-                    "client_id": current_account.client_id
+                    "client_id": client_id
                 }
             )
             raise HTTPException(
@@ -504,7 +525,7 @@ async def delete_file(
                 "file_id": str(file_id),
                 "deleted_at": str(result.deleted_at),
                 "deletion_reason": result.deletion_reason,
-                "client_id": current_account.client_id
+                "client_id": client_id
             }
         )
 
@@ -516,7 +537,7 @@ async def delete_file(
             extra={
                 "file_id": str(file_id),
                 "error": str(e),
-                "client_id": current_account.client_id
+                "client_id": client_id
             },
             exc_info=True
         )
@@ -590,13 +611,17 @@ async def list_files(
     Raises:
         HTTPException 403: Недостаточно прав для include_deleted=True
     """
+    # Материализуем атрибуты для избежания MissingGreenlet
+    client_id = current_account.client_id
+    role = current_account.role
+
     # Проверка прав для include_deleted
-    if include_deleted and current_account.role != ServiceAccountRole.ADMIN:
+    if include_deleted and role != ServiceAccountRole.ADMIN:
         logger.warning(
             "Access denied: admin role required for include_deleted=True",
             extra={
-                "client_id": current_account.client_id,
-                "role": current_account.role.value
+                "client_id": client_id,
+                "role": role.value
             }
         )
         raise HTTPException(
@@ -612,7 +637,7 @@ async def list_files(
             "retention_policy": retention_policy.value if retention_policy else None,
             "storage_element_id": storage_element_id,
             "include_deleted": include_deleted,
-            "client_id": current_account.client_id
+            "client_id": client_id
         }
     )
 
@@ -631,7 +656,7 @@ async def list_files(
             "total": result.total,
             "page": result.page,
             "returned_count": len(result.files),
-            "client_id": current_account.client_id
+            "client_id": client_id
         }
     )
 
