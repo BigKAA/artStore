@@ -19,6 +19,9 @@ pyjwt==2.10.1
 cryptography==44.0.0
 python-jose[cryptography]==3.3.0
 
+# JWT Hot-Reload Support
+watchfiles==0.21.0
+
 # Compression Support
 brotli==1.1.0
 

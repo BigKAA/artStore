@@ -199,6 +199,7 @@ async def lifespan(app: FastAPI):
     - Инициализация StorageSelector
     - Проверка конфигурации
     - Загрузка публичного ключа для JWT
+    - Запуск JWT key file watcher для hot-reload (Sprint: JWT Hot-Reload)
 
     Shutdown:
     - Закрытие HTTP connections
@@ -328,6 +329,19 @@ async def lifespan(app: FastAPI):
                 "Failed to initialize AdaptiveCapacityMonitor - continuing without it",
                 extra={"error": str(e)}
             )
+
+    # JWT Hot-Reload: Запуск file watcher для автоматической перезагрузки ключей
+    try:
+        from app.core.jwt_key_manager import get_jwt_key_manager
+
+        jwt_key_manager = get_jwt_key_manager()
+        jwt_key_manager.start_watching()
+        logger.info("JWT key file watcher started (hot-reload enabled)")
+    except Exception as e:
+        logger.warning(
+            "Failed to start JWT key watcher - hot-reload disabled",
+            extra={"error": str(e)}
+        )
 
     yield
 

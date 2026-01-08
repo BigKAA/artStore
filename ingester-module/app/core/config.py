@@ -92,7 +92,7 @@ class AuthSettings(BaseSettings):
     )
 
     enabled: bool = True
-    public_key_path: Path = Path("./keys/public_key.pem")
+    public_key_path: Path = Path("/app/keys/public_key.pem")
     algorithm: str = "RS256"
 
     # Sprint 16: Admin Module URL для health checks и Service Discovery fallback
