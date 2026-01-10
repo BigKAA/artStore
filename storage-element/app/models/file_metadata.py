@@ -4,7 +4,7 @@ File Metadata model для кеширования метаданных в Postgr
 Кеш для быстрого поиска файлов. Источник истины - *.attr.json файлы.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -99,6 +99,22 @@ class FileMetadata(Base):
         comment="Время последнего обновления метаданных"
     )
 
+    # Cache TTL fields
+    cache_updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="Timestamp последнего обновления кеша из attr.json"
+    )
+
+    cache_ttl_hours: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="24",  # 24 часа для edit/rw, 168 для ro/ar
+        comment="TTL кеша в часах (24=edit/rw, 168=ro/ar)"
+    )
+
     # User information
     created_by_id: Mapped[str] = mapped_column(
         String(255),
@@ -190,6 +206,20 @@ class FileMetadata(Base):
                 postgresql_using="gin"
             ),
         )
+
+    @property
+    def cache_expired(self) -> bool:
+        """
+        Проверка истёк ли TTL кеша.
+
+        Returns:
+            bool: True если кеш expired и требуется rebuild из attr.json
+        """
+        if not self.cache_updated_at:
+            return True
+
+        expiration = self.cache_updated_at + timedelta(hours=self.cache_ttl_hours)
+        return datetime.now(timezone.utc) > expiration
 
     def __repr__(self) -> str:
         return (
