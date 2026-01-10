@@ -916,6 +916,336 @@ Storage Element можно удалить из Admin Module при соблюд�
 - **Управление**: Переключатель "Auto-refresh" в заголовке страницы
 - **Поведение**: При отключении обновление происходит только при ручном нажатии "Sync All"
 
+## Cache Synchronization (v1.2.0)
+
+### Hybrid Cache Synchronization Overview
+
+Начиная с версии 1.2.0, Storage Element поддерживает **автоматическую синхронизацию** PostgreSQL кеша с `*.attr.json` файлами через:
+
+- **TTL-based Lazy Rebuild**: Автоматическая пересборка expired cache entries при запросах
+- **Manual Rebuild APIs**: Явные endpoint'ы для администратора (full/incremental rebuild)
+- **Consistency Check**: Dry-run проверка расхождений между cache и attr.json
+- **Priority-Based Locking**: Ручные операции блокируют автоматические
+
+**Зачем нужна синхронизация?**
+
+- **Восстановление после сбоев**: Если database cache был утерян или повреждён
+- **Миграция данных**: При переносе файлов между Storage Elements
+- **Обнаружение orphans**: Файлы в cache без attr.json или наоборот
+- **Expired cache cleanup**: Удаление устаревших cache entries
+
+### Cache TTL Configuration
+
+Каждая запись в cache имеет **TTL (Time-To-Live)**, после которого требуется обновление из attr.json.
+
+**TTL по режимам Storage Element:**
+
+| Режим | TTL | Обоснование |
+|-------|-----|-------------|
+| `edit` | 24 часа | Частые изменения файлов |
+| `rw` | 24 часа | Активная запись файлов |
+| `ro` | 168 часов (7 дней) | Редкие изменения |
+| `ar` | 168 часов (7 дней) | Архивное хранение |
+
+**Переменные окружения:**
+
+```bash
+# Управление TTL через env variables (опционально)
+CACHE_TTL_HOURS_EDIT=24
+CACHE_TTL_HOURS_RW=24
+CACHE_TTL_HOURS_RO=168
+CACHE_TTL_HOURS_AR=168
+```
+
+### Lazy Rebuild (Автоматический режим)
+
+**Когда срабатывает:**
+- При `GET /api/v1/files/{file_id}` запросе метаданных
+- Если `cache_expired = True` (cache_updated_at + cache_ttl_hours < now)
+
+**Поведение:**
+```python
+# 1. Проверка TTL
+if metadata.cache_expired:
+    # 2. Try to rebuild from attr.json (non-blocking)
+    try:
+        await _rebuild_entry_from_attr(file_id)
+    except Exception:
+        # 3. Graceful degradation: вернуть stale cache
+        return metadata  # Stale but still usable
+
+# 4. Вернуть свежий cache
+return metadata
+```
+
+**Важно**: Lazy rebuild использует **низкоприоритетный lock** и пропускается если идёт Manual Rebuild.
+
+### Manual Cache Rebuild APIs
+
+#### 1. Full Rebuild (Полная пересборка)
+
+**Endpoint**: `POST /api/v1/cache/rebuild`
+
+**Описание**: TRUNCATE cache таблицы и полная пересборка из всех attr.json файлов.
+
+**Когда использовать:**
+- После восстановления из backup
+- При критическом расхождении cache и attr.json
+- После миграции данных
+
+**Пример запроса:**
+
+```bash
+# Получить токен
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"admin-service","client_secret":"YourSecret"}' \
+  | jq -r '.access_token')
+
+# Full rebuild
+curl -X POST http://localhost:8010/api/v1/cache/rebuild \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "operation_type": "full",
+  "started_at": "2026-01-10T18:00:00Z",
+  "completed_at": "2026-01-10T18:05:30Z",
+  "duration_seconds": 330.5,
+  "statistics": {
+    "attr_files_scanned": 10000,
+    "cache_entries_before": 9500,
+    "cache_entries_after": 10000,
+    "entries_created": 10000,
+    "entries_updated": 0,
+    "entries_deleted": 0
+  },
+  "errors": []
+}
+```
+
+#### 2. Incremental Rebuild (Инкрементальная пересборка)
+
+**Endpoint**: `POST /api/v1/cache/rebuild/incremental`
+
+**Описание**: Добавляет только отсутствующие в cache attr.json файлы. НЕ удаляет orphan cache entries.
+
+**Когда использовать:**
+- После добавления новых файлов через filesystem (обход API)
+- Для периодической синхронизации без full rebuild
+
+**Пример запроса:**
+
+```bash
+curl -X POST http://localhost:8010/api/v1/cache/rebuild/incremental \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "operation_type": "incremental",
+  "statistics": {
+    "attr_files_scanned": 10000,
+    "cache_entries_before": 9500,
+    "cache_entries_after": 10000,
+    "entries_created": 500,
+    "entries_updated": 0
+  }
+}
+```
+
+#### 3. Consistency Check (Проверка консистентности)
+
+**Endpoint**: `GET /api/v1/cache/consistency`
+
+**Описание**: Dry-run проверка расхождений между cache и attr.json (НЕ изменяет данные).
+
+**Пример запроса:**
+
+```bash
+curl -X GET http://localhost:8010/api/v1/cache/consistency \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "total_attr_files": 10000,
+  "total_cache_entries": 9980,
+  "orphan_cache_count": 5,
+  "orphan_attr_count": 25,
+  "expired_cache_count": 150,
+  "is_consistent": false,
+  "inconsistency_percentage": 0.3,
+  "details": {
+    "orphan_cache_entries": ["file-id-1", "file-id-2"],
+    "orphan_attr_files": ["file-id-3", "file-id-4"],
+    "expired_cache_entries": ["file-id-5"]
+  }
+}
+```
+
+**Интерпретация:**
+- `orphan_cache_entries`: Записи в cache без соответствующих attr.json (удалить?)
+- `orphan_attr_files`: Attr.json файлы без записей в cache (добавить?)
+- `expired_cache_entries`: Cache entries с истёкшим TTL (обновить?)
+
+#### 4. Cleanup Expired Entries (Очистка expired)
+
+**Endpoint**: `POST /api/v1/cache/cleanup-expired`
+
+**Описание**: Удаляет cache entries с истёкшим TTL.
+
+**Когда использовать:**
+- Для освобождения места в БД
+- Периодическая cleanup задача (опционально)
+
+**Пример запроса:**
+
+```bash
+curl -X POST http://localhost:8010/api/v1/cache/cleanup-expired \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "operation_type": "cleanup_expired",
+  "statistics": {
+    "entries_deleted": 150
+  },
+  "duration_seconds": 2.5
+}
+```
+
+### Priority-Based Locking
+
+Система использует **Redis distributed locks** для координации операций синхронизации.
+
+**Приоритеты операций** (от высшего к низшему):
+
+1. **MANUAL_REBUILD** (Priority 1) - API-triggered full/incremental rebuild
+2. **MANUAL_CHECK** (Priority 2) - API-triggered consistency check
+3. **LAZY_REBUILD** (Priority 3) - On-demand expired entry rebuild
+4. **BACKGROUND_CLEANUP** (Priority 4) - Optional cleanup job
+
+**Правила блокировок:**
+- MANUAL_REBUILD блокирует все остальные операции
+- LAZY_REBUILD пропускается если идёт MANUAL_REBUILD (graceful degradation)
+- При конфликте низкоприоритетная операция ждёт или пропускается
+
+**Пример конфликта:**
+
+```bash
+# Terminal 1: Start manual rebuild (занимает lock на 30 минут)
+curl -X POST http://localhost:8010/api/v1/cache/rebuild \
+  -H "Authorization: Bearer $TOKEN"
+
+# Terminal 2: Try to start incremental rebuild
+curl -X POST http://localhost:8010/api/v1/cache/rebuild/incremental \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response: HTTP 409 Conflict
+{
+  "detail": "Cannot acquire lock: rebuild already in progress"
+}
+```
+
+### Storage Backend Abstraction
+
+Cache synchronization работает с двумя типами storage backends:
+
+**Local Filesystem:**
+```bash
+STORAGE_TYPE=local
+STORAGE_LOCAL_BASE_PATH=/data/storage
+```
+
+**S3/MinIO:**
+```bash
+STORAGE_TYPE=s3
+STORAGE_S3_ENDPOINT_URL=http://minio:9000
+STORAGE_S3_BUCKET_NAME=artstore
+STORAGE_S3_APP_FOLDER=storage-elem-01
+```
+
+Система автоматически определяет backend через `settings.storage.type` и использует соответствующий драйвер для чтения attr.json.
+
+### Best Practices
+
+**Production рекомендации:**
+
+1. **Периодическая consistency check** (раз в неделю):
+   ```bash
+   # Cron job: каждый понедельник в 02:00
+   0 2 * * 1 curl -X GET http://localhost:8010/api/v1/cache/consistency \
+     -H "Authorization: Bearer $TOKEN" | mail -s "Cache Consistency Report" admin@example.com
+   ```
+
+2. **Incremental rebuild** после добавления файлов вручную:
+   ```bash
+   # После копирования attr.json через filesystem
+   curl -X POST http://localhost:8010/api/v1/cache/rebuild/incremental \
+     -H "Authorization: Bearer $TOKEN"
+   ```
+
+3. **Full rebuild** только в исключительных случаях:
+   - Восстановление из backup
+   - Критическое расхождение (>10% orphans)
+   - После миграции данных
+
+4. **Cleanup expired entries** (опционально):
+   ```bash
+   # Cron job: каждый день в 03:00
+   0 3 * * * curl -X POST http://localhost:8010/api/v1/cache/cleanup-expired \
+     -H "Authorization: Bearer $TOKEN"
+   ```
+
+**Development рекомендации:**
+
+- Используйте `GET /api/v1/cache/consistency` перед manual rebuild
+- Тестируйте lazy rebuild через expired entries
+- Проверяйте logs на наличие cache rebuild warnings
+
+### Troubleshooting
+
+**Проблема**: Cache entries устаревают быстрее чем TTL
+
+**Решение**: Проверить настройки TTL для текущего режима Storage Element:
+
+```python
+# Проверка в logs
+logger.info(f"Cache TTL: {metadata.cache_ttl_hours} hours for mode {settings.app.mode}")
+```
+
+**Проблема**: Manual rebuild timeout (>30 минут)
+
+**Решение**: Для больших хранилищ (>100K файлов) увеличить timeout в коде:
+
+```python
+# app/api/v1/endpoints/cache.py
+result = await service.rebuild_cache_full()  # Default timeout: 1800s (30 min)
+```
+
+**Проблема**: Orphan attr files обнаружены
+
+**Решение**: Проверить доступность attr.json файлов и запустить incremental rebuild:
+
+```bash
+# 1. Check consistency
+curl -X GET http://localhost:8010/api/v1/cache/consistency -H "Authorization: Bearer $TOKEN"
+
+# 2. Incremental rebuild для добавления orphan attr files
+curl -X POST http://localhost:8010/api/v1/cache/rebuild/incremental -H "Authorization: Bearer $TOKEN"
+```
+
 ## Migration Notes (v1.1.0)
 
 ### STORAGE_MAX_SIZE унификация
