@@ -11,7 +11,7 @@ API v1 Router - объединение всех endpoints.
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import files, info, gc, capacity
+from app.api.v1.endpoints import files, info, gc, capacity, cache
 
 # Создание главного router для API v1
 router = APIRouter()
@@ -43,6 +43,14 @@ router.include_router(
 router.include_router(
     capacity.router,
     tags=["capacity"]
+)
+
+# Подключение cache management endpoints (PHASE 5: Hybrid Cache Sync)
+# Доступны только для Service Accounts с ролью ADMIN
+router.include_router(
+    cache.router,
+    prefix="/cache",
+    tags=["cache"]
 )
 
 # TODO: Подключить admin endpoints когда будут созданы
