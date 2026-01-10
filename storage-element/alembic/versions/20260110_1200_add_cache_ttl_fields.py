@@ -27,7 +27,7 @@ def upgrade() -> None:
     """
     # Получаем table_prefix из переменной окружения или используем дефолтный
     import os
-    table_prefix = os.getenv("APP__DATABASE__TABLE_PREFIX", "storage_elem_01")
+    table_prefix = os.getenv("DB_TABLE_PREFIX", "storage_elem_01")
     table_name = f'{table_prefix}_files'
 
     # Добавление cache_updated_at
@@ -60,7 +60,7 @@ def downgrade() -> None:
     Откат миграции - удаление cache TTL полей.
     """
     import os
-    table_prefix = os.getenv("APP__DATABASE__TABLE_PREFIX", "storage_elem_01")
+    table_prefix = os.getenv("DB_TABLE_PREFIX", "storage_elem_01")
     table_name = f'{table_prefix}_files'
 
     op.drop_column(table_name, 'cache_ttl_hours')

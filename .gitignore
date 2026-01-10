@@ -212,6 +212,7 @@ __marimo__/
 .data/
 data/
 .serena/
+.tasks/
 .claude/
 .utils/nginx/certs/
 .playwright-mcp/
