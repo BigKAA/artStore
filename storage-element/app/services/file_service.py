@@ -38,6 +38,12 @@ from app.utils.attr_utils import (
     write_attr_file,
 )
 from app.utils.file_naming import generate_storage_filename, generate_storage_path
+from app.services.cache_lock_manager import (
+    CacheLockManager,
+    LockType,
+    get_cache_lock_manager
+)
+from app.services.storage_backends import get_storage_backend
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +72,8 @@ class FileService:
     def __init__(
         self,
         db: AsyncSession,
-        storage: Optional[StorageService] = None
+        storage: Optional[StorageService] = None,
+        lock_manager: Optional[CacheLockManager] = None
     ):
         """
         Инициализация File Service.
@@ -74,10 +81,13 @@ class FileService:
         Args:
             db: Async сессия базы данных
             storage: Storage сервис (опционально, по умолчанию из settings)
+            lock_manager: Cache lock manager для lazy rebuild (опционально)
         """
         self.db = db
         self.storage = storage or get_storage_service()
         self.wal = WALService(db)
+        self.lock_manager = lock_manager
+        self.storage_backend = get_storage_backend()
 
     async def create_file(
         self,
@@ -487,6 +497,11 @@ class FileService:
         """
         Получить метаданные файла из DB cache.
 
+        PHASE 4: Lazy Rebuild Integration
+        - Проверяет TTL кеша через property cache_expired
+        - При expired entry автоматически пересобирает из attr.json
+        - Использует LAZY_REBUILD lock (низкий приоритет)
+
         Args:
             file_id: UUID файла
 
@@ -497,7 +512,54 @@ class FileService:
             result = await self.db.execute(
                 select(FileMetadata).where(FileMetadata.file_id == file_id)
             )
-            return result.scalar_one_or_none()
+            metadata = result.scalar_one_or_none()
+
+            # Если не найден в cache - вернуть None
+            if not metadata:
+                return None
+
+            # PHASE 4: Проверка TTL и lazy rebuild если expired
+            if metadata.cache_expired:
+                logger.info(
+                    "Cache entry expired, triggering lazy rebuild",
+                    extra={
+                        "file_id": str(file_id),
+                        "cache_updated_at": metadata.cache_updated_at.isoformat(),
+                        "cache_ttl_hours": metadata.cache_ttl_hours
+                    }
+                )
+
+                # Попытка rebuild из attr.json (non-blocking)
+                try:
+                    refreshed_metadata = await self._rebuild_entry_from_attr(file_id)
+
+                    if refreshed_metadata:
+                        logger.info(
+                            "Cache entry rebuilt successfully from attr.json",
+                            extra={"file_id": str(file_id)}
+                        )
+                        return refreshed_metadata
+                    else:
+                        # Rebuild не удался, но возвращаем старый cache (graceful degradation)
+                        logger.warning(
+                            "Failed to rebuild cache entry, returning stale data",
+                            extra={"file_id": str(file_id)}
+                        )
+                        return metadata
+
+                except Exception as e:
+                    # Ошибка rebuild - возвращаем старый cache (graceful degradation)
+                    logger.error(
+                        f"Error during lazy rebuild: {e}",
+                        extra={
+                            "file_id": str(file_id),
+                            "error": str(e)
+                        }
+                    )
+                    return metadata
+
+            # Cache не expired - вернуть как есть
+            return metadata
 
         except Exception as e:
             logger.error(
@@ -667,3 +729,141 @@ class FileService:
                 error_code="FILE_UPDATE_FAILED",
                 details={"file_id": str(file_id), "error": str(e)}
             )
+
+    async def _get_lock_manager(self) -> CacheLockManager:
+        """
+        Получить lock manager (lazy initialization).
+
+        Returns:
+            CacheLockManager: Singleton instance
+        """
+        if not self.lock_manager:
+            self.lock_manager = await get_cache_lock_manager()
+        return self.lock_manager
+
+    async def _rebuild_entry_from_attr(
+        self,
+        file_id: UUID
+    ) -> Optional[FileMetadata]:
+        """
+        Пересобрать cache entry из attr.json файла.
+
+        PHASE 4: Lazy Rebuild Implementation
+        - Использует LAZY_REBUILD lock (низкий приоритет)
+        - Если MANUAL_REBUILD lock занят - пропускает rebuild (graceful degradation)
+        - Читает attr.json через StorageBackend abstraction
+        - Обновляет DB cache с новым cache_updated_at timestamp
+
+        Args:
+            file_id: UUID файла для rebuild
+
+        Returns:
+            FileMetadata: Обновленные метаданные или None если не удалось
+
+        Raises:
+            Не генерирует исключения - graceful degradation при ошибках
+        """
+        lock_mgr = await self._get_lock_manager()
+
+        try:
+            # Попытка захватить LAZY_REBUILD lock (non-blocking)
+            acquired = await lock_mgr.acquire_lock(
+                LockType.LAZY_REBUILD,
+                timeout=30,  # 30 секунд для lazy rebuild
+                blocking=False  # Non-blocking - если занято, skip
+            )
+
+            if not acquired:
+                # Lock занят (вероятно MANUAL_REBUILD) - пропускаем
+                logger.info(
+                    "Cannot acquire LAZY_REBUILD lock, skipping rebuild",
+                    extra={
+                        "file_id": str(file_id),
+                        "reason": "Higher priority operation in progress"
+                    }
+                )
+                return None
+
+            try:
+                # Получить текущие метаданные из cache
+                result = await self.db.execute(
+                    select(FileMetadata).where(FileMetadata.file_id == file_id)
+                )
+                current_metadata = result.scalar_one_or_none()
+
+                if not current_metadata:
+                    logger.warning(
+                        "Cache entry not found for rebuild",
+                        extra={"file_id": str(file_id)}
+                    )
+                    return None
+
+                # Построить путь к attr.json файлу
+                relative_path = f"{current_metadata.storage_path}{current_metadata.storage_filename}"
+                attr_relative_path = f"{relative_path}.attr.json"
+
+                # Прочитать attr.json через StorageBackend
+                try:
+                    attributes = await self.storage_backend.read_attr_file(attr_relative_path)
+                except FileNotFoundError:
+                    logger.warning(
+                        "Attr file not found for rebuild",
+                        extra={
+                            "file_id": str(file_id),
+                            "attr_path": attr_relative_path
+                        }
+                    )
+                    return None
+
+                # Обновить метаданные из attr.json
+                current_metadata.original_filename = attributes.get('original_filename', current_metadata.original_filename)
+                current_metadata.file_size = attributes.get('file_size', current_metadata.file_size)
+                current_metadata.content_type = attributes.get('mime_type', current_metadata.content_type)
+                current_metadata.description = attributes.get('description', current_metadata.description)
+                current_metadata.version = str(attributes.get('version', current_metadata.version))
+                current_metadata.checksum = attributes.get('sha256', current_metadata.checksum)
+                current_metadata.metadata = attributes
+
+                # Обновить timestamps
+                if 'created_at' in attributes:
+                    current_metadata.created_at = datetime.fromisoformat(
+                        attributes['created_at'].replace('Z', '+00:00')
+                    )
+                if 'updated_at' in attributes:
+                    current_metadata.updated_at = datetime.fromisoformat(
+                        attributes['updated_at'].replace('Z', '+00:00')
+                    )
+
+                # КРИТИЧНО: Обновить cache timestamps
+                current_metadata.cache_updated_at = datetime.now(timezone.utc)
+
+                # Определить TTL в зависимости от режима
+                mode = settings.app.mode.value
+                current_metadata.cache_ttl_hours = 168 if mode in ['ro', 'ar'] else 24
+
+                # Сохранить в DB
+                await self.db.commit()
+
+                logger.info(
+                    "Cache entry rebuilt successfully from attr.json",
+                    extra={
+                        "file_id": str(file_id),
+                        "new_cache_ttl_hours": current_metadata.cache_ttl_hours
+                    }
+                )
+
+                return current_metadata
+
+            finally:
+                # Всегда освобождать lock
+                await lock_mgr.release_lock(LockType.LAZY_REBUILD)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to rebuild cache entry from attr.json: {e}",
+                extra={
+                    "file_id": str(file_id),
+                    "error": str(e)
+                }
+            )
+            return None
