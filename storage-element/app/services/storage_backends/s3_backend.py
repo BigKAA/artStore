@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
-import boto3
+import aioboto3
 from botocore.exceptions import ClientError
 
 from app.core.config import settings
@@ -20,28 +20,25 @@ logger = logging.getLogger(__name__)
 
 
 class S3Backend(StorageBackend):
-    """S3/MinIO Storage Backend."""
+    """S3/MinIO Storage Backend с асинхронными операциями."""
 
     def __init__(self):
         """Инициализация S3 backend."""
         self.bucket_name = settings.storage.s3.bucket_name
         self.app_folder = settings.storage.s3.app_folder
         self.endpoint_url = settings.storage.s3.endpoint_url
+        self.access_key_id = settings.storage.s3.access_key_id
+        self.secret_access_key = settings.storage.s3.secret_access_key
 
-        # S3 client
-        self.s3_client = boto3.client(
-            's3',
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=settings.storage.s3.access_key_id,
-            aws_secret_access_key=settings.storage.s3.secret_access_key,
-        )
+        # Создаём aioboto3 session (lightweight, без подключения)
+        self.session = aioboto3.Session()
 
     async def list_attr_files(
         self,
         prefix: Optional[str] = None,
         limit: Optional[int] = None
     ) -> AsyncGenerator[AttrFileInfo, None]:
-        """Получить список attr.json файлов из S3."""
+        """Получить список attr.json файлов из S3 (async)."""
         full_prefix = f"{self.app_folder}/"
         if prefix:
             full_prefix += prefix
@@ -49,49 +46,68 @@ class S3Backend(StorageBackend):
         logger.info("Listing attr.json files from S3", extra={"bucket": self.bucket_name, "prefix": full_prefix})
 
         try:
-            paginator = self.s3_client.get_paginator('list_objects_v2')
-            page_iterator = paginator.paginate(Bucket=self.bucket_name, Prefix=full_prefix)
+            # Async context manager для S3 client
+            async with self.session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key_id,
+                aws_secret_access_key=self.secret_access_key,
+            ) as s3_client:
+                paginator = s3_client.get_paginator('list_objects_v2')
+                page_iterator = paginator.paginate(Bucket=self.bucket_name, Prefix=full_prefix)
 
-            count = 0
-            for page in page_iterator:
-                if 'Contents' not in page:
-                    continue
-
-                for obj in page['Contents']:
-                    key = obj['Key']
-                    if not key.endswith('.attr.json'):
+                count = 0
+                # ✅ FIX: Async for вместо синхронного for
+                async for page in page_iterator:
+                    if 'Contents' not in page:
                         continue
 
-                    relative_path = key.replace(f"{self.app_folder}/", "")
-                    file_id = self._extract_file_id_from_path(relative_path)
+                    for obj in page['Contents']:
+                        key = obj['Key']
+                        if not key.endswith('.attr.json'):
+                            continue
 
-                    yield AttrFileInfo(
-                        relative_path=relative_path,
-                        file_id=file_id,
-                        file_size=obj.get('Size')
-                    )
+                        relative_path = key.replace(f"{self.app_folder}/", "")
+                        file_id = self._extract_file_id_from_path(relative_path)
 
-                    count += 1
-                    if limit and count >= limit:
-                        logger.info(f"Reached limit of {limit} attr.json files")
-                        return
+                        yield AttrFileInfo(
+                            relative_path=relative_path,
+                            file_id=file_id,
+                            file_size=obj.get('Size')
+                        )
 
-            logger.info(f"Listed {count} attr.json files from S3")
+                        count += 1
+                        if limit and count >= limit:
+                            logger.info(f"Reached limit of {limit} attr.json files")
+                            return
+
+                logger.info(f"Listed {count} attr.json files from S3")
 
         except ClientError as e:
             logger.error(f"Failed to list S3 objects: {e}")
             raise
 
     async def read_attr_file(self, relative_path: str) -> dict:
-        """Прочитать attr.json файл из S3."""
+        """Прочитать attr.json файл из S3 (async)."""
         key = f"{self.app_folder}/{relative_path}"
 
         try:
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
-            content = response['Body'].read().decode('utf-8')
-            return json.loads(content)
+            # ✅ FIX: Async context manager для S3 client
+            async with self.session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key_id,
+                aws_secret_access_key=self.secret_access_key,
+            ) as s3_client:
+                # ✅ FIX: Await для async операции
+                response = await s3_client.get_object(Bucket=self.bucket_name, Key=key)
 
-        except self.s3_client.exceptions.NoSuchKey:
+                # ✅ FIX: Async read body
+                async with response['Body'] as stream:
+                    content = await stream.read()
+                    return json.loads(content.decode('utf-8'))
+
+        except s3_client.exceptions.NoSuchKey:
             logger.warning(f"Attr file not found in S3: {key}")
             raise FileNotFoundError(f"Attr file not found: {relative_path}")
 
@@ -104,12 +120,21 @@ class S3Backend(StorageBackend):
             raise
 
     async def file_exists(self, relative_path: str) -> bool:
-        """Проверить существование data файла в S3."""
+        """Проверить существование data файла в S3 (async)."""
         key = f"{self.app_folder}/{relative_path}"
 
         try:
-            self.s3_client.head_object(Bucket=self.bucket_name, Key=key)
-            return True
+            # ✅ FIX: Async context manager для S3 client
+            async with self.session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key_id,
+                aws_secret_access_key=self.secret_access_key,
+            ) as s3_client:
+                # ✅ FIX: Await для async операции
+                await s3_client.head_object(Bucket=self.bucket_name, Key=key)
+                return True
+
         except ClientError as e:
             if e.response['Error']['Code'] == '404':
                 return False
@@ -117,16 +142,25 @@ class S3Backend(StorageBackend):
             raise
 
     async def get_storage_info(self) -> dict:
-        """Получить информацию о S3 storage."""
+        """Получить информацию о S3 storage (async)."""
         try:
-            self.s3_client.head_bucket(Bucket=self.bucket_name)
-            return {
-                "type": "s3",
-                "bucket_name": self.bucket_name,
-                "endpoint_url": self.endpoint_url,
-                "app_folder": self.app_folder,
-                "accessible": True
-            }
+            # ✅ FIX: Async context manager для S3 client
+            async with self.session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key_id,
+                aws_secret_access_key=self.secret_access_key,
+            ) as s3_client:
+                # ✅ FIX: Await для async операции
+                await s3_client.head_bucket(Bucket=self.bucket_name)
+                return {
+                    "type": "s3",
+                    "bucket_name": self.bucket_name,
+                    "endpoint_url": self.endpoint_url,
+                    "app_folder": self.app_folder,
+                    "accessible": True
+                }
+
         except ClientError as e:
             return {
                 "type": "s3",
