@@ -511,6 +511,50 @@ class SagaSettings(BaseSettings):
         return parse_bool_from_env(v)
 
 
+class EventPublishingSettings(BaseSettings):
+    """
+    Настройки для публикации events в Redis Pub/Sub.
+
+    PHASE 1: Sprint 16 - Query Module Sync Repair.
+    Admin Module публикует events о file operations.
+    Query Module подписывается и синхронизирует свой cache.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        alias="EVENT_PUBLISH_ENABLED",
+        description="Включить публикацию events в Redis"
+    )
+    channel_file_created: str = Field(
+        default="file:created",
+        alias="EVENT_CHANNEL_FILE_CREATED",
+        description="Redis channel для file:created events"
+    )
+    channel_file_updated: str = Field(
+        default="file:updated",
+        alias="EVENT_CHANNEL_FILE_UPDATED",
+        description="Redis channel для file:updated events"
+    )
+    channel_file_deleted: str = Field(
+        default="file:deleted",
+        alias="EVENT_CHANNEL_FILE_DELETED",
+        description="Redis channel для file:deleted events"
+    )
+    publish_timeout: int = Field(
+        default=5,
+        alias="EVENT_PUBLISH_TIMEOUT",
+        description="Timeout для publish операций (секунды)"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="EVENT_", case_sensitive=False, extra="allow")
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def parse_bool_fields(cls, v):
+        """Парсинг boolean полей из environment variables."""
+        return parse_bool_from_env(v)
+
+
 class HealthSettings(BaseSettings):
     """Настройки health checks."""
 
@@ -1090,6 +1134,7 @@ class Settings(BaseSettings):
     monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
     service_discovery: ServiceDiscoverySettings = Field(default_factory=ServiceDiscoverySettings)
     saga: SagaSettings = Field(default_factory=SagaSettings)
+    event_publishing: EventPublishingSettings = Field(default_factory=EventPublishingSettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     initial_admin: InitialAdminSettings = Field(default_factory=InitialAdminSettings)

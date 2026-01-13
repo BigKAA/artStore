@@ -19,9 +19,11 @@ from prometheus_client import make_asgi_app
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.observability import setup_observability
+from app.core.redis import close_redis
 from app.db.database import init_db, close_db
 from app.services.cache_service import cache_service
 from app.services.download_service import download_service
+from app.services.event_subscriber import event_subscriber
 
 # Настройка логирования
 setup_logging(level=settings.log_level, log_format=settings.log_format)
@@ -62,6 +64,10 @@ async def lifespan(app: FastAPI):
         jwt_key_manager.start_watching()
         logger.info("JWT key file watcher started for hot-reload support")
 
+        # PHASE 2: Запуск Event Subscriber для Redis Pub/Sub синхронизации
+        await event_subscriber.initialize()
+        logger.info("Event subscriber initialized for cache sync")
+
     except Exception as e:
         logger.error(
             "Failed to initialize Query Module",
@@ -86,6 +92,14 @@ async def lifespan(app: FastAPI):
         # Закрытие HTTP client
         await download_service.close()
         logger.info("Download service closed")
+
+        # PHASE 2: Закрытие Event Subscriber
+        await event_subscriber.close()
+        logger.info("Event subscriber closed")
+
+        # Закрытие Redis connections
+        await close_redis()
+        logger.info("Redis connections closed")
 
     except Exception as e:
         logger.warning(
