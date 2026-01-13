@@ -513,11 +513,19 @@ class SagaSettings(BaseSettings):
 
 class EventPublishingSettings(BaseSettings):
     """
-    Настройки для публикации events в Redis Pub/Sub.
+    Настройки для публикации events в Redis Streams.
 
     PHASE 1: Sprint 16 - Query Module Sync Repair.
-    Admin Module публикует events о file operations.
-    Query Module подписывается и синхронизирует свой cache.
+    PHASE 2: Миграция с Pub/Sub на Streams для guaranteed delivery.
+
+    Admin Module публикует events о file operations через Redis Streams (XADD).
+    Query Module подписывается через Consumer Groups (XREADGROUP) и синхронизирует cache.
+
+    Advantages over Pub/Sub:
+    - Guaranteed delivery (events persisted in stream)
+    - Consumer Groups with ACK mechanism
+    - Pending Entry List (PEL) for retry logic
+    - No event loss during reconnects
     """
 
     enabled: bool = Field(
@@ -525,21 +533,41 @@ class EventPublishingSettings(BaseSettings):
         alias="EVENT_PUBLISH_ENABLED",
         description="Включить публикацию events в Redis"
     )
+
+    # Redis Streams configuration (PHASE 2)
+    stream_name: str = Field(
+        default="file-events",
+        alias="EVENT_STREAM_NAME",
+        description="Redis Stream name для file events"
+    )
+    stream_maxlen: int = Field(
+        default=10000,
+        alias="EVENT_STREAM_MAXLEN",
+        description="Максимальное количество events в stream (автоочистка)"
+    )
+    stream_retention_hours: int = Field(
+        default=24,
+        alias="EVENT_STREAM_RETENTION_HOURS",
+        description="Время хранения events в stream (часы)"
+    )
+
+    # Legacy Pub/Sub channels (deprecated, будут удалены после миграции)
     channel_file_created: str = Field(
         default="file:created",
         alias="EVENT_CHANNEL_FILE_CREATED",
-        description="Redis channel для file:created events"
+        description="[DEPRECATED] Redis channel для file:created events"
     )
     channel_file_updated: str = Field(
         default="file:updated",
         alias="EVENT_CHANNEL_FILE_UPDATED",
-        description="Redis channel для file:updated events"
+        description="[DEPRECATED] Redis channel для file:updated events"
     )
     channel_file_deleted: str = Field(
         default="file:deleted",
         alias="EVENT_CHANNEL_FILE_DELETED",
-        description="Redis channel для file:deleted events"
+        description="[DEPRECATED] Redis channel для file:deleted events"
     )
+
     publish_timeout: int = Field(
         default=5,
         alias="EVENT_PUBLISH_TIMEOUT",
