@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.database import init_db, close_db, check_db_connection, get_db
 from app.core.redis import close_redis, check_redis_connection, service_discovery
 from app.services.storage_element_publish_service import storage_element_publish_service
+from app.services.event_publisher import event_publisher
 from app.core.logging_config import setup_logging, get_logger
 from app.core.observability import setup_observability
 from app.core.scheduler import init_scheduler, shutdown_scheduler
@@ -62,6 +63,10 @@ async def lifespan(app: FastAPI):
 
         # Инициализация Service Discovery (async)
         await service_discovery.initialize()
+
+        # PHASE 1: Инициализация EventPublisher для Query Module sync
+        await event_publisher.initialize()
+        logger.info("EventPublisher initialized")
 
         # Публикация начальной конфигурации Storage Elements при startup
         # Используем тот же цикл db session
@@ -117,6 +122,10 @@ async def lifespan(app: FastAPI):
         # Остановка APScheduler (с ожиданием завершения running jobs)
         shutdown_scheduler()
         logger.info("APScheduler shut down")
+
+        # PHASE 1: Закрытие EventPublisher
+        await event_publisher.close()
+        logger.info("EventPublisher closed")
 
         await service_discovery.close()  # Async вызов
         await close_redis()  # Async вызов

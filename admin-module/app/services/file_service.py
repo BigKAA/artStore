@@ -2,6 +2,7 @@
 Admin Module - File Registry Service.
 
 Sprint 15.2: Бизнес-логика для управления file registry.
+PHASE 1: Sprint 16 - Integration с EventPublisher для Query Module sync.
 
 Сервис отвечает за:
 - Регистрацию новых файлов при upload через Ingester Module
@@ -9,11 +10,13 @@ Sprint 15.2: Бизнес-логика для управления file registry
 - Обновление файла при финализации (temporary → permanent)
 - Soft delete файлов
 - Pagination и фильтрация файлов
+- Публикация events для синхронизации Query Module cache
 
 ВАЖНО:
 - Все операции асинхронные (asyncpg через SQLAlchemy)
 - Transaction safety для consistency
 - Audit logging для всех критических операций
+- Event publishing после успешных DB операций (PHASE 1)
 """
 
 import logging
@@ -33,6 +36,8 @@ from app.schemas.file import (
     FileListResponse,
     FileDeleteResponse,
 )
+from app.schemas.events import FileMetadataEvent
+from app.services.event_publisher import event_publisher
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +127,14 @@ class FileService:
                     "original_filename": file.original_filename,
                     "retention_policy": file.retention_policy.value
                 }
+            )
+
+            # PHASE 1: Публикация file:created event для Query Module sync
+            metadata = self._to_event_metadata(file)
+            await event_publisher.publish_file_created(
+                file_id=file.file_id,
+                storage_element_id=file.storage_element_id,
+                metadata=metadata
             )
 
             return self._to_response(file)
@@ -274,6 +287,14 @@ class FileService:
                 }
             )
 
+            # PHASE 1: Публикация file:updated event для Query Module sync
+            metadata = self._to_event_metadata(file)
+            await event_publisher.publish_file_updated(
+                file_id=file.file_id,
+                storage_element_id=file.storage_element_id,
+                metadata=metadata
+            )
+
             return self._to_response(file)
 
         except SQLAlchemyError as e:
@@ -356,6 +377,13 @@ class FileService:
                     "deleted_at": str(deleted_at),
                     "deletion_reason": deletion_reason
                 }
+            )
+
+            # PHASE 1: Публикация file:deleted event для Query Module sync
+            await event_publisher.publish_file_deleted(
+                file_id=file.file_id,
+                storage_element_id=file.storage_element_id,
+                deleted_at=deleted_at
             )
 
             return FileDeleteResponse(
@@ -466,6 +494,42 @@ class FileService:
             page=page,
             page_size=page_size,
             total_pages=total_pages
+        )
+
+    def _to_event_metadata(self, file: File) -> FileMetadataEvent:
+        """
+        Конвертация File model в FileMetadataEvent для event publishing.
+
+        PHASE 1: Используется при публикации events в Redis.
+
+        Args:
+            file: File model instance
+
+        Returns:
+            FileMetadataEvent: Event metadata schema для Redis Pub/Sub
+        """
+        return FileMetadataEvent(
+            file_id=file.file_id,
+            original_filename=file.original_filename,
+            storage_filename=file.storage_filename,
+            file_size=file.file_size,
+            checksum_sha256=file.checksum_sha256,
+            content_type=file.content_type,
+            description=file.description,
+            storage_element_id=file.storage_element_id,
+            storage_path=file.storage_path,
+            compressed=file.compressed,
+            compression_algorithm=file.compression_algorithm,
+            original_size=file.original_size,
+            uploaded_by=file.uploaded_by,
+            upload_source_ip=file.upload_source_ip,
+            created_at=file.created_at,
+            updated_at=file.updated_at,
+            retention_policy=file.retention_policy.value,
+            ttl_expires_at=file.ttl_expires_at,
+            ttl_days=file.ttl_days,
+            user_metadata=file.user_metadata or {},
+            tags=None,  # Tags будут добавлены в будущих спринтах
         )
 
     def _to_response(self, file: File) -> FileResponse:
