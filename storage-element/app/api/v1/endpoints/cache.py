@@ -20,13 +20,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_db
+from app.api.deps import get_db, require_service_account
 from app.services.cache_rebuild_service import (
     CacheRebuildService,
     ConsistencyReport,
     RebuildResult
 )
-from app.core.auth import require_service_account
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ async def rebuild_cache_full(
     logger.info(
         "Full cache rebuild requested",
         extra={
-            "requester": _auth.get("client_id"),
+            "requester": _auth.client_id,
             "role": _auth.get("role")
         }
     )
@@ -172,7 +171,7 @@ async def rebuild_cache_incremental(
     """
     logger.info(
         "Incremental cache rebuild requested",
-        extra={"requester": _auth.get("client_id")}
+        extra={"requester": _auth.client_id}
     )
 
     rebuild_service = CacheRebuildService(db=db)
@@ -257,7 +256,7 @@ async def check_consistency(
     """
     logger.info(
         "Cache consistency check requested",
-        extra={"requester": _auth.get("client_id")}
+        extra={"requester": _auth.client_id}
     )
 
     rebuild_service = CacheRebuildService(db=db)
@@ -344,7 +343,7 @@ async def cleanup_expired_entries(
     """
     logger.info(
         "Expired cache cleanup requested",
-        extra={"requester": _auth.get("client_id")}
+        extra={"requester": _auth.client_id}
     )
 
     rebuild_service = CacheRebuildService(db=db)
