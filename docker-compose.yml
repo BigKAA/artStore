@@ -137,6 +137,13 @@ services:
       INITIAL_ACCOUNT_ROLE: ADMIN
       INITIAL_ACCOUNT_PASSWORD: Test-Password123
 
+      # Event Publishing (PHASE 1: Query Module Sync)
+      EVENT_PUBLISH_ENABLED: "on"
+      EVENT_CHANNEL_FILE_CREATED: "file:created"
+      EVENT_CHANNEL_FILE_UPDATED: "file:updated"
+      EVENT_CHANNEL_FILE_DELETED: "file:deleted"
+      EVENT_PUBLISH_TIMEOUT: 5
+
       # Scheduler
       SCHEDULER_ENABLED: "on"
       SCHEDULER_TIMEZONE: "UTC"
@@ -566,11 +573,11 @@ services:
       # PostgreSQL SSL
       DB_SSL_ENABLED: ${DB_SSL_ENABLED:-off}
 
-      # Redis
-      REDIS_URL: redis://redis:6379/1
+      # Redis (PHASE 2: Same DB as Admin Module for Pub/Sub sync)
+      REDIS_URL: redis://redis:6379/0
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_DB: 1
+      REDIS_DB: 0
       SERVICE_DISCOVERY_CHANNEL: artstore:storage-elements
 
       # Caching
@@ -584,6 +591,12 @@ services:
 
       # Circuit Breaker
       CIRCUIT_BREAKER_ENABLED: "on"
+
+      # Event Subscription (PHASE 2: Query Module Sync)
+      EVENT_SUBSCRIBE_ENABLED: "on"
+      EVENT_CHANNEL_FILE_CREATED: "file:created"
+      EVENT_CHANNEL_FILE_UPDATED: "file:updated"
+      EVENT_CHANNEL_FILE_DELETED: "file:deleted"
     volumes:
       - ./query-module/keys:/app/keys:ro
       - query_logs:/app/logs
