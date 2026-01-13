@@ -81,7 +81,7 @@ async def rebuild_cache_full(
         "Full cache rebuild requested",
         extra={
             "requester": _auth.client_id,
-            "role": _auth.get("role")
+            "role": _auth.role
         }
     )
 
