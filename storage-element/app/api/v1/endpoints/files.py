@@ -42,6 +42,10 @@ class FileMetadataResponse(BaseModel):
     version: Optional[str] = None
     storage_path: str
     checksum: str
+    # Cache TTL fields (PHASE 1)
+    cache_updated_at: str
+    cache_ttl_hours: int
+    cache_expired: bool
 
     class Config:
         from_attributes = True
@@ -212,7 +216,11 @@ async def get_file_metadata(
             description=metadata.description,
             version=metadata.version,
             storage_path=metadata.storage_path,
-            checksum=metadata.checksum
+            checksum=metadata.checksum,
+            # Cache TTL fields (PHASE 1)
+            cache_updated_at=metadata.cache_updated_at.isoformat(),
+            cache_ttl_hours=metadata.cache_ttl_hours,
+            cache_expired=metadata.cache_expired
         )
 
     except HTTPException:
@@ -445,7 +453,11 @@ async def update_file_metadata(
             description=metadata.description,
             version=metadata.version,
             storage_path=metadata.storage_path,
-            checksum=metadata.checksum
+            checksum=metadata.checksum,
+            # Cache TTL fields (PHASE 1)
+            cache_updated_at=metadata.cache_updated_at.isoformat(),
+            cache_ttl_hours=metadata.cache_ttl_hours,
+            cache_expired=metadata.cache_expired
         )
 
     except StorageException as e:
