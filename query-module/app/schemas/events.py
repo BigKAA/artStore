@@ -27,7 +27,7 @@ class FileMetadataEvent(BaseModel):
     checksum_sha256: str = Field(..., description="SHA-256 checksum файла")
     content_type: str = Field(..., description="MIME тип файла")
     description: Optional[str] = Field(None, description="Описание файла")
-    storage_element_id: int = Field(..., description="ID Storage Element где хранится файл")
+    storage_element_id: str = Field(..., description="ID Storage Element где хранится файл")
     storage_path: str = Field(..., description="Путь к файлу в Storage Element")
     compressed: bool = Field(default=False, description="Файл сжат")
     compression_algorithm: Optional[str] = Field(None, description="Алгоритм сжатия (brotli/gzip)")
@@ -54,7 +54,7 @@ class FileCreatedEvent(BaseModel):
     event_type: str = Field(default="file:created", description="Тип события")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp события")
     file_id: UUID = Field(..., description="ID созданного файла")
-    storage_element_id: int = Field(..., description="ID Storage Element")
+    storage_element_id: str = Field(..., description="ID Storage Element")
     metadata: FileMetadataEvent = Field(..., description="Полные метаданные файла")
 
 
@@ -69,7 +69,7 @@ class FileUpdatedEvent(BaseModel):
     event_type: str = Field(default="file:updated", description="Тип события")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp события")
     file_id: UUID = Field(..., description="ID обновленного файла")
-    storage_element_id: int = Field(..., description="ID Storage Element")
+    storage_element_id: str = Field(..., description="ID Storage Element")
     metadata: FileMetadataEvent = Field(..., description="Обновленные метаданные файла")
 
 
@@ -84,5 +84,5 @@ class FileDeletedEvent(BaseModel):
     event_type: str = Field(default="file:deleted", description="Тип события")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp события")
     file_id: UUID = Field(..., description="ID удаленного файла")
-    storage_element_id: int = Field(..., description="ID Storage Element")
+    storage_element_id: str = Field(..., description="ID Storage Element")
     deleted_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp удаления")
