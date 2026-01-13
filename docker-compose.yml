@@ -138,7 +138,15 @@ services:
       INITIAL_ACCOUNT_PASSWORD: Test-Password123
 
       # Event Publishing (PHASE 1: Query Module Sync)
+      # PHASE 2: Миграция на Redis Streams для guaranteed delivery
       EVENT_PUBLISH_ENABLED: "on"
+
+      # Redis Streams configuration (PHASE 2)
+      EVENT_STREAM_NAME: file-events
+      EVENT_STREAM_MAXLEN: 10000
+      EVENT_STREAM_RETENTION_HOURS: 24
+
+      # Legacy Pub/Sub channels (deprecated, сохранены для backwards compatibility)
       EVENT_CHANNEL_FILE_CREATED: "file:created"
       EVENT_CHANNEL_FILE_UPDATED: "file:updated"
       EVENT_CHANNEL_FILE_DELETED: "file:deleted"
@@ -593,7 +601,18 @@ services:
       CIRCUIT_BREAKER_ENABLED: "on"
 
       # Event Subscription (PHASE 2: Query Module Sync)
+      # PHASE 3: Миграция на Redis Streams для guaranteed delivery
       EVENT_SUBSCRIBE_ENABLED: "on"
+
+      # Redis Streams Consumer configuration (PHASE 3)
+      EVENT_STREAM_NAME: file-events
+      EVENT_CONSUMER_GROUP: query-module-consumers
+      EVENT_CONSUMER_BATCH_SIZE: 10
+      EVENT_CONSUMER_BLOCK_MS: 5000
+      EVENT_PENDING_RETRY_MS: 60000
+      EVENT_PENDING_CHECK_INTERVAL: 30
+
+      # Legacy Pub/Sub channels (deprecated, сохранены для backwards compatibility)
       EVENT_CHANNEL_FILE_CREATED: "file:created"
       EVENT_CHANNEL_FILE_UPDATED: "file:updated"
       EVENT_CHANNEL_FILE_DELETED: "file:deleted"

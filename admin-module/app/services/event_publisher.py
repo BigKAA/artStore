@@ -1,16 +1,25 @@
 """
-Event Publisher Service для Redis Pub/Sub синхронизации.
+Event Publisher Service для Redis Streams синхронизации.
 
 PHASE 1: Sprint 16 - Query Module Sync Repair.
+PHASE 2: Миграция с Pub/Sub на Streams для guaranteed delivery.
 
-EventPublisher отвечает за публикацию events о file operations в Redis.
-Query Module подписывается на эти events и синхронизирует свой cache.
+EventPublisher отвечает за публикацию events о file operations в Redis Streams (XADD).
+Query Module подписывается через Consumer Groups (XREADGROUP) и синхронизирует cache.
 
 Архитектура:
-- Admin Module (EventPublisher) → Redis Pub/Sub → Query Module (EventSubscriber)
+- Admin Module (EventPublisher) → Redis Streams (XADD) → Query Module (EventSubscriber)
 - Events: file:created, file:updated, file:deleted
+- Stream: file-events с automatic cleanup (MAXLEN)
+- Consumer Groups с ACK mechanism для guaranteed delivery
 - Async Redis (redis.asyncio) для неблокирующей работы
 - Graceful degradation при Redis unavailable
+
+Advantages over Pub/Sub:
+- Events persisted in stream (не теряются при reconnect)
+- Consumer Groups с ACK для tracking обработки
+- Pending Entry List (PEL) для retry failed events
+- MAXLEN для automatic cleanup старых events
 """
 
 import logging
@@ -35,14 +44,17 @@ logger = logging.getLogger(__name__)
 
 class EventPublisher:
     """
-    Сервис для публикации file events в Redis Pub/Sub.
+    Сервис для публикации file events в Redis Streams (XADD).
 
     PHASE 1: Публикация events после успешных file operations.
-    Query Module подписывается на эти events и обновляет cache.
+    PHASE 2: Миграция на Streams для guaranteed delivery.
+
+    Query Module подписывается через Consumer Groups и обновляет cache.
 
     Usage:
         publisher = EventPublisher()
-        await publisher.publish_file_created(file_id, storage_element_id, metadata)
+        event_id = await publisher.publish_file_created(file_id, storage_element_id, metadata)
+        # Returns event_id like "1234567890-0"
     """
 
     def __init__(self):
@@ -55,7 +67,7 @@ class EventPublisher:
         Асинхронная инициализация EventPublisher.
 
         Вызывается при startup приложения (lifespan).
-        Получает Redis client для publishing.
+        Получает Redis client для publishing в Streams.
         """
         if not settings.event_publishing.enabled:
             logger.info("Event publishing disabled")
@@ -65,13 +77,11 @@ class EventPublisher:
             self.redis = await get_redis()
             self._initialized = True
             logger.info(
-                "EventPublisher initialized",
+                "EventPublisher initialized (Redis Streams)",
                 extra={
-                    "channels": [
-                        settings.event_publishing.channel_file_created,
-                        settings.event_publishing.channel_file_updated,
-                        settings.event_publishing.channel_file_deleted,
-                    ]
+                    "stream_name": settings.event_publishing.stream_name,
+                    "stream_maxlen": settings.event_publishing.stream_maxlen,
+                    "stream_retention_hours": settings.event_publishing.stream_retention_hours,
                 }
             )
         except Exception as e:
@@ -83,9 +93,9 @@ class EventPublisher:
         file_id: UUID,
         storage_element_id: int,
         metadata: FileMetadataEvent,
-    ) -> bool:
+    ) -> Optional[str]:
         """
-        Публикация file:created event.
+        Публикация file:created event в Redis Stream (XADD).
 
         Вызывается после успешной регистрации файла (FileService.register_file).
 
@@ -95,7 +105,7 @@ class EventPublisher:
             metadata: Полные метаданные файла
 
         Returns:
-            bool: True если event успешно опубликован, False иначе
+            Optional[str]: Event ID (например "1234567890-0") если успешно, None иначе
 
         Example:
             metadata = FileMetadataEvent(
@@ -103,48 +113,53 @@ class EventPublisher:
                 original_filename=file.original_filename,
                 ...
             )
-            success = await publisher.publish_file_created(
+            event_id = await publisher.publish_file_created(
                 file.file_id,
                 file.storage_element_id,
                 metadata
             )
+            # event_id = "1736778635123-0"
         """
         if not self._initialized or not self.redis:
             logger.warning(
                 "EventPublisher not initialized, skipping file:created event",
                 extra={"file_id": str(file_id)}
             )
-            return False
+            return None
 
         if not settings.event_publishing.enabled:
-            return False
+            return None
 
         try:
-            # Создаем event
-            event = FileCreatedEvent(
-                file_id=file_id,
-                storage_element_id=storage_element_id,
-                metadata=metadata,
+            # Создаем flat dictionary для XADD
+            # metadata сериализуется в JSON string как одно поле
+            event_data = {
+                "event_type": "file:created",
+                "timestamp": datetime.utcnow().isoformat(),
+                "file_id": str(file_id),
+                "storage_element_id": str(storage_element_id),
+                "metadata": metadata.model_dump_json(),
+            }
+
+            # XADD в Redis Stream с automatic cleanup
+            event_id = await self.redis.xadd(
+                name=settings.event_publishing.stream_name,
+                fields=event_data,
+                maxlen=settings.event_publishing.stream_maxlen,
+                approximate=True,  # Approximate MAXLEN для performance
             )
 
-            # Сериализуем в JSON
-            event_json = event.model_dump_json()
-
-            # Публикуем в Redis channel
-            channel = settings.event_publishing.channel_file_created
-            subscribers = await self.redis.publish(channel, event_json)
-
             logger.info(
-                "Published file:created event",
+                "Published file:created event to stream",
                 extra={
+                    "event_id": event_id,
                     "file_id": str(file_id),
                     "storage_element_id": storage_element_id,
-                    "channel": channel,
-                    "subscribers": subscribers,
+                    "stream_name": settings.event_publishing.stream_name,
                 }
             )
 
-            return True
+            return event_id
 
         except Exception as e:
             logger.error(
@@ -156,16 +171,16 @@ class EventPublisher:
                 },
                 exc_info=True
             )
-            return False
+            return None
 
     async def publish_file_updated(
         self,
         file_id: UUID,
         storage_element_id: int,
         metadata: FileMetadataEvent,
-    ) -> bool:
+    ) -> Optional[str]:
         """
-        Публикация file:updated event.
+        Публикация file:updated event в Redis Stream (XADD).
 
         Вызывается после успешного обновления файла (FileService.update_file).
 
@@ -175,44 +190,47 @@ class EventPublisher:
             metadata: Обновленные метаданные файла
 
         Returns:
-            bool: True если event успешно опубликован, False иначе
+            Optional[str]: Event ID если успешно, None иначе
         """
         if not self._initialized or not self.redis:
             logger.warning(
                 "EventPublisher not initialized, skipping file:updated event",
                 extra={"file_id": str(file_id)}
             )
-            return False
+            return None
 
         if not settings.event_publishing.enabled:
-            return False
+            return None
 
         try:
-            # Создаем event
-            event = FileUpdatedEvent(
-                file_id=file_id,
-                storage_element_id=storage_element_id,
-                metadata=metadata,
+            # Создаем flat dictionary для XADD
+            event_data = {
+                "event_type": "file:updated",
+                "timestamp": datetime.utcnow().isoformat(),
+                "file_id": str(file_id),
+                "storage_element_id": str(storage_element_id),
+                "metadata": metadata.model_dump_json(),
+            }
+
+            # XADD в Redis Stream с automatic cleanup
+            event_id = await self.redis.xadd(
+                name=settings.event_publishing.stream_name,
+                fields=event_data,
+                maxlen=settings.event_publishing.stream_maxlen,
+                approximate=True,
             )
 
-            # Сериализуем в JSON
-            event_json = event.model_dump_json()
-
-            # Публикуем в Redis channel
-            channel = settings.event_publishing.channel_file_updated
-            subscribers = await self.redis.publish(channel, event_json)
-
             logger.info(
-                "Published file:updated event",
+                "Published file:updated event to stream",
                 extra={
+                    "event_id": event_id,
                     "file_id": str(file_id),
                     "storage_element_id": storage_element_id,
-                    "channel": channel,
-                    "subscribers": subscribers,
+                    "stream_name": settings.event_publishing.stream_name,
                 }
             )
 
-            return True
+            return event_id
 
         except Exception as e:
             logger.error(
@@ -224,16 +242,16 @@ class EventPublisher:
                 },
                 exc_info=True
             )
-            return False
+            return None
 
     async def publish_file_deleted(
         self,
         file_id: UUID,
         storage_element_id: int,
         deleted_at: Optional[datetime] = None,
-    ) -> bool:
+    ) -> Optional[str]:
         """
-        Публикация file:deleted event.
+        Публикация file:deleted event в Redis Stream (XADD).
 
         Вызывается после успешного удаления файла (FileService.delete_file).
 
@@ -243,44 +261,48 @@ class EventPublisher:
             deleted_at: Timestamp удаления (опционально)
 
         Returns:
-            bool: True если event успешно опубликован, False иначе
+            Optional[str]: Event ID если успешно, None иначе
         """
         if not self._initialized or not self.redis:
             logger.warning(
                 "EventPublisher not initialized, skipping file:deleted event",
                 extra={"file_id": str(file_id)}
             )
-            return False
+            return None
 
         if not settings.event_publishing.enabled:
-            return False
+            return None
 
         try:
-            # Создаем event
-            event = FileDeletedEvent(
-                file_id=file_id,
-                storage_element_id=storage_element_id,
-                deleted_at=deleted_at or datetime.utcnow(),
+            # Создаем flat dictionary для XADD
+            deleted_timestamp = deleted_at or datetime.utcnow()
+            event_data = {
+                "event_type": "file:deleted",
+                "timestamp": datetime.utcnow().isoformat(),
+                "file_id": str(file_id),
+                "storage_element_id": str(storage_element_id),
+                "deleted_at": deleted_timestamp.isoformat(),
+            }
+
+            # XADD в Redis Stream с automatic cleanup
+            event_id = await self.redis.xadd(
+                name=settings.event_publishing.stream_name,
+                fields=event_data,
+                maxlen=settings.event_publishing.stream_maxlen,
+                approximate=True,
             )
 
-            # Сериализуем в JSON
-            event_json = event.model_dump_json()
-
-            # Публикуем в Redis channel
-            channel = settings.event_publishing.channel_file_deleted
-            subscribers = await self.redis.publish(channel, event_json)
-
             logger.info(
-                "Published file:deleted event",
+                "Published file:deleted event to stream",
                 extra={
+                    "event_id": event_id,
                     "file_id": str(file_id),
                     "storage_element_id": storage_element_id,
-                    "channel": channel,
-                    "subscribers": subscribers,
+                    "stream_name": settings.event_publishing.stream_name,
                 }
             )
 
-            return True
+            return event_id
 
         except Exception as e:
             logger.error(
@@ -292,7 +314,7 @@ class EventPublisher:
                 },
                 exc_info=True
             )
-            return False
+            return None
 
     async def close(self) -> None:
         """
