@@ -543,7 +543,11 @@ async def list_files(
                 description=f.description,
                 version=f.version,
                 storage_path=f.storage_path,
-                checksum=f.checksum
+                checksum=f.checksum,
+                # Cache TTL fields (PHASE 1)
+                cache_updated_at=f.cache_updated_at.isoformat(),
+                cache_ttl_hours=f.cache_ttl_hours,
+                cache_expired=f.cache_expired
             )
             for f in files
         ]
