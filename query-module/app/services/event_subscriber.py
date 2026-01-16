@@ -483,6 +483,8 @@ class EventSubscriber:
 
                         try:
                             # Claim ownership and retry
+                            # XCLAIM returns: [(event_id, data)] - direct list without stream_name
+                            # Unlike XREADGROUP which returns: [[stream_name, [(event_id, data)]]]
                             claimed = await self.redis.xclaim(
                                 name=self.stream_name,
                                 groupname=self.consumer_group,
@@ -491,22 +493,22 @@ class EventSubscriber:
                                 message_ids=[event_id],
                             )
 
-                            for stream_name, messages in claimed:
-                                for claimed_event_id, event_data in messages:
-                                    # Retry processing
-                                    await self._handle_event(claimed_event_id, event_data)
+                            # Parse XCLAIM response directly (no stream_name wrapper)
+                            for claimed_event_id, event_data in claimed:
+                                # Retry processing
+                                await self._handle_event(claimed_event_id, event_data)
 
-                                    # ACK если успешно
-                                    await self.redis.xack(
-                                        self.stream_name,
-                                        self.consumer_group,
-                                        claimed_event_id,
-                                    )
+                                # ACK если успешно
+                                await self.redis.xack(
+                                    self.stream_name,
+                                    self.consumer_group,
+                                    claimed_event_id,
+                                )
 
-                                    logger.info(
-                                        "Pending event retried successfully",
-                                        extra={"event_id": claimed_event_id}
-                                    )
+                                logger.info(
+                                    "Pending event retried successfully",
+                                    extra={"event_id": claimed_event_id}
+                                )
 
                         except Exception as e:
                             logger.error(
