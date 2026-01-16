@@ -109,7 +109,7 @@ class CacheSyncService:
                     "Cache synced for file:created event",
                     extra={
                         "file_id": str(event.file_id),
-                        "filename": metadata.original_filename,
+                        "original_filename": metadata.original_filename,
                         "storage_element_id": event.storage_element_id,
                     }
                 )
@@ -191,7 +191,7 @@ class CacheSyncService:
                     "Cache synced for file:updated event",
                     extra={
                         "file_id": str(event.file_id),
-                        "filename": metadata.original_filename,
+                        "original_filename": metadata.original_filename,
                         "storage_element_id": event.storage_element_id,
                     }
                 )
