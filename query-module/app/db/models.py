@@ -79,8 +79,7 @@ class FileMetadata(Base):
     sha256_hash: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        unique=True,
-        index=True,
+        index=True,  # Index без unique - позволяет duplicate content
         comment="SHA256 хеш файла для верификации целостности"
     )
 
