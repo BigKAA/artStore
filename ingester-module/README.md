@@ -608,6 +608,83 @@ Health check `/health/ready` теперь:
    - `degraded`: частично healthy
    - `fail`: критические компоненты недоступны
 
+## Runtime Fallback Mechanism (Sprint 17 Extension)
+
+### Overview
+
+При недоступности Redis, Ingester Module автоматически использует Admin Module API как fallback source для capacity метрик.
+
+### Fallback Chain
+
+```
+Primary: Redis cache (< 10ms latency)
+   ↓ RedisError
+Fallback: Admin Module API (< 500ms latency)
+   ↓ AdminClientError
+Result: None (upload блокируется)
+```
+
+### Supported Scenarios
+
+| Scenario | Primary | Fallback | Upload Status |
+|----------|---------|----------|---------------|
+| Redis OK | ✅ Redis cache | N/A | ✅ OK |
+| Redis down (startup) | ❌ Connection refused | ✅ Admin Module API | ✅ OK |
+| Redis down (runtime) | ❌ Connection timeout | ✅ Admin Module API | ✅ OK |
+| Redis + Admin down | ❌ No connection | ❌ No fallback | ❌ Blocked |
+
+### Configuration
+
+```bash
+# Admin Module URL для fallback
+SERVICE_ACCOUNT_ADMIN_MODULE_URL=http://localhost:8000
+
+# OAuth 2.0 credentials
+SERVICE_ACCOUNT_CLIENT_ID=ingester-service
+SERVICE_ACCOUNT_CLIENT_SECRET=secret
+
+# Timeout для fallback requests
+SERVICE_ACCOUNT_TIMEOUT=30  # seconds
+```
+
+### Performance Impact
+
+- **Redis cache hit**: < 10ms latency
+- **Admin Module API fallback**: < 500ms latency
+- **Overhead**: ~490ms additional latency при Redis failure
+
+### Monitoring
+
+```bash
+# Логи при fallback activation
+grep "Admin Module API fallback" logs/ingester.log
+
+# Метрики (Prometheus) - опционально
+ingester_capacity_fallback_total{source="admin_module_api"}
+ingester_capacity_latency_seconds{source="redis"}
+ingester_capacity_latency_seconds{source="admin_module_api"}
+```
+
+### Implementation Details
+
+**AdminModuleClient Extension:**
+- Новый метод: `get_storage_element_capacity(element_id)`
+- Helper метод: `_parse_capacity_info(element_id, data)`
+- OAuth 2.0 token refresh при 401
+- Корректная обработка 200, 401, 404 response codes
+
+**AdaptiveCapacityMonitor Fallback:**
+- DI injection `admin_client` в конструктор
+- Fallback логика в `get_capacity()` при `RedisError`
+- Логирование с WARNING level при fallback activation
+- INFO level при fallback success, ERROR при fallback failure
+
+**См. также:**
+- `claudedocs/ARCHITECTURE_Capacity_Monitoring_Fallback.md` - Детальная архитектура
+- `WORKFLOW_Runtime_Fallback_Capacity_Metrics.md` - Implementation workflow
+- `tests/unit/test_admin_client_capacity_fallback.py` - Unit тесты
+- `tests/unit/test_capacity_monitor_fallback.py` - Integration тесты
+
 ## Тестирование
 
 ### Unit Tests

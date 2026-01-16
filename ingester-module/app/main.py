@@ -437,12 +437,14 @@ async def lifespan(app: FastAPI):
                 storage_endpoints=storage_endpoints,
                 config=monitor_config,
                 storage_priorities=storage_priorities,  # Sprint 18 Phase 3
+                admin_client=admin_client,  # Sprint 17 Extension: передаем admin_client для fallback
             )
             logger.info(
-                "AdaptiveCapacityMonitor initialized",
+                "AdaptiveCapacityMonitor initialized with Admin Module API fallback",
                 extra={
                     "role": capacity_monitor.role.value,
                     "instance_id": capacity_monitor.instance_id,
+                    "fallback_available": admin_client is not None,
                 }
             )
 

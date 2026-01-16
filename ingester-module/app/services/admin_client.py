@@ -531,6 +531,147 @@ class AdminModuleClient:
                 f"Failed to connect to Admin Module: {e}"
             )
 
+    # ==================== Sprint 17 Extension: Capacity Fallback ====================
+
+    async def get_storage_element_capacity(
+        self,
+        element_id: str
+    ) -> Optional["StorageCapacityInfo"]:
+        """
+        Получение capacity информации для конкретного Storage Element.
+
+        Используется как fallback когда Redis недоступен для AdaptiveCapacityMonitor.
+
+        Sprint 17 Extension: Runtime Fallback для capacity метрик.
+
+        Args:
+            element_id: Storage Element ID (например: "se-01")
+
+        Returns:
+            StorageCapacityInfo или None если SE не найден
+
+        Raises:
+            AdminClientError: При ошибке запроса
+            AdminClientConnectionError: При ошибке соединения
+        """
+        if not self._initialized:
+            raise AdminClientError("Client not initialized. Call initialize() first.")
+
+        logger.debug(
+            "Fetching capacity for Storage Element via Admin Module API fallback",
+            extra={"element_id": element_id, "fallback": "admin_module_api"}
+        )
+
+        try:
+            token = await self._ensure_authenticated()
+
+            # Запрос к Internal API
+            response = await self._http_client.get(
+                f"/api/v1/internal/storage-elements/{element_id}",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                return self._parse_capacity_info(element_id, data)
+
+            elif response.status_code == 401:
+                # Токен истёк, retry с новым токеном
+                logger.debug("Token expired during capacity fetch, refreshing")
+                self._access_token = None
+                token = await self._ensure_authenticated()
+
+                response = await self._http_client.get(
+                    f"/api/v1/internal/storage-elements/{element_id}",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    return self._parse_capacity_info(element_id, data)
+
+                raise AdminClientAuthError(f"Auth retry failed: {response.text}")
+
+            elif response.status_code == 404:
+                logger.warning(
+                    f"Storage Element not found via Admin Module API",
+                    extra={"element_id": element_id}
+                )
+                return None
+
+            else:
+                raise AdminClientError(
+                    f"Failed to get capacity for {element_id}: "
+                    f"status={response.status_code}, response={response.text}"
+                )
+
+        except httpx.RequestError as e:
+            raise AdminClientConnectionError(
+                f"Failed to connect to Admin Module: {e}"
+            )
+
+    def _parse_capacity_info(
+        self,
+        element_id: str,
+        data: dict
+    ) -> "StorageCapacityInfo":
+        """
+        Преобразование Admin API response в StorageCapacityInfo.
+
+        Args:
+            element_id: Storage Element ID
+            data: Response data from Admin Module API
+
+        Returns:
+            StorageCapacityInfo
+
+        Raises:
+            AdminClientError: При ошибке парсинга данных
+        """
+        # Import здесь для избежания circular dependency
+        from app.services.capacity_monitor import StorageCapacityInfo, HealthStatus
+
+        try:
+            # Маппинг health_status из Admin API в HealthStatus enum
+            health_status_map = {
+                "healthy": HealthStatus.HEALTHY,
+                "degraded": HealthStatus.DEGRADED,
+                "unhealthy": HealthStatus.UNHEALTHY,
+            }
+
+            capacity_bytes = data.get("capacity_bytes", 0)
+            used_bytes = data.get("used_bytes", 0)
+            available_bytes = capacity_bytes - used_bytes if capacity_bytes else 0
+            percent_used = (used_bytes / capacity_bytes * 100) if capacity_bytes > 0 else 0.0
+
+            health_status = health_status_map.get(
+                data.get("health_status", "unhealthy"),
+                HealthStatus.UNHEALTHY
+            )
+
+            # Timestamp текущего запроса (fallback не имеет cached timestamp)
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            return StorageCapacityInfo(
+                storage_id=element_id,
+                mode=data.get("mode", "unknown"),
+                total=capacity_bytes,
+                used=used_bytes,
+                available=available_bytes,
+                percent_used=round(percent_used, 2),
+                health=health_status,
+                backend="unknown",  # Admin API не предоставляет backend info
+                location="unknown",  # Admin API не предоставляет location info
+                last_update=now_iso,  # Fallback - текущее время
+                last_poll=now_iso,    # Fallback - текущее время
+                endpoint=data.get("api_url", ""),
+            )
+
+        except Exception as e:
+            raise AdminClientError(
+                f"Failed to parse capacity info for {element_id}: {e}"
+            )
+
 
 # Глобальный singleton экземпляр
 _admin_client: Optional[AdminModuleClient] = None
