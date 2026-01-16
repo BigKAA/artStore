@@ -29,7 +29,7 @@ import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import httpx
 from redis.asyncio import Redis
@@ -47,6 +47,9 @@ from app.core.metrics import (
     update_available_storage_elements,
     record_cache_access,
 )
+
+if TYPE_CHECKING:
+    from app.services.admin_client import AdminModuleClient
 
 logger = get_logger(__name__)
 
@@ -191,6 +194,7 @@ class AdaptiveCapacityMonitor:
         storage_endpoints: dict[str, str],  # {se_id: endpoint_url}
         config: Optional[CapacityMonitorConfig] = None,
         storage_priorities: Optional[dict[str, int]] = None,  # Sprint 18 Phase 3
+        admin_client: Optional["AdminModuleClient"] = None,  # Sprint 17 Extension: Fallback
     ):
         """
         Инициализация AdaptiveCapacityMonitor.
@@ -200,12 +204,15 @@ class AdaptiveCapacityMonitor:
             storage_endpoints: Словарь {se_id: endpoint_url} для polling
             config: Конфигурация (опционально)
             storage_priorities: Словарь {se_id: priority} для sorted set (Sprint 18 Phase 3)
+            admin_client: AdminModuleClient для fallback при Redis failure (Sprint 17 Extension)
         """
         self._redis = redis_client
         self._storage_endpoints = storage_endpoints
         self._config = config or CapacityMonitorConfig()
         # Sprint 18 Phase 3: Priorities для sorted set (Sequential Fill)
         self._storage_priorities = storage_priorities or {}
+        # Sprint 17 Extension: Admin Module client для fallback
+        self._admin_client = admin_client
 
         # Instance ID для Leader Election (уникальный для каждого Ingester)
         self._instance_id = f"ingester-{uuid.uuid4().hex[:8]}"
@@ -801,6 +808,9 @@ class AdaptiveCapacityMonitor:
         """
         Получение capacity информации для SE.
 
+        Primary: Redis cache (fast, < 10ms)
+        Fallback: Admin Module API (slower, < 500ms)
+
         Работает как для Leader, так и для Follower (читает из cache).
 
         Args:
@@ -809,36 +819,85 @@ class AdaptiveCapacityMonitor:
         Returns:
             StorageCapacityInfo или None если данных нет
         """
+        # Primary: попытка получить из Redis cache
         try:
             cache_key = f"capacity:{se_id}"
             data = await self._redis.hgetall(cache_key)
 
-            if not data:
-                record_cache_access(hit=False)
-                return None
+            if data:
+                record_cache_access(hit=True)
+                return StorageCapacityInfo.from_dict(data)
 
-            record_cache_access(hit=True)
-            return StorageCapacityInfo.from_dict(data)
-
-        except RedisError as e:
-            logger.error(
-                "Failed to get capacity from cache",
-                extra={
-                    "se_id": se_id,
-                    "error": str(e),
-                }
+            # Cache miss - данных нет в Redis
+            record_cache_access(hit=False)
+            logger.debug(
+                f"Capacity cache miss for {se_id}",
+                extra={"se_id": se_id}
             )
             return None
+
+        except RedisError as e:
+            # ⚡ FALLBACK: Redis недоступен → Admin Module API
+            logger.warning(
+                "Redis unavailable for capacity, using Admin Module API fallback",
+                extra={
+                    "se_id": se_id,
+                    "redis_error": str(e),
+                    "fallback": "admin_module_api"
+                }
+            )
+
+            if self._admin_client:
+                try:
+                    capacity_info = await self._admin_client.get_storage_element_capacity(se_id)
+
+                    if capacity_info:
+                        logger.info(
+                            "Capacity retrieved via Admin Module API fallback",
+                            extra={
+                                "se_id": se_id,
+                                "capacity_status": capacity_info.health.value,
+                                "fallback": "success"
+                            }
+                        )
+                        return capacity_info
+                    else:
+                        logger.warning(
+                            f"Storage Element {se_id} not found in Admin Module",
+                            extra={"se_id": se_id}
+                        )
+                        return None
+
+                except Exception as fallback_error:
+                    logger.error(
+                        "Admin Module API fallback failed",
+                        extra={
+                            "se_id": se_id,
+                            "error": str(fallback_error),
+                            "fallback": "failed"
+                        }
+                    )
+                    return None
+            else:
+                logger.error(
+                    "Redis unavailable and no Admin Module client for fallback",
+                    extra={"se_id": se_id}
+                )
+                return None
 
     async def get_all_capacities(self) -> dict[str, StorageCapacityInfo]:
         """
         Получение capacity информации для всех SE.
+
+        Primary: Parallel read from Redis cache
+        Fallback: Batch request to Admin Module API (если доступен)
 
         Returns:
             Dict {se_id: StorageCapacityInfo}
         """
         result = {}
 
+        # Primary: попытка получить из Redis cache
         for se_id in self._storage_endpoints.keys():
             capacity = await self.get_capacity(se_id)
             if capacity:
@@ -1152,6 +1211,7 @@ async def init_capacity_monitor(
     storage_endpoints: dict[str, str],
     config: Optional[CapacityMonitorConfig] = None,
     storage_priorities: Optional[dict[str, int]] = None,  # Sprint 18 Phase 3
+    admin_client: Optional["AdminModuleClient"] = None,  # Sprint 17 Extension: Fallback
 ) -> AdaptiveCapacityMonitor:
     """
     Инициализация глобального Capacity Monitor.
@@ -1163,6 +1223,7 @@ async def init_capacity_monitor(
         storage_endpoints: Dict {se_id: endpoint_url}
         config: Опциональная конфигурация
         storage_priorities: Dict {se_id: priority} для sorted set (Sprint 18 Phase 3)
+        admin_client: AdminModuleClient для fallback при Redis failure (Sprint 17 Extension)
 
     Returns:
         Инициализированный AdaptiveCapacityMonitor
@@ -1174,6 +1235,7 @@ async def init_capacity_monitor(
         storage_endpoints=storage_endpoints,
         config=config,
         storage_priorities=storage_priorities,  # Sprint 18 Phase 3
+        admin_client=admin_client,  # Sprint 17 Extension: передаем admin_client
     )
 
     await _capacity_monitor.start()
