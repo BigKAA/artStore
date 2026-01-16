@@ -261,6 +261,16 @@ class AuthService:
                 trigger = "expiring_soon"
 
         try:
+            # КРИТИЧЕСКИЙ FIX: Пересоздаём HTTP клиент перед каждым token request
+            # для предотвращения зависания в broken state
+            if self._client:
+                try:
+                    await self._client.aclose()
+                except Exception as e:
+                    logger.warning(f"Error closing old HTTP client: {e}")
+                finally:
+                    self._client = None
+
             client = self._get_client()
 
             # OAuth 2.0 Client Credentials request
