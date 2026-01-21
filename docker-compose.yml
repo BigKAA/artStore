@@ -402,11 +402,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       LOG_FORMAT: json
 
-      # Storage Configuration - ТЕСТОВЫЙ РАЗМЕР 1GB
+      # Storage Configuration - ТЕСТОВЫЙ РАЗМЕР 2GB (для finalized файлов)
       STORAGE_TYPE: s3
       # Единый параметр размера хранилища (в байтах)
-      # 1 GB = 1073741824
-      STORAGE_MAX_SIZE: 1073741824
+      # 2 GB = 2147483648
+      STORAGE_MAX_SIZE: 2147483648
 
       # Health Reporting Settings
       STORAGE_ELEMENT_ID: se-03
