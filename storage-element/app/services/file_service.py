@@ -99,7 +99,9 @@ class FileService:
         user_fullname: Optional[str] = None,
         description: Optional[str] = None,
         version: Optional[str] = None,
-        metadata: Optional[dict] = None
+        metadata: Optional[dict] = None,
+        file_id: Optional[UUID] = None,
+        finalize_transaction_id: Optional[UUID] = None
     ) -> UUID:
         """
         Создать новый файл в хранилище.
@@ -116,6 +118,11 @@ class FileService:
         - Удаление созданных файлов
         - Очистка DB cache
 
+        Sprint 15: Поддержка finalization (Two-Phase Commit):
+        - Если file_id передан → использовать его (сохранение оригинального UUID)
+        - Если file_id не передан → генерировать новый UUID (обычная загрузка)
+        - finalize_transaction_id используется для связи с Ingester Module
+
         Args:
             file_data: Бинарные данные файла
             original_filename: Оригинальное имя файла
@@ -126,14 +133,28 @@ class FileService:
             description: Описание содержимого (опционально)
             version: Версия документа (опционально)
             metadata: Дополнительные метаданные (опционально)
+            file_id: UUID для сохранения (опционально, для финализации)
+            finalize_transaction_id: ID транзакции финализации (опционально)
 
         Returns:
             UUID: file_id созданного файла
 
         Raises:
-            StorageException: Ошибка создания файла
+            StorageException: Ошибка создания файла (включая duplicate file_id)
 
         Примеры:
+            >>> # Обычная загрузка (генерация нового UUID)
+            >>> with open("document.pdf", "rb") as f:
+            ...     file_id = await file_service.create_file(
+            ...         file_data=f,
+            ...         original_filename="document.pdf",
+            ...         content_type="application/pdf",
+            ...         user_id="user123",
+            ...         username="ivanov"
+            ...     )
+
+            >>> # Финализация (сохранение оригинального UUID)
+            >>> existing_uuid = UUID("...")
             >>> with open("document.pdf", "rb") as f:
             ...     file_id = await file_service.create_file(
             ...         file_data=f,
@@ -141,11 +162,36 @@ class FileService:
             ...         content_type="application/pdf",
             ...         user_id="user123",
             ...         username="ivanov",
-            ...         user_fullname="Иван Иванов",
-            ...         description="Quarterly report"
+            ...         file_id=existing_uuid,
+            ...         finalize_transaction_id=UUID("...")
             ...     )
         """
-        file_id = uuid4()
+        # Sprint 15: Условная логика для file_id
+        # Если file_id передан (finalization) → использовать его
+        # Иначе (обычная загрузка) → генерировать новый
+        if file_id is None:
+            file_id = uuid4()
+            logger.debug("Generated new file_id", extra={"file_id": str(file_id)})
+        else:
+            # Валидация уникальности file_id
+            existing_file = await self.db.execute(
+                select(FileMetadata).where(FileMetadata.file_id == file_id)
+            )
+            if existing_file.scalar_one_or_none():
+                raise StorageException(
+                    message=f"File with ID {file_id} already exists",
+                    error_code="FILE_ID_DUPLICATE",
+                    details={"file_id": str(file_id)}
+                )
+
+            logger.info(
+                "Using provided file_id for finalization",
+                extra={
+                    "file_id": str(file_id),
+                    "finalize_transaction_id": str(finalize_transaction_id) if finalize_transaction_id else None
+                }
+            )
+
         timestamp = datetime.now(timezone.utc)
         transaction_id = None
 

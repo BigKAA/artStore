@@ -84,6 +84,9 @@ async def upload_file(
     file: UploadFile = File(..., description="Файл для загрузки"),
     description: Optional[str] = Form(None, description="Описание содержимого"),
     version: Optional[str] = Form(None, description="Версия документа"),
+    file_id: Optional[str] = Form(None, description="UUID файла (для финализации, опционально)"),
+    finalize_transaction_id: Optional[str] = Form(None, description="ID транзакции финализации (опционально)"),
+    retention_policy: Optional[str] = Form(None, description="Политика хранения (temporary/permanent, опционально)"),
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user)
 ):
@@ -96,10 +99,17 @@ async def upload_file(
     - Загрузка файла через Consistency Protocol (WAL → Storage → Attr → DB → Commit)
     - Возврат метаданных созданного файла
 
+    Sprint 15: Поддержка finalization (Two-Phase Commit):
+    - Если передан file_id → использовать его (сохранение оригинального UUID)
+    - Если file_id не передан → генерировать новый UUID (обычная загрузка)
+
     Args:
         file: Загружаемый файл (multipart/form-data)
         description: Описание содержимого (опционально)
         version: Версия документа (опционально)
+        file_id: UUID файла для сохранения (опционально, для финализации)
+        finalize_transaction_id: ID транзакции финализации (опционально)
+        retention_policy: Политика хранения - temporary/permanent (опционально)
         user: Текущий пользователь из JWT
         db: Database session
 
@@ -107,7 +117,7 @@ async def upload_file(
         FileUploadResponse: Метаданные загруженного файла
 
     Raises:
-        HTTPException 400: Режим хранилища не разрешает загрузку
+        HTTPException 400: Режим хранилища не разрешает загрузку или invalid file_id
         HTTPException 500: Ошибка загрузки файла
     """
     # Проверка режима хранилища
@@ -117,23 +127,44 @@ async def upload_file(
             detail=f"File upload not allowed in {settings.app.mode.value} mode"
         )
 
+    # Sprint 15: Обработка file_id для finalization
+    provided_file_id: Optional[UUID] = None
+    if file_id:
+        try:
+            provided_file_id = UUID(file_id)
+            logger.debug(
+                "File upload with provided file_id (finalization)",
+                extra={
+                    "file_id": str(provided_file_id),
+                    "finalize_transaction_id": finalize_transaction_id,
+                    "user_id": user.sub
+                }
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid file_id format: {file_id}"
+            )
+
     try:
         # Инициализация File Service
         file_service = FileService(db)
 
         # Создание файла через координированный процесс
-        file_id = await file_service.create_file(
+        created_file_id = await file_service.create_file(
             file_data=file.file,
             original_filename=file.filename,
             content_type=file.content_type or "application/octet-stream",
             user_id=user.sub,
             username=user.username,
             description=description,
-            version=version
+            version=version,
+            file_id=provided_file_id,
+            finalize_transaction_id=UUID(finalize_transaction_id) if finalize_transaction_id else None
         )
 
         # Получение метаданных созданного файла
-        metadata = await file_service.get_file_metadata(file_id)
+        metadata = await file_service.get_file_metadata(created_file_id)
 
         logger.info(
             "File uploaded successfully",
@@ -145,7 +176,7 @@ async def upload_file(
         )
 
         return FileUploadResponse(
-            file_id=file_id,
+            file_id=created_file_id,
             original_filename=metadata.original_filename,
             file_size=metadata.file_size,
             checksum=metadata.checksum,

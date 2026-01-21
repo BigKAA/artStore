@@ -521,7 +521,7 @@ class FinalizeService:
         for attempt in range(max_retries):
             try:
                 response = await target_client.get(
-                    f"/api/v1/files/{file_id}/metadata",
+                    f"/api/v1/files/{file_id}",
                     headers={"Authorization": f"Bearer {access_token}"}
                 )
                 response.raise_for_status()
