@@ -156,25 +156,37 @@ async def finalize_file(
         file_size = file_metadata.get("file_size")
         checksum = file_metadata.get("checksum_sha256")
 
-        # Получить endpoint для source SE через StorageSelector
-        from app.services.storage_selector import get_storage_selector
+        # Получить endpoint для source SE через Admin Module API
+        from app.services.admin_client import get_admin_client
 
-        storage_selector = await get_storage_selector()
-        if not storage_selector._initialized:
+        admin_client = await get_admin_client()
+        if not admin_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="StorageSelector not initialized"
+                detail="Admin client not initialized"
             )
 
-        # Найти source SE endpoint
-        se_endpoints = storage_selector._endpoints
-        if source_se_id not in se_endpoints:
+        # Получить информацию о source SE
+        try:
+            all_storage_elements = await admin_client.get_available_storage_elements()
+            source_se = next(
+                (se for se in all_storage_elements if se.element_id == source_se_id),
+                None
+            )
+
+            if not source_se:
+                raise ValueError(f"Source SE {source_se_id} not found")
+
+            source_se_endpoint = source_se.endpoint
+        except Exception as e:
+            logger.error(
+                "Failed to get source SE endpoint",
+                extra={"source_se_id": source_se_id, "error": str(e)}
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Source SE {source_se_id} not available"
             )
-
-        source_se_endpoint = se_endpoints[source_se_id]
 
         logger.info(
             "File metadata retrieved from registry",

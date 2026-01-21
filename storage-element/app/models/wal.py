@@ -25,6 +25,7 @@ class WALOperationType(str, Enum):
     FILE_CREATE = "file_create"
     FILE_UPDATE = "file_update"
     FILE_DELETE = "file_delete"
+    FILE_FINALIZE = "file_finalize"  # Sprint 15: Two-Phase Commit finalization
     CACHE_REBUILD = "cache_rebuild"
     MODE_CHANGE = "mode_change"
 
