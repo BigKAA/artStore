@@ -466,6 +466,7 @@ class FinalizeService:
                 headers={"Authorization": f"Bearer {access_token}"},
                 files={"file": (f"{file_id}", file_content, "application/octet-stream")},
                 data={
+                    "file_id": str(file_id),  # Sprint 15: Preserve original file_id
                     "retention_policy": "permanent",
                     "finalize_transaction_id": str(transaction_id)
                 }
