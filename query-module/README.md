@@ -1,283 +1,176 @@
-# Query Module - Поиск и получение файлов ArtStore
+# Query Module - Поиск и скачивание файлов ArtStore
 
-## Назначение модуля
+## Содержание
 
-**Query Module Cluster** — это высокопроизводительный отказоустойчивый сервис для поиска и получения файлов, обеспечивающий:
-- **PostgreSQL Full-Text Search** для мгновенного поиска по метаданным
-- **Multi-level caching** (Local → Redis → PostgreSQL) для минимизации latency
-- **Optimized file download** с resumable transfers и Range requests
-- **Load balancing** между Storage Elements для распределения нагрузки
-- **Circuit Breaker Pattern** для graceful degradation
+- [Назначение](#назначение)
+- [Возможности](#возможности)
+- [Быстрый старт](#быстрый-старт)
+- [API Reference](#api-reference)
+- [Архитектура](#архитектура)
+  - [Search Engine](#search-engine)
+  - [Caching Strategy](#caching-strategy)
+  - [Download Service](#download-service)
+  - [Event Subscriber](#event-subscriber)
+- [Конфигурация](#конфигурация)
+- [Мониторинг](#мониторинг)
+- [Troubleshooting](#troubleshooting)
 
-## Ключевые возможности
+---
 
-### 1. Search Capabilities
+## Назначение
 
-#### PostgreSQL Full-Text Search
-- **GIN indexes**: Мгновенный поиск по всем метаданным
-- **Multi-field search**: Поиск по filename, template, custom metadata, tags
-- **Boolean operators**: AND, OR, NOT для комплексных запросов
-- **Fuzzy matching**: Поиск с опечатками (Levenshtein distance)
-- **Date range filters**: Поиск файлов по дате загрузки и expiration
+**Query Module** — сервис для поиска и получения файлов ArtStore:
 
-#### Real-time Search Features
-- **Auto-complete**: Предиктивный поиск на основе популярных запросов
-- **Search suggestions**: Recommended queries based on search history
-- **Faceted search**: Фильтры по MIME type, size ranges, upload date, Storage Element
+- PostgreSQL Full-Text Search для поиска по метаданным
+- Multi-level caching (Local → Redis) для минимизации latency
+- Resumable downloads с HTTP Range requests
+- JWT аутентификация
+- Redis Pub/Sub для синхронизации кеша
 
-#### Advanced Filters
-```
-GET /api/files/search?q=contract&size_min=1mb&size_max=10mb&mime_type=application/pdf&uploaded_after=2025-01-01
-```
+---
 
-### 2. Caching Strategy
+## Возможности
 
-#### Three-Level Cache
-```
-Request → Local Cache (in-memory) → Redis Cluster → PostgreSQL (source of truth)
-```
+| Функция | Статус | Описание |
+|---------|--------|----------|
+| Full-Text Search | ✅ | PostgreSQL GIN индексы |
+| Partial Match | ✅ | LIKE queries |
+| Exact Match | ✅ | Точное совпадение |
+| Multi-level Cache | ✅ | Local (in-memory) + Redis |
+| Resumable Downloads | ✅ | HTTP Range requests |
+| Streaming Downloads | ✅ | Эффективная передача больших файлов |
+| JWT Authentication | ✅ | RS256 с hot-reload публичного ключа |
+| Cache Sync | ✅ | Redis Pub/Sub для инвалидации |
+| Health Checks | ✅ | Liveness и Readiness probes |
 
-**Level 1: Local Cache**
-- **TTL**: 60 seconds
-- **Size**: 1000 наиболее популярных queries
-- **Eviction**: LRU (Least Recently Used)
+---
 
-**Level 2: Redis Cluster**
-- **TTL**: 5 minutes
-- **Partitioning**: По hash query string
-- **Invalidation**: При обновлении файлов
+## Быстрый старт
 
-**Level 3: PostgreSQL**
-- **Query cache**: Built-in PostgreSQL query cache
-- **Materialized views**: Для сложных агрегаций
+### Запуск через Docker Compose
 
-### 3. File Download Optimization
-
-#### Resumable Downloads
-- **Range requests**: HTTP Range header support
-- **Partial content**: 206 Partial Content responses
-- **Chunk download**: Configurable chunk size
-
-#### Compression
-- **Accept-Encoding**: Brotli/GZIP support
-- **On-the-fly compression**: Для текстовых файлов
-- **Cache compressed**: Сохранение сжатых версий
-
-#### Connection Pooling
-- **HTTP/2 persistent connections**: К Storage Elements
-- **Connection reuse**: Минимизация handshake overhead
-- **Adaptive pooling**: Auto-scaling based on load
-
-### 4. Load Balancing
-
-#### Storage Element Selection
-- **Least connections**: Выбор элемента с наименьшим количеством активных соединений
-- **Response time**: Приоритет быстрым Storage Elements
-- **Geographic proximity**: Опциональная привязка к ближайшему ЦОД
-- **Health-based**: Автоматическое исключение недоступных элементов
-
-#### Circuit Breaker Integration
-- **Per-Storage-Element tracking**: Отдельный circuit breaker для каждого элемента
-- **Automatic failover**: Переключение на доступные элементы
-- **Health recovery**: Gradual re-enable после восстановления
-
-## Технологический стек
-
-### Backend Framework
-- **Python 3.12+** с async/await
-- **FastAPI** для REST API
-- **Uvicorn** с uvloop
-- **Pydantic** для валидации
-- **aiohttp** для HTTP клиента к Storage Elements
-
-### Database & Caching
-- **PostgreSQL 15+** (asyncpg) для:
-  - Метаданные файлов (replicated от Storage Elements)
-  - Full-text search indexes (GIN)
-  - Query result caching
-- **Redis 7** (sync redis-py) для:
-  - Distributed caching
-  - Service Discovery subscription
-  - Popular query caching
-
-### Search & Indexing
-- **PostgreSQL tsvector/tsquery**: Full-text search
-- **pg_trgm extension**: Fuzzy matching
-- **GIN indexes**: Для быстрого поиска
-
-### Observability
-- **OpenTelemetry**: Distributed tracing
-- **Prometheus client**: Metrics export
-- **Structured logging**: JSON format
-
-## API Endpoints
-
-### Search (`/api/files/search`)
-
-```
-GET /api/files/search
-Query parameters:
-- q: search query (full-text search)
-- mime_type: MIME type filter
-- size_min, size_max: size range in bytes
-- uploaded_after, uploaded_before: date range
-- storage_element_id: specific Storage Element
-- template: custom template filter
-- tags: comma-separated tag list
-- page: page number (default 1)
-- page_size: results per page (default 50, max 1000)
-- sort: field to sort by (uploaded_at, size, filename)
-- order: asc or desc
-
-Response:
-{
-  "results": [
-    {
-      "file_id": "uuid",
-      "filename": "report.pdf",
-      "size_bytes": 1048576,
-      "mime_type": "application/pdf",
-      "storage_element_id": "uuid",
-      "uploaded_at": "2025-01-02T15:30:45Z",
-      "match_score": 0.95  # relevance score
-    }
-  ],
-  "pagination": {
-    "total": 1523,
-    "page": 1,
-    "page_size": 50,
-    "total_pages": 31
-  },
-  "facets": {
-    "mime_types": {"application/pdf": 800, "image/jpeg": 500},
-    "size_ranges": {"0-1mb": 300, "1-10mb": 800, "10mb+": 423}
-  }
-}
+```bash
+# Из корня проекта
+cd /home/artur/Projects/artStore
+docker-compose up -d query-module
 ```
 
-### Auto-complete (`/api/files/autocomplete`)
+### Поиск файлов
 
-```
-GET /api/files/autocomplete?q=contr
+```bash
+# Получить токен
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": "...", "client_secret": "..."}' | jq -r '.access_token')
 
-Response:
-{
-  "suggestions": [
-    {"query": "contract", "count": 450},
-    {"query": "contractor", "count": 120},
-    {"query": "contribution", "count": 85}
-  ]
-}
-```
-
-### File Metadata (`/api/files/{file_id}`)
-
-```
-GET /api/files/{file_id}
-
-Response:
-{
-  "file_id": "uuid",
-  "filename": "report.pdf",
-  "size_bytes": 1048576,
-  "mime_type": "application/pdf",
-  "storage_element_id": "uuid",
-  "storage_element_url": "https://storage1.example.com",
-  "md5_hash": "...",
-  "sha256_hash": "...",
-  "uploaded_by": "ivanov",
-  "uploaded_at": "2025-01-02T15:30:45Z",
-  "retention_days": 1825,
-  "expires_at": "2030-01-02T15:30:45Z",
-  "template": "contract",
-  "custom_metadata": {...}
-}
+# Поиск файлов
+curl -X POST http://localhost:8030/api/search \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "contract", "mode": "partial"}'
 ```
 
-### File Download (`/api/files/{file_id}/download`)
+### Проверка health
 
-```
-GET /api/files/{file_id}/download
-Headers:
-- Range: bytes=0-1023 (optional, для resumable download)
-- Accept-Encoding: br, gzip (optional, для compression)
-
-Response 200 или 206 Partial Content:
-- Content-Type: application/pdf
-- Content-Length: 1048576
-- Content-Encoding: br (если compressed)
-- Accept-Ranges: bytes
-- ETag: "sha256-hash"
-- Last-Modified: Wed, 02 Jan 2025 15:30:45 GMT
-
-Binary file data stream
+```bash
+curl http://localhost:8030/health/ready | jq
 ```
 
-### Health & Monitoring
+---
+
+## API Reference
+
+Полная документация API: **[API.md](./API.md)**
+
+### Основные endpoints
+
+| Endpoint | Метод | Описание |
+|----------|-------|----------|
+| `/api/search` | POST | Поиск файлов с фильтрацией |
+| `/api/search/{file_id}` | GET | Метаданные файла |
+| `/api/download/{file_id}` | GET | Скачивание файла |
+| `/api/download/{file_id}/metadata` | GET | Метаданные для скачивания |
+| `/health/live` | GET | Liveness probe |
+| `/health/ready` | GET | Readiness probe |
+
+---
+
+## Архитектура
+
+### Search Engine
+
+Поддерживает три режима поиска:
+
+| Режим | Описание | Use Case |
+|-------|----------|----------|
+| `exact` | Точное совпадение | Поиск по UUID, hash |
+| `partial` | LIKE queries | Поиск по части имени |
+| `fulltext` | PostgreSQL FTS | Полнотекстовый поиск |
+
+**Фильтры:**
+- По имени файла, расширению, тегам
+- По размеру (min/max)
+- По дате создания
+- По пользователю
+
+**Сортировка:**
+- `created_at`, `updated_at`, `file_size`, `filename`, `relevance`
+
+### Caching Strategy
 
 ```
-GET /health/live
-GET /health/ready
-GET /metrics
+Request → Local Cache (LRU) → Redis Cache → PostgreSQL
 ```
 
-## Внутренняя архитектура
+| Уровень | TTL | Назначение |
+|---------|-----|------------|
+| Local (in-memory) | 60s | Горячие данные |
+| Redis | 5min | Распределённый кеш |
+| PostgreSQL | - | Source of truth |
 
-```
-query-module/
-├── app/
-│   ├── main.py
-│   ├── core/
-│   │   ├── config.py
-│   │   ├── security.py
-│   │   └── exceptions.py
-│   ├── api/
-│   │   └── v1/
-│   │       └── endpoints/
-│   │           ├── search.py         # Search endpoints
-│   │           ├── files.py          # File metadata & download
-│   │           ├── autocomplete.py   # Auto-complete
-│   │           └── health.py
-│   ├── schemas/
-│   │   ├── search.py                 # Search request/response schemas
-│   │   └── file.py
-│   ├── services/
-│   │   ├── search_service.py         # Full-text search logic
-│   │   ├── cache_service.py          # Multi-level caching
-│   │   ├── download_service.py       # File download coordination
-│   │   ├── storage_client.py         # HTTP client для Storage Elements
-│   │   ├── service_discovery.py      # Redis pub/sub subscription
-│   │   ├── load_balancer.py          # Storage Element load balancing
-│   │   └── circuit_breaker.py        # Circuit breaker per Storage Element
-│   └── utils/
-│       ├── query_parser.py           # Parse search queries
-│       └── metrics.py
-├── tests/
-│   ├── unit/
-│   └── integration/
-├── Dockerfile
-├── requirements.txt
-└── .env.example
-```
+**Инвалидация:**
+- Redis Pub/Sub при обновлении файлов
+- Автоматический TTL expiration
+
+### Download Service
+
+- **Streaming**: Эффективная передача больших файлов
+- **Resumable**: HTTP Range requests для возобновления
+- **Verification**: SHA256 checksum для проверки целостности
+
+### Event Subscriber
+
+Redis Pub/Sub подписка для синхронизации:
+- Инвалидация кеша при изменениях
+- Обновление метаданных файлов
+
+---
 
 ## Конфигурация
 
-### Environment Variables
+### Основные переменные окружения
 
 ```bash
-# Database
-DATABASE_URL=postgresql+asyncpg://artstore:password@localhost:5432/artstore
+# Application
+APP_NAME=ArtStore Query Module
+APP_PORT=8030
+APP_DEBUG=off
+APP_SWAGGER_ENABLED=off
 
-# PostgreSQL SSL (опционально, для production)
-DATABASE_SSL_ENABLED=false                    # Включить SSL для PostgreSQL
-DATABASE_SSL_MODE=require                     # SSL режим: disable, require, verify-ca, verify-full
-# DATABASE_SSL_CA_CERT=/app/ssl-certs/ca-cert.pem      # CA certificate (для verify-ca/verify-full)
-# DATABASE_SSL_CLIENT_CERT=/app/ssl-certs/client-cert.pem  # Client certificate (опционально)
-# DATABASE_SSL_CLIENT_KEY=/app/ssl-certs/client-key.pem    # Client key (опционально)
+# Database (PostgreSQL)
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=artstore
+DB_PASSWORD=password
+DB_DATABASE=artstore
 
 # Redis
-REDIS_URL=redis://localhost:6379/1
-SERVICE_DISCOVERY_CHANNEL=artstore:storage-elements
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_DB=1
+
+# JWT Authentication
+AUTH_PUBLIC_KEY_PATH=/app/keys/public_key.pem
 
 # Caching
 LOCAL_CACHE_SIZE=1000
@@ -285,90 +178,96 @@ LOCAL_CACHE_TTL_SECONDS=60
 REDIS_CACHE_TTL_SECONDS=300
 
 # Search
-SEARCH_DEFAULT_PAGE_SIZE=50
-SEARCH_MAX_PAGE_SIZE=1000
-FUZZY_SEARCH_ENABLED=true
-AUTOCOMPLETE_MIN_CHARS=3
+SEARCH_DEFAULT_LIMIT=100
+SEARCH_MAX_LIMIT=1000
 
-# Download
-DOWNLOAD_CHUNK_SIZE_MB=10
-COMPRESSION_ENABLED=true
-RANGE_REQUESTS_ENABLED=true
+# CORS
+CORS_ENABLED=on
+CORS_ALLOW_ORIGINS=http://localhost:4200
 
-# Load Balancing
-LOAD_BALANCE_STRATEGY=least_connections  # least_connections, round_robin, response_time
-STORAGE_HEALTH_CHECK_INTERVAL_SECONDS=30
-
-# Circuit Breaker
-CIRCUIT_BREAKER_ENABLED=true
-CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
-CIRCUIT_BREAKER_SUCCESS_THRESHOLD=2
-CIRCUIT_BREAKER_TIMEOUT_SECONDS=60
-
-# Monitoring
-OPENTELEMETRY_ENABLED=true
-PROMETHEUS_METRICS_ENABLED=true
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
 ```
 
-## Тестирование
+### Полный список переменных
 
-```bash
-# Unit tests
-pytest query-module/tests/unit/ -v --cov=app
+См. [.env.example](./.env.example) для всех доступных параметров.
 
-# Integration tests
-pytest query-module/tests/integration/ -v
-```
+---
 
-## Мониторинг и метрики
+## Мониторинг
 
-### Prometheus Metrics (`/metrics`)
+### Prometheus Metrics
 
-#### Custom Business Metrics
-- `artstore_query_search_requests_total`: Количество поисковых запросов
-- `artstore_query_search_duration_seconds`: Search latency
-- `artstore_query_cache_hits_total`: Cache hit rate (local/redis)
-- `artstore_query_downloads_total`: Количество downloads
-- `artstore_query_download_duration_seconds`: Download latency
-- `artstore_query_storage_response_time_seconds`: Response time от Storage Elements
+Endpoint: `GET /metrics`
 
-### OpenTelemetry Tracing
+| Metric | Type | Description |
+|--------|------|-------------|
+| `http_requests_total` | Counter | Количество HTTP запросов |
+| `http_request_duration_seconds` | Histogram | Latency запросов |
 
-- `artstore.query.search` - Полный поисковый запрос
-- `artstore.query.cache_lookup` - Cache lookup operations
-- `artstore.query.download` - File download coordination
+### Health Checks
+
+| Endpoint | Назначение | Kubernetes |
+|----------|------------|------------|
+| `/health/live` | Приложение запущено | livenessProbe |
+| `/health/ready` | Готов принимать трафик | readinessProbe |
+
+### Критерии готовности
+
+| Компонент | Критичность | Влияние |
+|-----------|-------------|---------|
+| PostgreSQL | Critical | 503 если недоступен |
+| Redis | Optional | 200 с degraded status |
+
+---
 
 ## Troubleshooting
 
-### Проблемы с поиском
+### Медленный поиск
 
-**Проблема**: Медленный поиск
-**Решение**: Проверить GIN indexes существуют. Проверить `ANALYZE` и `VACUUM` PostgreSQL.
+**Причина**: Отсутствуют GIN индексы или устаревшая статистика.
 
-**Проблема**: Irrelevant search results
-**Решение**: Настроить relevance weighting в query parser. Добавить boost для specific fields.
+**Решение**:
+```bash
+# Проверить индексы
+docker exec -it artstore_postgres psql -U artstore -c "\di"
 
-### Проблемы с кешированием
+# Обновить статистику
+docker exec -it artstore_postgres psql -U artstore -c "ANALYZE file_metadata;"
+```
 
-**Проблема**: Low cache hit rate
-**Решение**: Увеличить `LOCAL_CACHE_SIZE` и `REDIS_CACHE_TTL_SECONDS`. Analyze query patterns.
+### Low cache hit rate
 
-**Проблема**: Stale cache data
-**Решение**: Проверить cache invalidation logic при обновлениях файлов.
+**Причина**: Маленький размер кеша или короткий TTL.
 
-## Security Considerations
+**Решение**: Увеличить `LOCAL_CACHE_SIZE` и `REDIS_CACHE_TTL_SECONDS`.
 
-### Production Checklist
+### Storage Element unavailable
 
-- [ ] JWT validation на всех endpoints
-- [ ] Query sanitization для предотвращения SQL injection
-- [ ] Rate limiting для защиты от search abuse
-- [ ] TLS 1.3 для соединений к Storage Elements
-- [ ] Audit logging всех file downloads
-- [ ] Access control на file-level (через JWT claims)
+**Причина**: Storage Element недоступен для скачивания.
 
-## Ссылки на документацию
+**Решение**:
+```bash
+# Проверить состояние SE
+curl http://localhost:8010/health/live
 
+# Проверить логи
+docker-compose logs query-module
+```
+
+### JWT validation failed
+
+**Причина**: Публичный ключ не синхронизирован.
+
+**Решение**: Query Module поддерживает hot-reload JWT ключей. Проверьте что файл `public_key.pem` актуален.
+
+---
+
+## Ссылки
+
+- [API Reference](./API.md)
 - [Главная документация проекта](../README.md)
-- [Storage Element documentation](../storage-element/README.md)
-- [PostgreSQL Full-Text Search](https://www.postgresql.org/docs/current/textsearch.html)
+- [Admin Module](../admin-module/README.md)
+- [Storage Element](../storage-element/README.md)

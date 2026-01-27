@@ -1,5 +1,28 @@
 # Storage Element - Физическое хранилище файлов ArtStore
 
+## Оглавление
+
+- [Назначение модуля](#назначение-модуля)
+- [Ключевые концепции](#ключевые-концепции)
+- [Режимы работы Storage Element](#режимы-работы-storage-element)
+- [Технологический стек](#технологический-стек)
+- [API Endpoints](API.md)
+- [Внутренняя архитектура](#внутренняя-архитектура)
+- [Конфигурация](#конфигурация)
+- [S3 Storage Requirements](#s3-storage-requirements)
+- [Тестирование](#тестирование)
+- [Health Reporting Service](#health-reporting-service-sprint-14)
+- [Мониторинг и метрики](#мониторинг-и-метрики)
+- [Troubleshooting](#troubleshooting)
+- [Аутентификация и RBAC](#аутентификация-и-rbac)
+- [Security Considerations](#security-considerations)
+- [Интеграция с Admin Module](#интеграция-с-admin-module)
+- [Cache Synchronization](#cache-synchronization-v120)
+- [Migration Notes](#migration-notes-v110)
+- [Ссылки на документацию](#ссылки-на-документацию)
+
+---
+
 ## Назначение модуля
 
 **Storage Element** — это модуль физического хранения файлов с кешированием метаданных, обеспечивающий:
@@ -162,7 +185,7 @@ retention_years: 5
 fill_threshold_percent: 95  # Переход на другой RW элемент при 95% заполнении
 ```
 
-**Переход**: `POST /api/admin/change-mode` (RW → RO)
+**Переход в RO**: Изменить `STORAGE_MODE=ro` в конфигурации и перезапустить сервис.
 
 ### RO (Read-Only)
 
@@ -182,7 +205,7 @@ mode: ro
 retention_years: 10
 ```
 
-**Переход**: `POST /api/admin/change-mode` (RO → AR)
+**Переход в AR**: Изменить `STORAGE_MODE=ar` в конфигурации и перезапустить сервис.
 
 ### AR (Archive, холодное хранение)
 
@@ -252,107 +275,23 @@ restore_ttl_days: 30
 
 ## API Endpoints
 
-### File Operations (`/api/files/*`)
+Полное описание API см. в **[API.md](API.md)**.
 
-```
-POST /api/files/upload
-  - Chunked upload с streaming
-  - Input: multipart/form-data (file + metadata JSON)
-  - Output: {"file_id": "uuid", "storage_filename": "...", "size_bytes": 123}
-  - Режимы: edit, rw
+**Краткий обзор доступных endpoints**:
 
-GET /api/files/{file_id}
-  - Метаданные файла
-  - Output: Полный attr.json content
-  - Режимы: edit, rw, ro, ar
-
-GET /api/files/{file_id}/download
-  - Скачивание файла
-  - Resumable download (Range requests support)
-  - Output: File stream
-  - Режимы: edit, rw, ro (ar требует restore)
-
-PATCH /api/files/{file_id}/metadata
-  - Обновление custom metadata
-  - Input: {"template": "...", "tags": [...]}
-  - Режимы: edit
-
-DELETE /api/files/{file_id}
-  - Удаление файла
-  - Режимы: только edit
-
-POST /api/files/{file_id}/restore
-  - Запрос восстановления из AR режима
-  - Output: {"restore_id": "uuid", "status": "queued", "estimated_time": "2-7 days"}
-  - Режимы: только ar
-```
-
-### Admin Operations (`/api/admin/*`)
-
-```
-POST /api/admin/change-mode
-  - Смена режима работы Storage Element
-  - Input: {"new_mode": "ro"}  # rw→ro or ro→ar
-  - Two-Phase Commit для консистентности
-
-POST /api/admin/reconcile
-  - Ручной запуск reconciliation между attr.json и DB cache
-  - Output: {"reconciled": 150, "conflicts": 2, "errors": 0}
-
-GET /api/admin/stats
-  - Статистика Storage Element
-  - Output: {
-      "total_files": 10000,
-      "total_size_gb": 500,
-      "used_percent": 50,
-      "mode": "rw",
-      "oldest_file": "2020-01-01",
-      "newest_file": "2025-01-02"
-    }
-
-GET /api/admin/health
-  - Детальный health check
-  - Проверяет: filesystem space, database connectivity, WAL status
-```
-
-### System Information (`/api/v1/info`)
-
-```
-GET /api/v1/info
-  - Полная информация о Storage Element для auto-discovery
-  - Используется Admin Module для автоматической регистрации и синхронизации
-  - Output: {
-      "name": "storage-element",
-      "display_name": "Storage Element 01",
-      "version": "1.0.0",
-      "mode": "edit",  # Определяется конфигурацией при запуске
-      "storage_type": "local",  # local или s3
-      "base_path": "/data/storage",
-      "capacity_bytes": 1099511627776,  # Общая емкость
-      "used_bytes": 549755813888,       # Использовано
-      "file_count": 1234,
-      "status": "operational"           # operational, degraded, offline
-    }
-  - Не требует авторизации
-```
+| Группа | Prefix | Описание |
+|--------|--------|----------|
+| File Operations | `/api/v1/files/*` | Upload, download, metadata, delete |
+| System Info | `/api/v1/info` | Auto-discovery информация |
+| Capacity | `/api/v1/capacity` | Информация о ёмкости |
+| Garbage Collector | `/api/v1/gc/*` | Системное удаление файлов |
+| Cache Management | `/api/v1/cache/*` | Управление кешем метаданных |
+| Health | `/health/*` | Liveness и readiness probes |
+| Metrics | `/metrics` | Prometheus метрики |
 
 **ВАЖНО**: Mode определяется ТОЛЬКО конфигурацией storage element при запуске.
-Admin Module использует этот endpoint для получения актуальной информации,
+Admin Module использует endpoint `/api/v1/info` для получения актуальной информации,
 но НЕ МОЖЕТ изменять mode через API.
-
-### Health & Monitoring
-
-```
-GET /health/live
-  - Liveness probe
-
-GET /health/ready
-  - Readiness probe
-  - Проверяет: filesystem accessible, database connected, sufficient disk space
-
-GET /metrics
-  - Prometheus metrics
-```
 
 ## Внутренняя архитектура
 
@@ -782,7 +721,10 @@ await stop_health_reporter()
 ### Проблемы с консистентностью
 
 **Проблема**: DB cache не соответствует attr.json
-**Решение**: Запустить `POST /api/admin/reconcile` для автоматического исправления.
+**Решение**: Использовать Cache Management API:
+1. `GET /api/v1/cache/consistency` - проверить расхождения
+2. `POST /api/v1/cache/rebuild/incremental` - добавить недостающие записи
+3. `POST /api/v1/cache/rebuild` - полная пересборка (при критических расхождениях)
 
 **Проблема**: WAL entries stuck in pending state
 **Решение**: Проверить логи на ошибки filesystem. Перезапустить storage element для auto-recovery.
@@ -802,6 +744,56 @@ await stop_health_reporter()
 1. Проверить `auto_cleanup` settings для edit режима
 2. Перенести старые файлы на другой Storage Element (rw → ro)
 3. Перевести ro элементы в ar режим
+
+## Аутентификация и RBAC
+
+### JWT RS256 Authentication
+
+Storage Element использует **JWT токены с RS256** для distributed authentication:
+- **Публичный ключ** загружается из Admin Module
+- **Autonomous validation** - проверка токенов без обращения к Admin Module
+- **Bearer token** обязателен для всех protected API endpoints
+
+**JWT Token Payload**:
+```json
+{
+  "sub": "user_id_123",
+  "username": "ivanov",
+  "roles": ["user", "operator"],
+  "exp": 1735777200,
+  "iat": 1735775400
+}
+```
+
+### Роли и Разрешения (RBAC)
+
+| Роль | Описание | File Operations | Admin Operations |
+|------|----------|-----------------|------------------|
+| **ADMIN** | Полный доступ | create, read, update, delete | Все |
+| **OPERATOR** | Управление storage | read | Mode transitions, storage admin |
+| **USER** | Стандартный пользователь | create, read, update, delete | - |
+| **READONLY** | Только чтение | read | - |
+
+**Матрица разрешений**:
+
+| Permission | ADMIN | OPERATOR | USER | READONLY |
+|-----------|-------|----------|------|----------|
+| `file:create` | ✅ | ❌ | ✅ | ❌ |
+| `file:read` | ✅ | ✅ | ✅ | ✅ |
+| `file:update` | ✅ | ❌ | ✅ | ❌ |
+| `file:delete` | ✅ | ❌ | ✅ | ❌ |
+| `mode:transition` | ✅ | ✅ | ❌ | ❌ |
+| `admin:storage` | ✅ | ✅ | ❌ | ❌ |
+
+### Конфигурация
+
+```bash
+# JWT public key для валидации токенов
+AUTH__JWT_PUBLIC_KEY_PATH=./keys/public_key.pem
+AUTH__JWT_ALGORITHM=RS256
+```
+
+**Важно**: В production публичный ключ получается из Admin Module автоматически.
 
 ## Security Considerations
 
