@@ -22,6 +22,9 @@ minio:
   rootPassword: minioadmin
   bucket: artstore-files
   storage: 10Gi
+  httproute:
+    enabled: true
+    hostname: "minio.kryukov.lan"
   resources:
     requests:
       memory: "256Mi"
