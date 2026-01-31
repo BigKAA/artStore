@@ -30,10 +30,18 @@ minio:
       memory: "512Mi"
       cpu: "1000m"
 
+# JWT ключи для аутентификации между модулями
+# Если managed=true — Secret jwt-keys создаётся из values (удобно для ArgoCD/GitOps)
+# Если managed=false — Secret создаётся скриптом generate-jwt-keys.sh (рекомендуется)
+jwt:
+  managed: false
+  privateKey: ""
+  publicKey: ""
+
 # Gateway API
 gateway:
   enabled: true
   name: artstore-gateway
   gatewayClassName: eg
   listenerPort: 80
-  hostname: "artstore.local"
+  hostname: "artstore.kryukov.lan"

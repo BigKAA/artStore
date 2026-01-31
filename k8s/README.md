@@ -34,6 +34,7 @@ k8s/
 │   └── se-03.yaml                 # SE-03: rw, priority 300, 2GB
 ├── scripts/
 │   ├── build-push.sh              # Сборка образов и push в registry
+│   ├── generate-jwt-keys.sh       # Генерация RSA ключей и K8s Secret jwt-keys
 │   └── dev-local.sh               # Локальная разработка одного модуля
 └── README.md
 ```
@@ -99,7 +100,21 @@ REGISTRY=192.168.218.180:5000 TAG=v0.2.0 ./k8s/scripts/build-push.sh
 
 Скрипт также создаёт namespace `artstore` и Secret `jwt-keys` (из `storage-element/keys/`).
 
-### 3. Деплой инфраструктуры (один раз)
+### 3. Генерация JWT ключей (один раз)
+
+```bash
+# Генерация RSA ключей и создание Secret jwt-keys
+./k8s/scripts/generate-jwt-keys.sh
+
+# Проверка
+kubectl get secret jwt-keys -n artstore
+```
+
+> **Примечание**: Скрипт `build-push.sh` также создаёт этот Secret автоматически,
+> если ключи уже существуют в `storage-element/keys/`. Данный скрипт нужен
+> для первоначальной генерации ключей или их пересоздания (`--force`).
+
+### 4. Деплой инфраструктуры (один раз)
 
 ```bash
 helm upgrade --install infra ./k8s/charts/infrastructure
@@ -111,7 +126,7 @@ kubectl get pods -n artstore
 # postgres, redis, minio — должны быть Running
 ```
 
-### 4. Деплой модулей
+### 5. Деплой модулей
 
 ```bash
 # Admin Module — первым (от него зависят ingester и storage-element)
@@ -127,7 +142,7 @@ helm upgrade --install se-02 ./k8s/charts/storage-element -f ./k8s/values/se-02.
 helm upgrade --install se-03 ./k8s/charts/storage-element -f ./k8s/values/se-03.yaml
 ```
 
-### 5. Проверка
+### 6. Проверка
 
 ```bash
 # Поды
@@ -158,14 +173,14 @@ kubectl get gateway -n artstore -o jsonpath='{.items[0].status.addresses[0].valu
 Добавить в `/etc/hosts` на рабочей машине:
 
 ```
-<GATEWAY-IP>  artstore.local
+<GATEWAY-IP>  artstore.kryukov.lan
 ```
 
 После этого:
 ```bash
-curl http://artstore.local/api/auth/token    # Admin Module
-curl http://artstore.local/api/upload         # Ingester Module
-curl http://artstore.local/api/search         # Query Module
+curl http://artstore.kryukov.lan/api/auth/token    # Admin Module
+curl http://artstore.kryukov.lan/api/upload         # Ingester Module
+curl http://artstore.kryukov.lan/api/search         # Query Module
 ```
 
 ### Через port-forward (без Gateway)
