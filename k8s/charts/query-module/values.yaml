@@ -42,7 +42,7 @@ eventChannelFileDeleted: "file:deleted"
 httproute:
   enabled: true
   gatewayName: artstore-gateway
-  hostname: "artstore.local"
+  hostname: "artstore.kryukov.lan"
   pathPrefixes:
     - /api/query
     - /api/search

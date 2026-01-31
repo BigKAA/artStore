@@ -41,7 +41,7 @@ serviceAccountClientSecret: Test-Password123
 httproute:
   enabled: true
   gatewayName: artstore-gateway
-  hostname: "artstore.local"
+  hostname: "artstore.kryukov.lan"
   pathPrefixes:
     - /api/ingester
     - /api/upload

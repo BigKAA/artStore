@@ -51,7 +51,7 @@ schedulerStorageHealthCheckIntervalSeconds: 60
 httproute:
   enabled: true
   gatewayName: artstore-gateway
-  hostname: "artstore.local"
+  hostname: "artstore.kryukov.lan"
   pathPrefixes:
     - /api/auth
     - /api/admin

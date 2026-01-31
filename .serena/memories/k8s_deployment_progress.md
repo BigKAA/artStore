@@ -26,52 +26,21 @@
 4. **SQL скрипт** `k8s/scripts/init-postgres.sql` создан для инициализации пользователя и БД
 
 ### Что нужно сделать:
-1. **Выполнить SQL скрипт** на кластерном PostgreSQL (создать пользователя artstore и БД)
-2. **Собрать и запушить образы** в Harbor:
-   ```bash
-   ./k8s/scripts/build-push.sh
-   ```
-3. **Задеплоить infrastructure** (MinIO + Gateway + Secrets):
-   ```bash
-   helm upgrade --install infra ./k8s/charts/infrastructure -n artstore --create-namespace
-   ```
-4. **Задеплоить модули**:
-   ```bash
-   helm upgrade --install admin-module ./k8s/charts/admin-module -n artstore
-   helm upgrade --install ingester ./k8s/charts/ingester-module -n artstore
-   helm upgrade --install query ./k8s/charts/query-module -n artstore
-   helm upgrade --install se-01 ./k8s/charts/storage-element -f ./k8s/values/se-01.yaml -n artstore
-   helm upgrade --install se-02 ./k8s/charts/storage-element -f ./k8s/values/se-02.yaml -n artstore
-   helm upgrade --install se-03 ./k8s/charts/storage-element -f ./k8s/values/se-03.yaml -n artstore
-   ```
-5. **Проверить** что все поды Running
-6. **Проверить Gateway routing** через artstore.local
+1. **Исправить JWT валидацию в ingester-module** — токен выписывается (200), но при использовании получает 401.
+   Вероятная причина: JWT key manager генерирует новые ключи в памяти при ротации, а валидация использует другие.
+   Нужно исследовать код `admin-module/app/core/jwt_key_manager.py`.
+2. ~~**Проверить Gateway routing**~~ ✅ Переведён на `artstore.kryukov.lan`, все HTTPRoute обновлены
+3. **Redis NodePort** — создать для доступа с dev-машин (для `dev-local.sh`)
+4. **DNS запись** — добавить `artstore.kryukov.lan` на DNS-сервер 192.168.218.9 (если не сделано)
 
-### Кластер
-- 4 ноды: pr1 (control-plane), pr2-pr4 (workers), Rocky Linux 10, K8s v1.34.1, containerd 2.1.5
-- IPs: 192.168.218.136-139
-- GatewayClass: `eg` (Envoy Gateway)
-- StorageClass: `nfs-client`
-- MetalLB pool: 192.168.218.180-190
-- Gateway IP: 192.168.218.181
-- Namespace: artstore
+## Решённые проблемы:
+- ✅ DNS: `harbor.kryukov.lan` → DNS сервер 192.168.218.9, ноды используют его
+- ✅ TLS: CA сертификат добавлен в containerd на нодах (`/etc/containerd/certs.d/harbor.kryukov.lan/`)
+- ✅ Architecture: образы пересобраны для `linux/amd64` (MacBook собирает arm64 по умолчанию)
+- ✅ MinIO bucket `artstore-files` создан
+- ✅ Service account `client_id` обновлён (`sa_prod_admin_service_db0fd1af`)
+- ✅ PostgreSQL: пользователь `artstore` создан, БД artstore/artstore_admin/artstore_query созданы
+- ✅ PostgreSQL superuser: `postgres` / `qjkMzdJh68` (хранится в `/opt/bitnami/postgresql/secrets/postgres-password`)
 
-### Файловая структура k8s/
-```
-k8s/
-├── charts/
-│   ├── infrastructure/ # MinIO, Gateway, Secrets, ConfigMap (PG и Redis — внешние)
-│   ├── admin-module/
-│   ├── ingester-module/
-│   ├── query-module/
-│   └── storage-element/
-├── values/
-│   ├── se-01.yaml
-│   ├── se-02.yaml
-│   └── se-03.yaml
-├── scripts/
-│   ├── build-push.sh
-│   ├── init-postgres.sql
-│   └── dev-local.sh
-└── README.md
-```
+## Git
+- Коммит `feat(k8s): Migrate to Harbor registry and external PostgreSQL/Redis` замержен в main и запушен
