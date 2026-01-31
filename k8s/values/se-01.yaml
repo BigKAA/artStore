@@ -1,0 +1,7 @@
+# Storage Element 01 — primary, edit mode, highest priority
+elementId: se-01
+mode: edit
+priority: 100
+maxSize: 1073741824        # 1GB
+s3Folder: storage_element_01
+dbTablePrefix: storage_elem_01

@@ -1,0 +1,57 @@
+namespace: artstore
+registry: harbor.kryukov.lan
+image: library/query-module
+tag: latest
+imagePullPolicy: Always
+
+replicas: 1
+port: 8030
+
+swaggerEnabled: "on"
+logLevel: DEBUG
+logFormat: json
+
+# Database
+dbDatabase: artstore_query
+
+# Cache
+localCacheSize: 1000
+localCacheTtlSeconds: 60
+redisCacheTtlSeconds: 300
+
+# Search
+searchDefaultPageSize: 50
+searchMaxPageSize: 1000
+
+# Circuit Breaker
+circuitBreakerEnabled: "on"
+
+# Events
+eventSubscribeEnabled: "on"
+eventStreamName: file-events
+eventConsumerGroup: query-module-consumers
+eventConsumerBatchSize: 10
+eventConsumerBlockMs: 5000
+eventPendingRetryMs: 60000
+eventPendingCheckInterval: 30
+eventChannelFileCreated: "file:created"
+eventChannelFileUpdated: "file:updated"
+eventChannelFileDeleted: "file:deleted"
+
+# Gateway HTTPRoute
+httproute:
+  enabled: true
+  gatewayName: artstore-gateway
+  hostname: "artstore.local"
+  pathPrefixes:
+    - /api/query
+    - /api/search
+    - /api/download
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "1000m"

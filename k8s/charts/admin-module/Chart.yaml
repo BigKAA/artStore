@@ -1,0 +1,6 @@
+apiVersion: v2
+name: artstore-admin-module
+description: "ArtStore Admin Module — аутентификация, управление, Saga координация"
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,39 @@
+namespace: artstore
+
+# Внешний PostgreSQL (кластерный, namespace: pg)
+externalPostgres:
+  host: postgresql.pg.svc
+  port: 5432
+  user: artstore
+  password: password
+
+# Внешний Redis (кластерный, namespace: redis)
+externalRedis:
+  host: redis-master.redis.svc
+  port: 6379
+  password: qUwTt8g9it
+
+# MinIO — собственный инстанс в namespace artstore
+minio:
+  image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+  portApi: 9000
+  portConsole: 9001
+  rootUser: minioadmin
+  rootPassword: minioadmin
+  bucket: artstore-files
+  storage: 10Gi
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "1000m"
+
+# Gateway API
+gateway:
+  enabled: true
+  name: artstore-gateway
+  gatewayClassName: eg
+  listenerPort: 80
+  hostname: "artstore.local"

@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-module
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "query.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "query.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "query.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: query-module
+          image: {{ include "query.image" . }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.port }}
+          envFrom:
+            - configMapRef:
+                name: artstore-infra-config
+          env:
+            # Redis password (внешний Redis с аутентификацией)
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: REDIS_PASSWORD
+            - name: APP_NAME
+              value: artstore-query-module
+            - name: APP_SWAGGER_ENABLED
+              value: {{ .Values.swaggerEnabled | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logFormat }}
+            # Database
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: DB_PASSWORD
+            - name: DB_DATABASE
+              value: {{ .Values.dbDatabase }}
+            # Cache
+            - name: LOCAL_CACHE_SIZE
+              value: {{ .Values.localCacheSize | quote }}
+            - name: LOCAL_CACHE_TTL_SECONDS
+              value: {{ .Values.localCacheTtlSeconds | quote }}
+            - name: REDIS_CACHE_TTL_SECONDS
+              value: {{ .Values.redisCacheTtlSeconds | quote }}
+            # Search
+            - name: SEARCH_DEFAULT_PAGE_SIZE
+              value: {{ .Values.searchDefaultPageSize | quote }}
+            - name: SEARCH_MAX_PAGE_SIZE
+              value: {{ .Values.searchMaxPageSize | quote }}
+            # Circuit Breaker
+            - name: CIRCUIT_BREAKER_ENABLED
+              value: {{ .Values.circuitBreakerEnabled | quote }}
+            # Events
+            - name: EVENT_SUBSCRIBE_ENABLED
+              value: {{ .Values.eventSubscribeEnabled | quote }}
+            - name: EVENT_STREAM_NAME
+              value: {{ .Values.eventStreamName }}
+            - name: EVENT_CONSUMER_GROUP
+              value: {{ .Values.eventConsumerGroup }}
+            - name: EVENT_CONSUMER_BATCH_SIZE
+              value: {{ .Values.eventConsumerBatchSize | quote }}
+            - name: EVENT_CONSUMER_BLOCK_MS
+              value: {{ .Values.eventConsumerBlockMs | quote }}
+            - name: EVENT_PENDING_RETRY_MS
+              value: {{ .Values.eventPendingRetryMs | quote }}
+            - name: EVENT_PENDING_CHECK_INTERVAL
+              value: {{ .Values.eventPendingCheckInterval | quote }}
+            - name: EVENT_CHANNEL_FILE_CREATED
+              value: {{ .Values.eventChannelFileCreated }}
+            - name: EVENT_CHANNEL_FILE_UPDATED
+              value: {{ .Values.eventChannelFileUpdated }}
+            - name: EVENT_CHANNEL_FILE_DELETED
+              value: {{ .Values.eventChannelFileDeleted }}
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /app/keys
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: {{ .Values.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: {{ .Values.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: jwt-keys
+          secret:
+            secretName: jwt-keys

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: artstore-storage-element
+description: "ArtStore Storage Element — физическое хранение файлов (один инстанс per release)"
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

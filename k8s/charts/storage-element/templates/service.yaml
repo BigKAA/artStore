@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "se.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "se.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "se.selectorLabels" . | nindent 4 }}
+  ports:
+    - port: {{ .Values.containerPort }}
+      targetPort: {{ .Values.containerPort }}
