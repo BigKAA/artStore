@@ -15,7 +15,7 @@
 
 ## Структура файлов
 
-```
+```txt
 k8s/
 ├── registry/                      # Docker Registry (plain YAML, разовая настройка)
 │   ├── deployment.yaml
@@ -41,7 +41,7 @@ k8s/
 
 ## Зависимости между charts
 
-```
+```txt
 infrastructure    (namespace, Secrets, ConfigMap, Gateway, PostgreSQL, Redis, MinIO)
      │
      ├── admin-module         (использует: db-credentials, artstore-infra-config, jwt-keys)
@@ -54,6 +54,7 @@ infrastructure    (namespace, Secrets, ConfigMap, Gateway, PostgreSQL, Redis, Mi
 **Порядок деплоя**: infrastructure → admin-module → остальные модули (параллельно).
 
 Infrastructure создаёт ресурсы, от которых зависят все модули:
+
 - ConfigMap `artstore-infra-config` — адреса PostgreSQL, Redis, MinIO, Admin Module
 - Secret `db-credentials` — логин/пароль PostgreSQL
 - Secret `minio-credentials` — ключи доступа MinIO
@@ -121,6 +122,7 @@ helm upgrade --install infra ./k8s/charts/infrastructure
 ```
 
 Проверка:
+
 ```bash
 kubectl get pods -n artstore
 # postgres, redis, minio — должны быть Running
@@ -172,11 +174,12 @@ kubectl get gateway -n artstore -o jsonpath='{.items[0].status.addresses[0].valu
 
 Добавить в `/etc/hosts` на рабочей машине:
 
-```
+```txt
 <GATEWAY-IP>  artstore.kryukov.lan
 ```
 
 После этого:
+
 ```bash
 curl http://artstore.kryukov.lan/api/auth/token    # Admin Module
 curl http://artstore.kryukov.lan/api/upload         # Ingester Module
@@ -241,6 +244,7 @@ helm upgrade ingester ./k8s/charts/ingester-module --set logLevel=INFO
 ```
 
 Скрипт автоматически:
+
 1. Настраивает `kubectl port-forward` к PostgreSQL, Redis, MinIO и другим модулям в K8s
 2. Генерирует `.env.dev-remote` в директории модуля
 3. Активирует Python venv (если есть `.venv/`)

@@ -1,21 +1,24 @@
-# ArtStore - Руководство по разработке и тестированию
+# ArtStore - Руководство по разработке
 
 ## Оглавление
+
 1. [Начало работы](#начало-работы)
 2. [Методология разработки](#методология-разработки)
-3. [Инфраструктура и запуск](#инфраструктура-и-запуск)
-4. [Тестирование](#тестирование)
-5. [Docker Best Practices](#docker-best-practices)
-6. [Git Workflow](#git-workflow)
-7. [Code Review Guidelines](#code-review-guidelines)
+3. [Окружения](#окружения)
+4. [API документация](#api-документация)
+5. [Configuration Parameters Convention](#configuration-parameters-convention)
+6. [Тестирование](#тестирование)
+7. [Docker Best Practices](#docker-best-practices)
+8. [Git Workflow](#git-workflow)
+9. [Code Review Guidelines](#code-review-guidelines)
 
 ## Начало работы
 
 ### Требования
 
-- **Docker** >= 20.10
-- **Docker Compose** >= 2.0
 - **Python** >= 3.12
+- **Docker** >= 20.10, **Docker Compose** >= 2.0 (для локального окружения)
+- **kubectl** + **helm** (для работы с K8s окружением)
 - **Node.js** >= 18 (для Admin UI)
 - **Git**
 
@@ -35,12 +38,6 @@ pip install -r admin-module/requirements.txt
 pip install -r storage-element/requirements.txt
 pip install -r ingester-module/requirements.txt
 pip install -r query-module/requirements.txt
-
-# 4. Запустить базовую инфраструктуру
-docker-compose up -d
-
-# 5. Проверить доступность сервисов
-docker-compose ps
 ```
 
 ## Методология разработки
@@ -50,7 +47,7 @@ docker-compose ps
 1. **Trunk-Based Development**: Короткоживущие feature branches с частыми merge в main
 2. **Test-Driven Development (TDD)**: Тесты пишутся перед кодом
 3. **Continuous Integration**: Автоматический запуск тестов на каждый commit
-4. **Infrastructure as Code**: Вся инфраструктура описана в Docker Compose файлах
+4. **Infrastructure as Code**: Инфраструктура описана в Docker Compose (локально) и Helm Charts (K8s)
 
 ### Рабочий процесс
 
@@ -76,92 +73,68 @@ graph LR
 1. **Planning**: Уточнение требований, проектирование API
 2. **Implementation**: TDD подход (test → code → refactor)
 3. **Testing**: Unit → Integration → E2E (если нужно)
-4. **Documentation**: Обновление README-PROJECT.md модуля
+4. **Documentation**: Обновление README модуля
 5. **Review**: Code review с минимум одним reviewer
-6. **Deployment**: Автоматический deploy после merge
+6. **Deployment**: Deploy после merge
 
-## Инфраструктура и запуск
+## Окружения
 
-### 🔴 КРИТИЧЕСКИ ВАЖНО: Docker Compose в корне проекта
+Проект поддерживает два окружения для разработки. Инструкции по запуску и настройке находятся в отдельных документах:
 
-**ОБЯЗАТЕЛЬНОЕ ПРАВИЛО**: Использовать ТОЛЬКО docker-compose файлы из корня проекта!
+| Окружение | Описание | Документация |
+|-----------|----------|-------------|
+| **Docker Compose** | Локальная разработка, всё на одной машине | [README.md → Быстрый старт](README.md#быстрый-старт) |
+| **Kubernetes** | Dev/staging кластер, Helm Charts, Harbor | [k8s/README.md](k8s/README.md) |
+
+### 🔴 Docker Compose: работать только из корня проекта
 
 ```bash
-# ✅ ПРАВИЛЬНО - всегда из корня проекта
-cd /home/artur/Projects/artStore
+# ✅ ПРАВИЛЬНО
+cd <project-root>
 docker-compose up -d
 
-# ❌ НЕПРАВИЛЬНО - не запускать из поддиректорий модулей
+# ❌ НЕПРАВИЛЬНО — не запускать из поддиректорий модулей
 cd admin-module
 docker-compose up -d  # НЕ ДЕЛАТЬ ТАК!
 ```
 
-### Запуск окружений
+### 🔴 Пересборка при изменении Python кода
 
-#### Базовая инфраструктура (PostgreSQL, Redis, MinIO)
-
-```bash
-docker-compose up -d postgres redis minio pgadmin
-```
-
-#### Запуск всех модулей
+При изменении Python файлов **обязательно** пересобирать без кеша:
 
 ```bash
-# Запуск всех backend модулей
-docker-compose up -d admin-module storage-element ingester-module query-module
-
-# Запуск с логами
-docker-compose up admin-module storage-element ingester-module query-module
-
-# Просмотр логов конкретного модуля
-docker-compose logs -f ingester-module
-```
-
-#### Мониторинг стек (Prometheus, Grafana)
-
-```bash
-docker-compose -f docker-compose.monitoring.yml up -d
-
-# Доступ:
-# Prometheus: http://localhost:9090
-# Grafana: http://localhost:3000 (admin/admin123)
-# AlertManager: http://localhost:9093
-```
-
-### Остановка и очистка
-
-```bash
-# Остановка всех сервисов
-docker-compose down
-
-# Остановка с удалением volumes (ОСТОРОЖНО: удалит все данные!)
-docker-compose down -v
-```
-
-### 🔴 Пересборка модулей при изменении Python кода
-
-**КРИТИЧЕСКИ ВАЖНО**: При изменении Python файлов **ОБЯЗАТЕЛЬНО** пересобирать без кеша!
-
-```bash
-# ✅ ПРАВИЛЬНО - пересборка БЕЗ КЕША (обязательно при изменении Python кода)
+# ✅ ПРАВИЛЬНО — пересборка БЕЗ КЕША
 docker-compose build --no-cache <module-name>
 docker-compose up -d <module-name>
 
-# ❌ НЕПРАВИЛЬНО - обычная пересборка может использовать устаревший кешированный код
-docker-compose build <module-name>  # НЕ ГАРАНТИРУЕТ обновление Python файлов!
-
-# Альтернатива - пересборка и запуск в одну команду
+# Альтернатива
 docker-compose up -d --build --force-recreate <module-name>
 ```
 
-**Причина**: Docker кеширует слои образа. Если изменения только в Python файлах (`COPY ./app /app/app`), Docker может использовать кешированный слой и НЕ скопировать обновлённый код.
+**Причина**: Docker кеширует слои образа. Если изменения только в Python файлах, Docker может использовать кешированный слой и НЕ скопировать обновлённый код.
 
-**Когда использовать `--no-cache`**:
-1. При изменении Python кода в `/app` директории
-2. При обновлении конфигурации приложения
-3. При добавлении новых файлов
-4. При исправлении ошибок импорта
-5. Если после `docker-compose build` изменения не применились
+## API документация
+
+Для получения списка endpoints API модулей в первую очередь обращайтесь к **Swagger** запущенного модуля. Swagger обычно включён (`APP_SWAGGER_ENABLED=on`).
+
+**Через K8s Gateway** (`artstore.kryukov.lan`):
+
+| Модуль | Swagger URL |
+|--------|-------------|
+| Admin Module | `http://artstore.kryukov.lan/api/docs` |
+| Ingester Module | `http://artstore.kryukov.lan/api/upload/docs` |
+| Query Module | `http://artstore.kryukov.lan/api/search/docs` |
+
+**Через Docker Compose** (localhost):
+
+| Модуль | Swagger URL |
+|--------|-------------|
+| Admin Module | `http://localhost:8000/docs` |
+| Ingester Module | `http://localhost:8020/docs` |
+| Query Module | `http://localhost:8030/docs` |
+| Storage Element | `http://localhost:8010/docs` |
+
+> В K8s Storage Elements не имеют HTTPRoute — доступ к Swagger только через `kubectl port-forward`.
 
 ## Configuration Parameters Convention
 
@@ -197,10 +170,14 @@ DB_SSL_ENABLED=on
 
 ### Добавление нового параметра
 
-1. **Проверь существующие** - найди аналогичные во всех модулях
-2. **Переиспользуй** - используй существующее имя и формат
-3. **Документируй** - обнови `.env.example` и README.md
-4. **Унифицируй** - параметр должен иметь одинаковое имя во всех модулях
+1. **Проверь существующие** — найди аналогичные во всех модулях
+2. **Переиспользуй** — используй существующее имя и формат
+3. **Документируй** — обнови `.env.example` и README.md
+4. **Унифицируй** — параметр должен иметь одинаковое имя во всех модулях
+
+### Логирование
+
+**Production**: `LOG_FORMAT=json` (обязательно), **Development**: `LOG_FORMAT=text` (допускается)
 
 ## Тестирование
 
@@ -231,7 +208,6 @@ pytest storage-element/tests/unit/ -v --cov=app
 
 # С coverage report
 pytest admin-module/tests/ --cov=app --cov-report=html
-# Откройте htmlcov/index.html для просмотра
 
 # Docker-based тестирование (рекомендуется для CI)
 docker-compose run --rm admin-module pytest tests/unit/ -v
@@ -268,14 +244,10 @@ docker-compose -f docker-compose.test.yml up --abort-on-container-exit admin-mod
 
 **Инструменты**: Playwright, Cypress (для Admin UI)
 
-**Запуск**:
 ```bash
-# Playwright для backend E2E
 cd admin-ui
-npm run e2e
-
-# Интерактивный режим
-npm run e2e:open
+npm run e2e            # запуск
+npm run e2e:open       # интерактивный режим
 ```
 
 ### Test Coverage Requirements
@@ -285,7 +257,6 @@ npm run e2e:open
 - **Integration tests**: Все API endpoints покрыты
 - **E2E tests**: Критические user flows (login, upload, search, download)
 
-**Проверка coverage**:
 ```bash
 pytest tests/ --cov=app --cov-report=term-missing --cov-fail-under=80
 ```
@@ -318,7 +289,6 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 2. **Использовать именованные volumes** для данных приложения
 3. **Использовать tmpfs** для временных файлов
 
-**Правильная конфигурация**:
 ```yaml
 services:
   storage-element:
@@ -326,11 +296,9 @@ services:
     volumes:
       # ✅ Именованный volume для данных
       - storage-data:/app/.data/storage
-
       # ✅ tmpfs для временных файлов
       - type: tmpfs
         target: /tmp
-
       # ❌ НЕ монтировать source code для записи
       # - ./storage-element:/app  # НЕПРАВИЛЬНО!
 
@@ -343,54 +311,27 @@ volumes:
 
 **Требование**: Тесты НЕ должны создавать файлы в директориях с исходным кодом
 
-**Решение**:
 ```yaml
 # docker-compose.test.yml
 services:
   storage-element-test:
     build:
       context: ./storage-element
-      target: test  # Отдельный stage для тестов
+      target: test
     volumes:
-      # ✅ Изолированные volumes для test data
       - test-storage:/app/.data/storage
       - test-logs:/app/logs
-
-      # ✅ tmpfs для pytest cache
       - type: tmpfs
         target: /app/.pytest_cache
-
-volumes:
-  test-storage:
-  test-logs:
 ```
 
 **pytest.ini конфигурация**:
 ```ini
 [pytest]
-# Кеш в /tmp вместо .pytest_cache
 cache_dir = /tmp/pytest_cache
 
-# Coverage data в /tmp
 [coverage:run]
 data_file = /tmp/.coverage
-```
-
-### Логирование
-
-**Production** (docker-compose.yml):
-```yaml
-environment:
-  LOG_LEVEL: INFO
-  LOG_FORMAT: json  # ОБЯЗАТЕЛЬНО для production
-  LOG_FILE: /app/logs/app.log  # В volume, НЕ в source directory
-```
-
-**Development** (docker-compose.dev.yml):
-```yaml
-environment:
-  LOG_LEVEL: DEBUG
-  LOG_FORMAT: text  # Разрешен только в development
 ```
 
 ## Git Workflow
@@ -519,13 +460,14 @@ Closes #123
 
 ## Troubleshooting
 
-### Общие проблемы
-
 **Проблема**: `docker-compose` команды не находят сервисы
-**Решение**: Всегда запускайте из корня проекта (`/home/artur/Projects/artStore`)
+**Решение**: Всегда запускайте из корня проекта
 
-**Проблема**: PostgreSQL connection timeout
-**Решение**: Убедитесь что PostgreSQL контейнер запущен и healthy (`docker-compose ps`)
+**Проблема**: JWT 401 Unauthorized при inter-service вызовах
+**Решение**: Пересоздать JWT ключи — `./k8s/scripts/generate-jwt-keys.sh --force`, перезапустить все модули. Подробнее: [k8s/README.md](k8s/README.md)
+
+**Проблема**: Ingester не видит Storage Elements
+**Решение**: SE требуют ручной регистрации через admin-module API (SUPER_ADMIN). Подробнее: [k8s/README.md](k8s/README.md)
 
 **Проблема**: Tests fail с "database already exists"
 **Решение**: Используйте отдельную test database или cleanup fixtures
@@ -533,31 +475,10 @@ Closes #123
 **Проблема**: Coverage report не генерируется
 **Решение**: Установите `pytest-cov`: `pip install pytest-cov`
 
-### Полезные команды
-
-```bash
-# Проверить здоровье всех контейнеров
-docker-compose ps
-
-# Перезапустить конкретный сервис
-docker-compose restart admin-module
-
-# Посмотреть последние логи
-docker-compose logs --tail=100 -f storage-element
-
-# Очистить все Docker ресурсы (ОСТОРОЖНО!)
-docker system prune -a --volumes
-
-# Подключиться к PostgreSQL
-docker exec -it artstore_postgres psql -U artstore -d artstore
-
-# Подключиться к Redis
-docker exec -it artstore_redis redis-cli
-```
-
 ## Дополнительные ресурсы
 
 - [Главная документация проекта](README.md)
+- [Kubernetes окружение](k8s/README.md)
 - [Admin Module](admin-module/README.md)
 - [Storage Element](storage-element/README.md)
 - [Ingester Module](ingester-module/README.md)
@@ -570,14 +491,14 @@ docker exec -it artstore_redis redis-cli
 **Q: Нужно ли создавать virtual environment для каждого модуля?**
 A: Нет! Используйте ЕДИНЫЙ `.venv` в корне проекта для всех Python модулей.
 
-**Q: Где запускать docker-compose команды?**
-A: **ВСЕГДА** из корня проекта (`/home/artur/Projects/artStore`), никогда из поддиректорий модулей.
-
-**Q: Как запустить только один модуль для тестирования?**
-A: `docker-compose up -d postgres redis minio <module-name>`
-
 **Q: Можно ли использовать локальный Python для разработки без Docker?**
 A: Да, для разработки можно, но **тестирование ОБЯЗАТЕЛЬНО** в Docker окружении.
 
 **Q: Как добавить новый Python package?**
 A: Добавьте в `<module>/requirements.txt` и пересоберите Docker образ: `docker-compose build <module>`
+
+**Q: Где найти инструкции по запуску инфраструктуры?**
+A: Docker Compose — [README.md](README.md), Kubernetes — [k8s/README.md](k8s/README.md)
+
+**Q: Как посмотреть API endpoints модуля?**
+A: Через Swagger запущенного модуля (`/docs`). Swagger обычно включён. См. раздел [API документация](#api-документация).
