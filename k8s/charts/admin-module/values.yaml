@@ -1,0 +1,68 @@
+namespace: artstore
+registry: harbor.kryukov.lan
+image: library/admin-module
+tag: latest
+imagePullPolicy: Always
+
+replicas: 1
+port: 8000
+
+debug: "on"
+swaggerEnabled: "on"
+logLevel: INFO
+logFormat: json
+
+# Database
+dbDatabase: artstore_admin
+dbPoolSize: 10
+dbMaxOverflow: 20
+
+# JWT
+jwtAccessTokenExpireMinutes: 30
+
+# Security
+auditHmacSecret: test-hmac-secret-for-development-32chars-minimum
+
+# Initial Service Account
+initialAccountEnabled: "on"
+initialAccountName: admin-service
+initialAccountRole: ADMIN
+initialAccountPassword: Test-Password123
+
+# Events
+eventPublishEnabled: "on"
+eventStreamName: file-events
+eventStreamMaxlen: 10000
+eventStreamRetentionHours: 24
+eventChannelFileCreated: "file:created"
+eventChannelFileUpdated: "file:updated"
+eventChannelFileDeleted: "file:deleted"
+eventPublishTimeout: 5
+
+# Scheduler
+schedulerEnabled: "on"
+schedulerTimezone: UTC
+schedulerJwtRotationEnabled: "on"
+schedulerJwtRotationIntervalHours: 24
+schedulerStorageHealthCheckEnabled: "on"
+schedulerStorageHealthCheckIntervalSeconds: 60
+
+# Gateway HTTPRoute
+httproute:
+  enabled: true
+  gatewayName: artstore-gateway
+  hostname: "artstore.local"
+  pathPrefixes:
+    - /api/auth
+    - /api/admin
+    - /api/service-accounts
+    - /api/storage-elements
+    - /api/files
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "1000m"

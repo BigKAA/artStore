@@ -1,0 +1,30 @@
+# Общий ConfigMap с адресами инфраструктуры — используется всеми модулями
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: artstore-infra-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "infra.labels" . | nindent 4 }}
+data:
+  # PostgreSQL (внешний, namespace: pg)
+  DB_HOST: {{ .Values.externalPostgres.host }}
+  DB_PORT: "{{ .Values.externalPostgres.port }}"
+  DB_SSL_ENABLED: "off"
+  # Redis (внешний, namespace: redis)
+  REDIS_HOST: {{ .Values.externalRedis.host }}
+  REDIS_PORT: "{{ .Values.externalRedis.port }}"
+  REDIS_DB: "0"
+  REDIS_URL: "redis://:{{ .Values.externalRedis.password }}@{{ .Values.externalRedis.host }}:{{ .Values.externalRedis.port }}/0"
+  # MinIO (собственный, namespace: artstore)
+  STORAGE_S3_ENDPOINT_URL: "http://minio:{{ .Values.minio.portApi }}"
+  STORAGE_S3_BUCKET_NAME: {{ .Values.minio.bucket }}
+  STORAGE_S3_REGION: us-east-1
+  # Service Discovery
+  SERVICE_DISCOVERY_CHANNEL: "artstore:storage-elements"
+  # Auth
+  AUTH_ADMIN_MODULE_URL: "http://admin-module:8000"
+  SERVICE_ACCOUNT_ADMIN_MODULE_URL: "http://admin-module:8000"
+  JWT_ALGORITHM: RS256
+  JWT_PUBLIC_KEY_PATH: /app/keys/public_key.pem
+  JWT_PRIVATE_KEY_PATH: /app/keys/private_key.pem

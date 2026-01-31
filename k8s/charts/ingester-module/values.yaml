@@ -1,0 +1,55 @@
+namespace: artstore
+registry: harbor.kryukov.lan
+image: library/ingester-module
+tag: latest
+imagePullPolicy: Always
+
+replicas: 1
+port: 8020
+
+swaggerEnabled: "on"
+logLevel: DEBUG
+logFormat: json
+
+# Upload limits
+maxFileSizeMb: 1024
+maxBatchFiles: 100
+chunkSizeMb: 10
+
+# Compression
+compressionEnabled: "on"
+compressionMinSizeMb: 10
+
+# Circuit Breaker
+circuitBreakerEnabled: "on"
+circuitBreakerFailureThreshold: 5
+
+# Capacity monitor
+capacityMonitorConfigReloadEnabled: "on"
+capacityMonitorConfigReloadInterval: 60
+
+# Storage Element HTTP client
+storageElementTimeout: 30
+storageElementMaxRetries: 3
+storageElementConnectionPoolSize: 100
+
+# Service Account
+serviceAccountClientId: sa_prod_admin_service_db0fd1af
+serviceAccountClientSecret: Test-Password123
+
+# Gateway HTTPRoute
+httproute:
+  enabled: true
+  gatewayName: artstore-gateway
+  hostname: "artstore.local"
+  pathPrefixes:
+    - /api/ingester
+    - /api/upload
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "1000m"

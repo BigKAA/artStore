@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "se.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "se.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "se.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "se.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: storage-element
+          image: {{ include "se.image" . }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+          envFrom:
+            - configMapRef:
+                name: artstore-infra-config
+          env:
+            # Redis password (внешний Redis с аутентификацией)
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: REDIS_PASSWORD
+            - name: APP_NAME
+              value: "artstore-storage-element-{{ .Values.elementId }}"
+            - name: APP_MODE
+              value: {{ .Values.mode }}
+            - name: APP__SWAGGER_ENABLED
+              value: {{ .Values.swaggerEnabled | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logFormat }}
+            # Storage
+            - name: STORAGE_TYPE
+              value: {{ .Values.storageType }}
+            - name: STORAGE_MAX_SIZE
+              value: {{ .Values.maxSize | int64 | quote }}
+            - name: STORAGE_LOCAL_BASE_PATH
+              value: {{ .Values.localBasePath }}
+            - name: STORAGE_ELEMENT_ID
+              value: {{ .Values.elementId }}
+            - name: STORAGE_PRIORITY
+              value: {{ .Values.priority | quote }}
+            - name: STORAGE_EXTERNAL_ENDPOINT
+              value: "http://{{ include "se.fullname" . }}:{{ .Values.containerPort }}"
+            # Health reporting
+            - name: HEALTH_REPORT_INTERVAL
+              value: {{ .Values.healthReportInterval | quote }}
+            - name: HEALTH_REPORT_TTL_MULTIPLIER
+              value: {{ .Values.healthReportTtlMultiplier | quote }}
+            # Capacity thresholds
+            - name: CAPACITY_WARNING_THRESHOLD
+              value: {{ .Values.capacityWarningThreshold | quote }}
+            - name: CAPACITY_CRITICAL_THRESHOLD
+              value: {{ .Values.capacityCriticalThreshold | quote }}
+            - name: CAPACITY_FULL_THRESHOLD
+              value: {{ .Values.capacityFullThreshold | quote }}
+            # S3
+            - name: STORAGE_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: STORAGE_S3_ACCESS_KEY_ID
+            - name: STORAGE_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: STORAGE_S3_SECRET_ACCESS_KEY
+            - name: STORAGE_S3_APP_FOLDER
+              value: {{ .Values.s3Folder }}
+            # Database
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: DB_PASSWORD
+            - name: DB_DATABASE
+              value: artstore
+            - name: DB_TABLE_PREFIX
+              value: {{ .Values.dbTablePrefix }}
+            - name: REDIS_POOL_SIZE
+              value: {{ .Values.redisPoolSize | quote }}
+            # WAL
+            - name: WAL_ENABLED
+              value: {{ .Values.walEnabled | quote }}
+            - name: WAL_RETENTION_HOURS
+              value: {{ .Values.walRetentionHours | quote }}
+            # Service Account
+            - name: SERVICE_ACCOUNT_CLIENT_ID
+              value: {{ .Values.serviceAccountClientId }}
+            - name: SERVICE_ACCOUNT_CLIENT_SECRET
+              value: {{ .Values.serviceAccountClientSecret | quote }}
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /app/keys
+              readOnly: true
+            - name: storage-data
+              mountPath: {{ .Values.localBasePath }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: jwt-keys
+          secret:
+            secretName: jwt-keys
+        - name: storage-data
+          persistentVolumeClaim:
+            claimName: {{ include "se.fullname" . }}-data

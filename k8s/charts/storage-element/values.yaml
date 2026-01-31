@@ -1,0 +1,51 @@
+namespace: artstore
+registry: harbor.kryukov.lan
+image: library/storage-element
+tag: latest
+imagePullPolicy: Always
+
+# Уникальные параметры инстанса — переопределяются в values-se-XX.yaml
+elementId: se-01
+mode: edit
+priority: 100
+maxSize: 1073741824        # 1GB
+s3Folder: storage_element_01
+dbTablePrefix: storage_elem_01
+
+containerPort: 8000
+swaggerEnabled: "on"
+logLevel: DEBUG
+logFormat: json
+
+# Storage
+storageType: s3
+storagePvcSize: 2Gi
+localBasePath: /app/.data/storage
+
+# Health reporting
+healthReportInterval: 30
+healthReportTtlMultiplier: 3
+
+# Capacity thresholds
+capacityWarningThreshold: 85
+capacityCriticalThreshold: 92
+capacityFullThreshold: 98
+
+# WAL
+walEnabled: "on"
+walRetentionHours: 24
+
+# Redis
+redisPoolSize: 10
+
+# Service Account (для регистрации в admin-module)
+serviceAccountClientId: sa_prod_admin_service_db0fd1af
+serviceAccountClientSecret: Test-Password123
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "1000m"

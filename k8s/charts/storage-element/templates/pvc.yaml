@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "se.fullname" . }}-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "se.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: {{ .Values.storagePvcSize }}

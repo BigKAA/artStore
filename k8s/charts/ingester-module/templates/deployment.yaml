@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingester-module
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "ingester.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ingester.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ingester.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: ingester-module
+          image: {{ include "ingester.image" . }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.port }}
+          envFrom:
+            - configMapRef:
+                name: artstore-infra-config
+          env:
+            # Redis password (внешний Redis с аутентификацией)
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: REDIS_PASSWORD
+            - name: APP_NAME
+              value: artstore-ingester-module
+            - name: APP_SWAGGER_ENABLED
+              value: {{ .Values.swaggerEnabled | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logFormat }}
+            # Upload
+            - name: MAX_FILE_SIZE_MB
+              value: {{ .Values.maxFileSizeMb | quote }}
+            - name: MAX_BATCH_FILES
+              value: {{ .Values.maxBatchFiles | quote }}
+            - name: CHUNK_SIZE_MB
+              value: {{ .Values.chunkSizeMb | quote }}
+            # Compression
+            - name: COMPRESSION_ENABLED
+              value: {{ .Values.compressionEnabled | quote }}
+            - name: COMPRESSION_MIN_SIZE_MB
+              value: {{ .Values.compressionMinSizeMb | quote }}
+            # Circuit Breaker
+            - name: CIRCUIT_BREAKER_ENABLED
+              value: {{ .Values.circuitBreakerEnabled | quote }}
+            - name: CIRCUIT_BREAKER_FAILURE_THRESHOLD
+              value: {{ .Values.circuitBreakerFailureThreshold | quote }}
+            # Capacity monitor
+            - name: CAPACITY_MONITOR_CONFIG_RELOAD_ENABLED
+              value: {{ .Values.capacityMonitorConfigReloadEnabled | quote }}
+            - name: CAPACITY_MONITOR_CONFIG_RELOAD_INTERVAL
+              value: {{ .Values.capacityMonitorConfigReloadInterval | quote }}
+            # Storage Element client
+            - name: STORAGE_ELEMENT_TIMEOUT
+              value: {{ .Values.storageElementTimeout | quote }}
+            - name: STORAGE_ELEMENT_MAX_RETRIES
+              value: {{ .Values.storageElementMaxRetries | quote }}
+            - name: STORAGE_ELEMENT_CONNECTION_POOL_SIZE
+              value: {{ .Values.storageElementConnectionPoolSize | quote }}
+            # Service Account
+            - name: SERVICE_ACCOUNT_CLIENT_ID
+              value: {{ .Values.serviceAccountClientId }}
+            - name: SERVICE_ACCOUNT_CLIENT_SECRET
+              value: {{ .Values.serviceAccountClientSecret | quote }}
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /app/keys
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: {{ .Values.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: {{ .Values.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: jwt-keys
+          secret:
+            secretName: jwt-keys

@@ -1,0 +1,7 @@
+# Storage Element 03 — fallback, read-write (no delete), lowest priority
+elementId: se-03
+mode: rw
+priority: 300
+maxSize: 2147483648        # 2GB
+s3Folder: storage_element_03
+dbTablePrefix: storage_elem_03

@@ -1,0 +1,7 @@
+# Storage Element 02 — secondary, edit mode, medium priority
+elementId: se-02
+mode: edit
+priority: 200
+maxSize: 1073741824        # 1GB
+s3Folder: storage_element_02
+dbTablePrefix: storage_elem_02

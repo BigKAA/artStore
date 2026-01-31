@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-module
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "admin.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "admin.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "admin.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: admin-module
+          image: {{ include "admin.image" . }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.port }}
+          envFrom:
+            - configMapRef:
+                name: artstore-infra-config
+          env:
+            # Redis password (внешний Redis с аутентификацией)
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: REDIS_PASSWORD
+            - name: APP_NAME
+              value: artstore-admin-module
+            - name: APP_DEBUG
+              value: {{ .Values.debug | quote }}
+            - name: APP_SWAGGER_ENABLED
+              value: {{ .Values.swaggerEnabled | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logFormat }}
+            # Database
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: DB_PASSWORD
+            - name: DB_DATABASE
+              value: {{ .Values.dbDatabase }}
+            - name: DB_POOL_SIZE
+              value: {{ .Values.dbPoolSize | quote }}
+            - name: DB_MAX_OVERFLOW
+              value: {{ .Values.dbMaxOverflow | quote }}
+            # JWT
+            - name: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+              value: {{ .Values.jwtAccessTokenExpireMinutes | quote }}
+            # Security
+            - name: SECURITY_AUDIT_HMAC_SECRET
+              value: {{ .Values.auditHmacSecret | quote }}
+            # Initial Account
+            - name: INITIAL_ACCOUNT_ENABLED
+              value: {{ .Values.initialAccountEnabled | quote }}
+            - name: INITIAL_ACCOUNT_NAME
+              value: {{ .Values.initialAccountName }}
+            - name: INITIAL_ACCOUNT_ROLE
+              value: {{ .Values.initialAccountRole }}
+            - name: INITIAL_ACCOUNT_PASSWORD
+              value: {{ .Values.initialAccountPassword | quote }}
+            # Events
+            - name: EVENT_PUBLISH_ENABLED
+              value: {{ .Values.eventPublishEnabled | quote }}
+            - name: EVENT_STREAM_NAME
+              value: {{ .Values.eventStreamName }}
+            - name: EVENT_STREAM_MAXLEN
+              value: {{ .Values.eventStreamMaxlen | quote }}
+            - name: EVENT_STREAM_RETENTION_HOURS
+              value: {{ .Values.eventStreamRetentionHours | quote }}
+            - name: EVENT_CHANNEL_FILE_CREATED
+              value: {{ .Values.eventChannelFileCreated }}
+            - name: EVENT_CHANNEL_FILE_UPDATED
+              value: {{ .Values.eventChannelFileUpdated }}
+            - name: EVENT_CHANNEL_FILE_DELETED
+              value: {{ .Values.eventChannelFileDeleted }}
+            - name: EVENT_PUBLISH_TIMEOUT
+              value: {{ .Values.eventPublishTimeout | quote }}
+            # Scheduler
+            - name: SCHEDULER_ENABLED
+              value: {{ .Values.schedulerEnabled | quote }}
+            - name: SCHEDULER_TIMEZONE
+              value: {{ .Values.schedulerTimezone }}
+            - name: SCHEDULER_JWT_ROTATION_ENABLED
+              value: {{ .Values.schedulerJwtRotationEnabled | quote }}
+            - name: SCHEDULER_JWT_ROTATION_INTERVAL_HOURS
+              value: {{ .Values.schedulerJwtRotationIntervalHours | quote }}
+            - name: SCHEDULER_STORAGE_HEALTH_CHECK_ENABLED
+              value: {{ .Values.schedulerStorageHealthCheckEnabled | quote }}
+            - name: SCHEDULER_STORAGE_HEALTH_CHECK_INTERVAL_SECONDS
+              value: {{ .Values.schedulerStorageHealthCheckIntervalSeconds | quote }}
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /app/keys
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: {{ .Values.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: {{ .Values.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: jwt-keys
+          secret:
+            secretName: jwt-keys

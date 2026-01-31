@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "infra.labels" . | nindent 4 }}
+    app.kubernetes.io/name: minio
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: minio
+  ports:
+    - name: api
+      port: {{ .Values.minio.portApi }}
+      targetPort: {{ .Values.minio.portApi }}
+    - name: console
+      port: {{ .Values.minio.portConsole }}
+      targetPort: {{ .Values.minio.portConsole }}

@@ -209,16 +209,10 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-.data/
-data/
-.serena/
-.tasks/
+#.serena/
+#.tasks/
 .claude/
-.utils/nginx/certs/
-.playwright-mcp/
 claudedocs/
 .archive/
-scripts/
-!scripts/test-jwt-hot-reload.sh
-query-module/keys/
-test_artifacts/
+#scripts/
+#test_artifacts/
