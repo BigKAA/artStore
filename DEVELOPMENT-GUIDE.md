@@ -82,7 +82,7 @@ graph LR
 Проект поддерживает два окружения для разработки. Инструкции по запуску и настройке находятся в отдельных документах:
 
 | Окружение | Описание | Документация |
-|-----------|----------|-------------|
+| --------- | -------- | ------------ |
 | **Docker Compose** | Локальная разработка, всё на одной машине | [README.md → Быстрый старт](README.md#быстрый-старт) |
 | **Kubernetes** | Dev/staging кластер, Helm Charts, Harbor | [k8s/README.md](k8s/README.md) |
 
@@ -120,7 +120,7 @@ docker-compose up -d --build --force-recreate <module-name>
 **Через K8s Gateway** (`artstore.kryukov.lan`):
 
 | Модуль | Swagger URL |
-|--------|-------------|
+| ------ | ----------- |
 | Admin Module | `http://artstore.kryukov.lan/api/docs` |
 | Ingester Module | `http://artstore.kryukov.lan/api/upload/docs` |
 | Query Module | `http://artstore.kryukov.lan/api/search/docs` |
@@ -128,7 +128,7 @@ docker-compose up -d --build --force-recreate <module-name>
 **Через Docker Compose** (localhost):
 
 | Модуль | Swagger URL |
-|--------|-------------|
+| ------ | ----------- |
 | Admin Module | `http://localhost:8000/docs` |
 | Ingester Module | `http://localhost:8020/docs` |
 | Query Module | `http://localhost:8030/docs` |
